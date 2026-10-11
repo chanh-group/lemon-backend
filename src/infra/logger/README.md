@@ -1,49 +1,48 @@
-# Independent Request Logging Module — LEMON CHAT
+# Request Logging Module — LEMON CHAT
 
-Module logging độc lập cho **LEMON CHAT Backend**, được thiết kế theo chuẩn đặc tả tại [docs/SETUP.md](../../../../docs/SETUP.md) và [docs/RESPONSES.md](../../../../docs/RESPONSES.md).
+Module logging gọn nhẹ cho **LEMON CHAT Backend**, tận dụng 100% tính năng gốc có sẵn của `pino`, `pino-http`, và `nestjs-pino`, tuân thủ đặc tả tại [docs/SETUP.md](../../../../docs/SETUP.md).
 
-Module hoàn toàn độc lập (Self-contained), chưa gắn trực tiếp vào `AppModule` hay `main.ts` để tránh xung đột (merge conflicts) với các thành viên khác đang làm tính năng và infra.
+Module giữ đúng thiết kế độc lập (Self-contained), chưa can thiệp vào `AppModule` hay `main.ts` để tránh xung đột nhánh.
 
 ---
 
-## 1. Tính năng nổi bật
+## 1. Tính năng cốt lõi
 
-1. **Ghi log yêu cầu đến (Incoming Request)**:
-   - **Thời gian request đến**: Unix timestamp + định dạng ngày giờ tháng năm ISO 8601 (`YYYY-MM-DDTHH:mm:ss.sssZ`).
-   - **URL client gọi**: Full path + query parameters (`req.originalUrl || req.url`).
-   - **HTTP Method**, **Request ID** (`x-request-id`), **Client IP**, **User-Agent**.
-2. **Ghi log phản hồi hoàn tất (Completed Request)**:
-   - **URL client gọi**, HTTP Method.
-   - **Mã trạng thái HTTP** (`statusCode`), phân loại cảnh báo tự động:
+1. **Tận dụng Native Hooks của `pino-http`**:
+   - `customReceivedMessage`: Ghi nhận khi request vừa đến (`http.request_incoming: --> METHOD URL (reqId: ...)`).
+   - `customSuccessMessage`: Ghi nhận khi request hoàn tất kèm `responseTime` đo bằng hrtime chính xác cao.
+   - `customLogLevel`: Tự động phân loại mức log theo chuẩn HTTP:
      - 2xx / 3xx $\rightarrow$ `info`
-     - 4xx $\rightarrow$ `warn` (lỗi nghiệp vụ / phía client)
-     - 5xx $\rightarrow$ `error` (lỗi hệ thống)
-   - **Thời gian xử lý** (`responseTime` / `durationMs`).
-   - **Thời gian hoàn tất** (ngày giờ tháng năm).
-3. **An toàn bảo mật (Auto-redaction)**:
-   - Tự động che giấu (`***`) các trường nhạy cảm: `password`, `oldPassword`, `newPassword`, `otp`, `accessToken`, `refreshToken`, `secret`, `authorization`, `cookie`.
-4. **Hỗ trợ Request Tracing**:
-   - Tự động sinh `x-request-id` (UUIDv7/UUID) nếu client chưa gửi, hoặc giữ nguyên ID client gửi lên và echo về header của response.
-   - Bỏ qua các endpoint nội bộ như `/health/live`, `/health/ready`, `/metrics` để giảm nhiễu log.
+     - 4xx $\rightarrow$ `warn`
+     - 5xx / Error $\rightarrow$ `error`
+2. **Request Tracing chuẩn UUIDv7**:
+   - `genReqId` tạo mã **UUIDv7** thời gian thực (`uuid.v7()`) nếu client chưa gửi, và tự động echo header `x-request-id` về client.
+3. **Bảo mật & Chuẩn hóa**:
+   - **Auto-redact**: Che giấu (`***`) các trường nhạy cảm: `password`, `oldPassword`, `newPassword`, `otp`, `accessToken`, `refreshToken`, `secret`, `authorization`, `cookie`.
+   - **Serializers chuẩn**: Sử dụng `pino.stdSerializers.req`, `res`, `err`.
+   - **Bỏ qua Health check**: Tự động bỏ qua `/health/live`, `/health/ready`, `/metrics`.
+   - **Immutability**: `AppLogger.forContext()` tạo child logger bất biến, không mutate singleton instance.
 
 ---
 
-## 2. Các class thành phần
+## 2. Cấu trúc module (~250 dòng code)
 
-* **`AppLogger`** (`logger.service.ts`):
-  Class độc lập triển khai `LoggerService` của NestJS và bọc `pino`. Có thể khởi tạo `new AppLogger()` trực tiếp ở bất kỳ đâu không cần qua DI container.
-* **`RequestLoggerMiddleware`** (`request-logger.middleware.ts`):
-  Class triển khai `NestMiddleware` ở tầng HTTP Express, bắt đầu ghi nhận ngay khi request chạm tới server và ghi nhận thời gian xử lý khi request hoàn tất (`res.on('finish')`).
-* **`RequestLoggerInterceptor`** (`request-logger.interceptor.ts`):
-  Class triển khai `NestInterceptor` cho NestJS execution context, tiện lợi khi muốn gắn qua Decorator `@UseInterceptors(RequestLoggerInterceptor)` hoặc global interceptor.
-* **`LoggerModule`** (`logger.module.ts`):
-  Module đóng gói sẵn, có thể gọi `LoggerModule.forRoot()` để cấu hình động.
+```
+src/infra/logger/
+├── logger.constants.ts        # Hằng số REDACT_PATHS, HEADER_REQUEST_ID, IGNORED_LOG_URLS
+├── logger.interface.ts        # Types & Interfaces gọn nhẹ
+├── logger.config.ts           # 1 resolver cấu hình chung cho Pino & Pino-HTTP (hooks, serializers, uuidv7)
+├── logger.service.ts          # AppLogger mỏng bọc Pino, hỗ trợ forContext() bất biến
+├── request-logger.middleware.ts # RequestLoggerMiddleware mỏng ủy quyền cho pino-http
+├── logger.module.ts           # LoggerModule đóng gói cho NestJS
+└── index.ts                   # Barrel export
+```
 
 ---
 
 ## 3. Cách tích hợp khi nhóm ghép nhánh
 
-### Cách 1: Gắn qua Middleware trong AppModule (Khuyên dùng cho toàn bộ HTTP)
+### Cách 1: Tích hợp qua AppModule (Khuyên dùng)
 
 ```typescript
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
@@ -59,37 +58,21 @@ export class AppModule implements NestModule {
 }
 ```
 
-### Cách 2: Gắn độc lập trực tiếp trong `main.ts`
+### Cách 2: Tích hợp toàn diện qua `LoggerModule.forRoot()`
 
 ```typescript
-import { AppLogger, RequestLoggerMiddleware } from './infra/logger/index.js';
+import { Module } from '@nestjs/common';
+import { LoggerModule } from './infra/logger/index.js';
 
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
-    bufferLogs: true,
-  });
-
-  const logger = new AppLogger();
-  app.useLogger(logger);
-  app.use(new RequestLoggerMiddleware(logger).use.bind(new RequestLoggerMiddleware(logger)));
-
-  await app.listen(3000);
-}
-```
-
-### Cách 3: Gắn qua Global Interceptor
-
-```typescript
-import { RequestLoggerInterceptor } from './infra/logger/index.js';
-
-app.useGlobalInterceptors(new RequestLoggerInterceptor());
+@Module({
+  imports: [LoggerModule.forRoot()],
+})
+export class AppModule {}
 ```
 
 ---
 
 ## 4. Kiểm thử
-
-Chạy bộ test độc lập của logger:
 
 ```bash
 bun test src/infra/logger
