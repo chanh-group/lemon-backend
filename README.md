@@ -119,6 +119,35 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 - Website - [https://nestjs.com](https://nestjs.com/)
 - Twitter - [@nestframework](https://twitter.com/nestframework)
 
+## Logging Convention
+
+Dự án sử dụng NestJS `Logger` chuẩn (`@nestjs/common`) với cấu hình tập trung tại `src/utils/logger.module.ts`. Mọi service khởi tạo logger độc lập theo tên class:
+
+```typescript
+import { Injectable, Logger } from '@nestjs/common';
+
+@Injectable()
+export class ExampleService {
+  private readonly logger = new Logger(ExampleService.name);
+
+  someMethod() {
+    // Thứ tự tham số chuẩn Nest: message trước, metadata/object sau (ngược với Pino)
+    this.logger.log('User signed up successfully', { userId: '123' });
+  }
+}
+```
+
+### Quy ước log level:
+- `log`: Business event thành công (ví dụ: `User signed up`, `Conversation created`).
+- `warn`: Attempt thất bại nhưng nằm trong dự tính nghiệp vụ (ví dụ: `Invalid invite code`, `Password mismatch`).
+- `error`: Exception / lỗi hệ thống không mong muốn (kèm `{ err }`).
+- `debug`: Chi tiết query / kỹ thuật hỗ trợ dev.
+
+### Định dạng & Quy tắc:
+1. **Message**: Dùng string literal ổn định, ngắn gọn để dễ grep log (không nối chuỗi động vào message).
+2. **Metadata**: Dùng plain object truyền ở tham số thứ 2.
+3. **Thứ tự tham số**: `logger.log(message, context/meta)` — **Message trước, Object sau** (chú ý ngược với `(obj, msg)` của Pino).
+
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
