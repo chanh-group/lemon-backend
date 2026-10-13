@@ -131,6 +131,11 @@ export class MemoryCacheService extends CacheStoreExt {
       this.store.delete(key);
       return OtpCheckOutcome.Missing;
     }
+    // Mirror Lua's `type(entry) ~= 'table'` check: only objects count as entries.
+    if (typeof otp !== "object" || otp === null || Array.isArray(otp)) {
+      this.store.delete(key);
+      return OtpCheckOutcome.Missing;
+    }
     if (otp.code === candidate) return OtpCheckOutcome.Match;
     const attempts = (otp.attempts ?? 0) + 1;
     if (attempts >= maxAttempts) {

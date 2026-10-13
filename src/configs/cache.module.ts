@@ -10,15 +10,8 @@ import {
 import { CACHE_STORE, REDIS_CLIENT } from "../utils/cache/cache-store.interface.js";
 import { MemoryCacheService } from "../utils/cache/memory-cache.service.js";
 import {
-  CHECK_OTP_COMMAND,
-  CHECK_OTP_LUA,
-  CREATE_SESSION_COMMAND,
-  CREATE_SESSION_LUA,
   RedisCacheService,
-  REVOKE_SESSION_COMMAND,
-  REVOKE_SESSION_LUA,
-  ROTATE_REFRESH_COMMAND,
-  ROTATE_REFRESH_LUA,
+  registerCacheCommands,
   type RedisWithCacheCommands,
 } from "../utils/cache/redis-cache.service.js";
 
@@ -39,10 +32,7 @@ async function createRedisClient(): Promise<RedisWithCacheCommands> {
   redis.on("error", (err: Error) => {
     logger.warn(`Redis connection error: ${err.message}`);
   });
-  redis.defineCommand(ROTATE_REFRESH_COMMAND, { lua: ROTATE_REFRESH_LUA });
-  redis.defineCommand(CREATE_SESSION_COMMAND, { lua: CREATE_SESSION_LUA });
-  redis.defineCommand(REVOKE_SESSION_COMMAND, { lua: REVOKE_SESSION_LUA });
-  redis.defineCommand(CHECK_OTP_COMMAND, { lua: CHECK_OTP_LUA });
+  registerCacheCommands(redis);
   return redis;
 }
 

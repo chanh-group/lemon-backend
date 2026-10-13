@@ -2,7 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 import { CacheError } from "../../../../src/utils/cache/cache.errors.js";
 import { OtpCheckOutcome, RotationOutcome } from "../../../../src/utils/cache/cache.types.js";
 import {
+  CHECK_OTP_COMMAND,
+  CHECK_OTP_LUA,
+  CREATE_SESSION_COMMAND,
+  CREATE_SESSION_LUA,
   RedisCacheService,
+  REVOKE_SESSION_COMMAND,
+  REVOKE_SESSION_LUA,
+  ROTATE_REFRESH_COMMAND,
+  ROTATE_REFRESH_LUA,
+  registerCacheCommands,
   type RedisWithCacheCommands,
 } from "../../../../src/utils/cache/redis-cache.service.js";
 
@@ -61,6 +70,16 @@ describe("RedisCacheService", () => {
     ]);
     await service.deleteMany([]);
     expect(exec).toHaveBeenCalledTimes(1);
+  });
+
+  it("registers all four Lua commands", () => {
+    const defineCommand = vi.fn();
+    registerCacheCommands({ defineCommand });
+    expect(defineCommand).toHaveBeenCalledTimes(4);
+    expect(defineCommand).toHaveBeenCalledWith(ROTATE_REFRESH_COMMAND, { lua: ROTATE_REFRESH_LUA });
+    expect(defineCommand).toHaveBeenCalledWith(CREATE_SESSION_COMMAND, { lua: CREATE_SESSION_LUA });
+    expect(defineCommand).toHaveBeenCalledWith(REVOKE_SESSION_COMMAND, { lua: REVOKE_SESSION_LUA });
+    expect(defineCommand).toHaveBeenCalledWith(CHECK_OTP_COMMAND, { lua: CHECK_OTP_LUA });
   });
 
   it("maps otp codes", async () => {

@@ -83,7 +83,12 @@ export abstract class CacheStoreExt implements CacheStore {
 
   /** JSON-serialize + write with TTL in seconds. Unserializable values are skipped with a warn. */
   async set<T>(key: string, value: T, expirationSecs: number): Promise<void> {
-    const serialized = JSON.stringify(value);
+    let serialized: string | undefined;
+    try {
+      serialized = JSON.stringify(value);
+    } catch {
+      serialized = undefined;
+    }
     if (serialized === undefined) {
       this.logger.warn(`Skipping cache write (unserializable value): ${key}`);
       return;
