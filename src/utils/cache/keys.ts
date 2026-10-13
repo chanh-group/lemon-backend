@@ -7,7 +7,7 @@ import {
   REFRESH_TOKEN_KEY_PREFIX,
   SESSION_KEY_PREFIX,
   USER_CACHE_KEY_PREFIX,
-} from "./cache.constants.js";
+} from "./constants.js";
 
 export function refreshTokenKey(jti: string): string {
   return `${REFRESH_TOKEN_KEY_PREFIX}${jti}`;

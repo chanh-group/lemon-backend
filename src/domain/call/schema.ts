@@ -1,8 +1,8 @@
 import { sql } from "drizzle-orm";
 import { check, index, integer, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { uuidV7 } from "../../utils/database.js";
-import { conversations } from "../conversation/conversation.schema.js";
-import { users } from "../user/user.schema.js";
+import { conversations } from "../conversation/schema.js";
+import { users } from "../user/schema.js";
 
 export const callMediaEnum = pgEnum("call_media", ["VOICE", "VIDEO"]);
 

@@ -11,7 +11,7 @@ import type {
   RefreshRotation,
   RevokeRefreshSession,
   RotationOutcome,
-} from "./cache.types.js";
+} from "./types.js";
 
 export const REDIS_CLIENT: unique symbol = Symbol("REDIS_CLIENT");
 export const CACHE_STORE: unique symbol = Symbol("CACHE_STORE");

@@ -1,8 +1,8 @@
 import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
-import { ExampleModule } from "./domain/example/example.module.js";
-import { CacheModule } from "./configs/cache.module.js";
-import { DatabaseModule } from "./configs/database.module.js";
-import { RequestLoggerMiddleware } from "./middleware/request-logger.middleware.js";
+import { ExampleModule } from "./domain/example/module.js";
+import { CacheModule } from "./configs/cache.js";
+import { DatabaseModule } from "./configs/database.js";
+import { RequestLoggerMiddleware } from "./middleware/request-logger.js";
 
 @Module({
   imports: [DatabaseModule, CacheModule, ExampleModule],

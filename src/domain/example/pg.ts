@@ -1,8 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import type { DrizzleDb } from "../../configs/database.module.js";
-import type { ExampleEntity } from "./example.repository.js";
-import { ExampleRepository } from "./example.repository.js";
+import type { DrizzleDb } from "../../configs/database.js";
+import type { ExampleEntity } from "./repository.js";
+import { ExampleRepository } from "./repository.js";
 
 @Injectable()
 export class ExamplePgRepository implements ExampleRepository {
