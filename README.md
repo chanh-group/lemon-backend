@@ -1,123 +1,85 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# LemonChat Backend (`LemonCore`)
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Backend cho app chat LemonChat — NestJS + Drizzle ORM + PostgreSQL + Redis. Code chạy được cả trên **Node ≥ 20** và Bun (cấm dùng API native của Bun như `bun:*` để bạn nào dùng Node vẫn chạy được).
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Stack
 
-## Description
+| Thành phần   | Công nghệ                          |
+| ------------ | ---------------------------------- |
+| Framework    | NestJS 12 + Express                |
+| ORM / DB     | Drizzle ORM + PostgreSQL 16        |
+| Cache        | Redis qua `ioredis`                |
+| Test         | Vitest (unit) + Supertest (e2e)    |
+| Lint / Format| oxlint (type-aware) + oxfmt       |
+| Package mgr  | Bun (`bun.lock`)                   |
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Chạy local
 
-## Project setup
+Yêu cầu: Node ≥ 20 (hoặc Bun), PostgreSQL 16, Redis đang chạy ở local.
 
 ```bash
-$ bun install
+cp .env.example .env   # rồi sửa lại cho khớp máy bạn
+bun install
+
+# migrate DB
+bun run db:migrate
+
+# chạy dev (watch mode)
+bun run start:dev
 ```
 
-## Compile and run the project
+App mặc định nghe ở `http://localhost:3000` (đổi qua `PORT`).
 
-```bash
-# development
-$ bun run start
+| Lệnh               | Để làm gì                              |
+| ------------------ | -------------------------------------- |
+| `bun run start:dev`| Chạy dev, tự reload                    |
+| `bun run build` + `bun run start:prod` | Build rồi chạy production |
+| `bun run typecheck`| `tsc --noEmit` — phải xanh             |
+| `bun run lint`     | oxlint type-aware — phải sạch          |
+| `bun run fmt`      | Format toàn repo (oxfmt)               |
+| `bun run test`     | Unit tests (`test/unit/**`)            |
+| `bun run test:e2e` | E2E tests (`test/e2e/**`, cần DB thật) |
+| `bun run test:cov` | Unit tests + coverage                  |
+| `bun run db:generate` / `db:migrate` / `db:studio` | Drizzle Kit |
 
-# watch mode
-$ bun run start:dev
+## Biến môi trường
 
-# production mode
-$ bun run start:prod
+Xem đầy đủ ở `.env.example`. Các biến quan trọng:
+
+| Biến              | Ví dụ / Ghi chú                              |
+| ----------------- | -------------------------------------------- |
+| `DATABASE_URL`    | `postgres://postgres:postgres@localhost:5432/lemon_chat` |
+| `REDIS_URL`       | `redis://localhost:6379`                     |
+| `JWT_SECRET`      | Chuỗi bí mật **≥ 32 bytes**                  |
+| `JWT_ISSUER` / `JWT_AUDIENCE` | `lemon-chat` / `lemon-chat-client` |
+| `USE_MEMORY_CACHE`| `true` → dùng cache in-memory, khỏi cần Redis (dev/test) |
+| `NODE_ENV`        | `development` / `production` (quyết định format log) |
+| `FRONTEND_URL`    | URL FE, dùng cho CORS                        |
+
+Đọc env trong code luôn qua helper `get_env()` (`src/helpers/index.ts`) — thiếu biến bắt buộc là crash ngay lúc boot, không fail âm thầm.
+
+## Cấu trúc thư mục
+
+```
+src/
+  main.ts                 # bootstrap (logger, PORT)
+  app.ts                  # root module
+  configs/                # module Global: database.ts, cache.ts, schema.ts (barrel)
+  domain/<name>/          # theo domain: controller.ts, service.ts, module.ts,
+                          # repository.ts (interface), pg.ts (Drizzle impl),
+                          # schema.ts, dto/{request,response,mapper}.ts
+  middleware/             # request-logger.ts (access log 1 dòng/request)
+  utils/cache/            # CacheStore interface + Redis/Memory backend (Lua atomic)
+  utils/                  # logger.ts (AppLogger), database.ts, i18n/
+  helpers/                # get_env(), ...
+test/unit/...             # mirror theo src (VD: src/utils/cache/keys.ts
+test/e2e/...              #   -> test/unit/utils/cache/keys.spec.ts)
+drizzle/                  # migration SQL đã generate (sql-first)
 ```
 
-## Run tests
+**Quy ước đặt tên file** (học từ Rust): file chỉ mang tên **role**, không lặp tên folder — `service.ts` chứ không phải `example.service.ts`, `pg.ts` chứ không phải `user.pg.ts`, `store.ts` chứ không phải `cache-store.interface.ts`. Tên class/interface giữ nguyên (`ExampleService`, `CacheModule`...). Import ESM bắt buộc kèm suffix `.js` (`from "./service.js"`).
 
-```bash
-# unit tests
-$ bun run test
-
-# e2e tests
-$ bun run test:e2e
-
-# test coverage
-$ bun run test:cov
-```
-
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ bun install -g @nestjs/mau
-$ mau deploy
-```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Observability
-
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project:
-
-```bash
-$ bun install @nestjs/observe
-```
-
-Then follow the [setup guide](https://docs.nestjs.com/observability/overview) - it takes a single import and an app key.
-
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+Chi tiết quy ước cho người/agent sửa code: xem `AGENTS.md`.
 
 ## Logging Convention
 
@@ -136,6 +98,8 @@ export class ExampleService {
   }
 }
 ```
+
+`RequestLoggerMiddleware` tự động ghi 1 dòng mỗi request (`method, path` đã strip query, `status, durationMs`), phân level theo status (`<400` log, `4xx` warn, `5xx` error).
 
 ### Quy ước log level:
 
@@ -167,6 +131,8 @@ export class ExampleService {
 2. **Metadata**: Dùng plain object truyền ở tham số thứ 2.
 3. **Thứ tự tham số**: `logger.log(message, context/meta)` — **Message trước, Object sau** (chú ý ngược với `(obj, msg)` của Pino).
 
-## License
+## Đóng góp
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+- Mỗi việc một nhánh (`feat/...`, `fix/...`, `refactor/...`), commit theo conventional commits (`feat(cache): ...`).
+- Mở PR vào `main` trên GitHub UI, chờ review rồi merge. Không push thẳng `main`.
+- Trước khi báo xong việc: `bun run typecheck && bun run lint && bun run test` phải xanh hết.
