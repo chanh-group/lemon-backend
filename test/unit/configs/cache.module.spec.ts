@@ -17,4 +17,21 @@ describe("CacheModule", () => {
     await mod.close();
     delete process.env.USE_MEMORY_CACHE;
   });
+
+  it("redis mode provides RedisCacheService and quits on destroy", async () => {
+    const quit = vi.fn().mockResolvedValue("OK");
+    const { Test } = await import("@nestjs/testing");
+    const { CacheModule } = await import("../../../src/configs/cache.module.js");
+    const { CACHE_STORE, REDIS_CLIENT } = await import(
+      "../../../src/utils/cache/cache-store.interface.js"
+    );
+    const { RedisCacheService } = await import("../../../src/utils/cache/redis-cache.service.js");
+    const mod = await Test.createTestingModule({ imports: [CacheModule] })
+      .overrideProvider(REDIS_CLIENT)
+      .useValue({ quit })
+      .compile();
+    expect(mod.get(CACHE_STORE)).toBeInstanceOf(RedisCacheService);
+    await mod.close();
+    expect(quit).toHaveBeenCalledTimes(1);
+  });
 });

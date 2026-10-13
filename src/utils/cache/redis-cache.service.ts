@@ -21,76 +21,76 @@ export const CHECK_OTP_COMMAND = "checkOtp";
 
 /** Rotate refresh + update sessions JSON in 1 round trip. Returns 1 rotated, 0 stale. */
 export const ROTATE_REFRESH_LUA = `
-local cur = redis.call('GET', KEYS[1])
-if not cur or cur ~= ARGV[1] then
-    return 0
-end
-redis.call('DEL', KEYS[1])
-redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[4])
-local raw = redis.call('GET', KEYS[3])
-local sessions = {}
-if raw then
-    local ok, decoded = pcall(cjson.decode, raw)
-    if ok and type(decoded) == 'table' then
-        sessions = decoded
-    end
-end
-local updated = {}
-for _, v in ipairs(sessions) do
-    if v ~= ARGV[2] then
-        updated[#updated + 1] = v
-    end
-end
-updated[#updated + 1] = ARGV[3]
-redis.call('SET', KEYS[3], cjson.encode(updated), 'EX', ARGV[4])
-return 1
+  local cur = redis.call('GET', KEYS[1])
+  if not cur or cur ~= ARGV[1] then
+      return 0
+  end
+  redis.call('DEL', KEYS[1])
+  redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[4])
+  local raw = redis.call('GET', KEYS[3])
+  local sessions = {}
+  if raw then
+      local ok, decoded = pcall(cjson.decode, raw)
+      if ok and type(decoded) == 'table' then
+          sessions = decoded
+      end
+  end
+  local updated = {}
+  for _, v in ipairs(sessions) do
+      if v ~= ARGV[2] then
+          updated[#updated + 1] = v
+      end
+  end
+  updated[#updated + 1] = ARGV[3]
+  redis.call('SET', KEYS[3], cjson.encode(updated), 'EX', ARGV[4])
+  return 1
 `;
 
 /** Create a session + evict the oldest past max in 1 round trip. Returns session count. */
 export const CREATE_SESSION_LUA = `
-local raw = redis.call('GET', KEYS[2])
-local sessions = {}
-if raw then
-    local ok, decoded = pcall(cjson.decode, raw)
-    if ok and type(decoded) == 'table' then
-        sessions = decoded
-    end
-end
-sessions[#sessions + 1] = ARGV[2]
-local max_n = tonumber(ARGV[4])
-while #sessions > max_n do
-    local evicted = table.remove(sessions, 1)
-    redis.call('DEL', ARGV[5] .. evicted)
-end
-redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[3])
-redis.call('SET', KEYS[2], cjson.encode(sessions), 'EX', ARGV[3])
-return #sessions
+  local raw = redis.call('GET', KEYS[2])
+  local sessions = {}
+  if raw then
+      local ok, decoded = pcall(cjson.decode, raw)
+      if ok and type(decoded) == 'table' then
+          sessions = decoded
+      end
+  end
+  sessions[#sessions + 1] = ARGV[2]
+  local max_n = tonumber(ARGV[4])
+  while #sessions > max_n do
+      local evicted = table.remove(sessions, 1)
+      redis.call('DEL', ARGV[5] .. evicted)
+  end
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[3])
+  redis.call('SET', KEYS[2], cjson.encode(sessions), 'EX', ARGV[3])
+  return #sessions
 `;
 
 /** Revoke one session (single sign-out), keeping the sessions list's remaining TTL. */
 export const REVOKE_SESSION_LUA = `
-redis.call('DEL', KEYS[1])
-local raw = redis.call('GET', KEYS[2])
-if not raw then
-    return 0
-end
-local ok, decoded = pcall(cjson.decode, raw)
-if not ok or type(decoded) ~= 'table' then
-    redis.call('DEL', KEYS[2])
-    return 0
-end
-local updated = {}
-for _, v in ipairs(decoded) do
-    if v ~= ARGV[1] then
-        updated[#updated + 1] = v
-    end
-end
-if #updated == 0 then
-    redis.call('DEL', KEYS[2])
-else
-    redis.call('SET', KEYS[2], cjson.encode(updated), 'KEEPTTL')
-end
-return 1
+  redis.call('DEL', KEYS[1])
+  local raw = redis.call('GET', KEYS[2])
+  if not raw then
+      return 0
+  end
+  local ok, decoded = pcall(cjson.decode, raw)
+  if not ok or type(decoded) ~= 'table' then
+      redis.call('DEL', KEYS[2])
+      return 0
+  end
+  local updated = {}
+  for _, v in ipairs(decoded) do
+      if v ~= ARGV[1] then
+          updated[#updated + 1] = v
+      end
+  end
+  if #updated == 0 then
+      redis.call('DEL', KEYS[2])
+  else
+      redis.call('SET', KEYS[2], cjson.encode(updated), 'KEEPTTL')
+  end
+  return 1
 `;
 
 /**
@@ -99,28 +99,39 @@ return 1
  * `-2` just exceeded the limit (deleted).
  */
 export const CHECK_OTP_LUA = `
-local raw = redis.call('GET', KEYS[1])
-if not raw then
-    return -1
-end
-local ok, entry = pcall(cjson.decode, raw)
-if not ok or type(entry) ~= 'table' then
-    redis.call('DEL', KEYS[1])
-    return -1
-end
-if entry.code == ARGV[1] then
-    return 1
-end
-local attempts = tonumber(entry.attempts) or 0
-attempts = attempts + 1
-if attempts >= tonumber(ARGV[2]) then
-    redis.call('DEL', KEYS[1])
-    return -2
-end
-entry.attempts = attempts
-redis.call('SET', KEYS[1], cjson.encode(entry), 'KEEPTTL')
-return 0
+  local raw = redis.call('GET', KEYS[1])
+  if not raw then
+      return -1
+  end
+  local ok, entry = pcall(cjson.decode, raw)
+  if not ok or type(entry) ~= 'table' then
+      redis.call('DEL', KEYS[1])
+      return -1
+  end
+  if entry.code == ARGV[1] then
+      return 1
+  end
+  local attempts = tonumber(entry.attempts) or 0
+  attempts = attempts + 1
+  if attempts >= tonumber(ARGV[2]) then
+      redis.call('DEL', KEYS[1])
+      return -2
+  end
+  entry.attempts = attempts
+  redis.call('SET', KEYS[1], cjson.encode(entry), 'KEEPTTL')
+  return 0
 `;
+
+/**
+ * Register the four cache Lua scripts on a client. Exported so the module and
+ * tests share the exact registration (names + scripts).
+ */
+export function registerCacheCommands(client: Pick<Redis, "defineCommand">): void {
+  client.defineCommand(ROTATE_REFRESH_COMMAND, { lua: ROTATE_REFRESH_LUA });
+  client.defineCommand(CREATE_SESSION_COMMAND, { lua: CREATE_SESSION_LUA });
+  client.defineCommand(REVOKE_SESSION_COMMAND, { lua: REVOKE_SESSION_LUA });
+  client.defineCommand(CHECK_OTP_COMMAND, { lua: CHECK_OTP_LUA });
+}
 
 export interface RedisWithCacheCommands extends Redis {
   rotateRefresh(

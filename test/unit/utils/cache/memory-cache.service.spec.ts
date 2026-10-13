@@ -40,6 +40,37 @@ describe("MemoryCacheService", () => {
     ).toBe(RotationOutcome.Stale);
   });
 
+  it("treats corrupt sessions list as empty on rotate", async () => {
+    const c = new MemoryCacheService();
+    await c.setRaw("refreshToken:old", "sub", 100);
+    await c.setRaw("sessions:sub", "{corrupt", 100);
+    const r = await c.rotateRefreshToken({
+      oldKey: "refreshToken:old",
+      newKey: "refreshToken:new",
+      sessionKey: "sessions:sub",
+      subject: "sub",
+      oldJti: "old",
+      newJti: "new",
+      ttlSecs: 100,
+    });
+    expect(r).toBe(RotationOutcome.Rotated);
+    expect(await c.get("sessions:sub")).toEqual(["new"]);
+  });
+
+  it("treats corrupt sessions list as empty on create", async () => {
+    const c = new MemoryCacheService();
+    await c.setRaw("sessions:u", "{corrupt", 100);
+    await c.createRefreshSession({
+      key: "refreshToken:j1",
+      sessionKey: "sessions:u",
+      subject: "u",
+      jti: "j1",
+      ttlSecs: 100,
+      maxSessions: 5,
+    });
+    expect(await c.get("sessions:u")).toEqual(["j1"]);
+  });
+
   it("evicts oldest beyond maxSessions", async () => {
     const c = new MemoryCacheService();
     for (let i = 1; i <= 6; i++)
@@ -90,5 +121,18 @@ describe("MemoryCacheService", () => {
     await c.setRaw("otp:b@x.com", "{corrupt", 120);
     expect(await c.checkOtpCode("otp:b@x.com", "1", 5)).toBe(OtpCheckOutcome.Missing);
     expect(await c.getRaw("otp:b@x.com")).toBeNull();
+  });
+
+  it("non-object otp JSON is Missing and deleted (matches Lua type check)", async () => {
+    const c = new MemoryCacheService();
+    await c.setRaw("otp:null@x.com", "null", 120);
+    await c.setRaw("otp:num@x.com", "5", 120);
+    await c.setRaw("otp:str@x.com", '"abc"', 120);
+    expect(await c.checkOtpCode("otp:null@x.com", "1", 5)).toBe(OtpCheckOutcome.Missing);
+    expect(await c.checkOtpCode("otp:num@x.com", "1", 5)).toBe(OtpCheckOutcome.Missing);
+    expect(await c.checkOtpCode("otp:str@x.com", "1", 5)).toBe(OtpCheckOutcome.Missing);
+    expect(await c.getRaw("otp:null@x.com")).toBeNull();
+    expect(await c.getRaw("otp:num@x.com")).toBeNull();
+    expect(await c.getRaw("otp:str@x.com")).toBeNull();
   });
 });

@@ -56,6 +56,14 @@ describe("CacheStoreExt", () => {
     expect(c.store.has("bad")).toBe(false);
   });
 
+  it("skips circular values with a warn instead of throwing", async () => {
+    const c = new Fake();
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    await expect(c.set("circ", circular, 60)).resolves.toBeUndefined();
+    expect(c.store.has("circ")).toBe(false);
+  });
+
   it("bestEffort swallows infra errors", async () => {
     const c = new Fake();
     c.fail = true;
