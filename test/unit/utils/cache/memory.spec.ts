@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryCacheService } from "../../../../src/utils/cache/memory-cache.service.js";
-import { OtpCheckOutcome, RotationOutcome } from "../../../../src/utils/cache/cache.types.js";
+import { MemoryCacheService } from "../../../../src/utils/cache/memory.js";
+import { OtpCheckOutcome, RotationOutcome } from "../../../../src/utils/cache/types.js";
 
 describe("MemoryCacheService", () => {
   beforeEach(() => vi.useFakeTimers());

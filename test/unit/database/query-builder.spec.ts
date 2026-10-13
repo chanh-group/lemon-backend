@@ -2,7 +2,7 @@ import { and, desc, eq, gt, isNull, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { beforeAll, describe, expect, it } from "vitest";
-import type { DrizzleDb } from "../../../src/configs/database.module.js";
+import type { DrizzleDb } from "../../../src/configs/database.js";
 import * as schema from "../../../src/configs/schema.js";
 
 describe("Drizzle SQL Query Builder Verification", () => {

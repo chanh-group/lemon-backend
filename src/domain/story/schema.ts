@@ -11,7 +11,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { created, uuidV7 } from "../../utils/database.js";
-import { users } from "../user/user.schema.js";
+import { users } from "../user/schema.js";
 
 export const storyKindEnum = pgEnum("story_kind", ["IMAGE", "VIDEO", "TEXT"]);
 

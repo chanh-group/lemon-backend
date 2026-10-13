@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Request, Response } from "express";
-import { RequestLoggerMiddleware } from "../../../src/middleware/request-logger.middleware.js";
+import { RequestLoggerMiddleware } from "../../../src/middleware/request-logger.js";
 import { createAppLogger, Logger } from "../../../src/utils/logger.js";
 
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;

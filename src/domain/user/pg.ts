@@ -1,10 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
 import { eq } from "drizzle-orm";
-import type { DrizzleDb } from "../../configs/database.module.js";
-import type { User } from "./user.schema.js";
-import type { UserRepository } from "./user.repository.js";
-import { users } from "./user.schema.js";
+import type { DrizzleDb } from "../../configs/database.js";
+import type { User } from "./schema.js";
+import type { UserRepository } from "./repository.js";
+import { users } from "./schema.js";
 
 @Injectable()
 export class UserPgRepository implements UserRepository {

@@ -1,5 +1,5 @@
 import { NestFactory } from "@nestjs/core";
-import { AppModule } from "./app.module.js";
+import { AppModule } from "./app.js";
 import { get_env } from "./helpers/index.js";
 import { createAppLogger } from "./utils/logger.js";
 
