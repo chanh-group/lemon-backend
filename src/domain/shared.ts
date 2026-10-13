@@ -1,11 +1,10 @@
-export type PaginatedResult<T> = {
-  items: T[];
-  nextCursor?: string | null;
-  hasMore: boolean;
-};
+export interface Pageable {
+  cursor?: string;
+  size: number;
+}
 
-export type BaseTimestamp = {
-  createdAt: Date;
-  updatedAt: Date;
-};
-
+export interface Page<T> {
+  content: T[];
+  cursor?: string;
+  size: number;
+}
