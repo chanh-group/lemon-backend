@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { CacheError } from "../../../../src/utils/cache/cache.errors.js";
-import { OtpCheckOutcome, RotationOutcome } from "../../../../src/utils/cache/cache.types.js";
+import { CacheError } from "../../../../src/utils/cache/error.js";
+import { OtpCheckOutcome, RotationOutcome } from "../../../../src/utils/cache/types.js";
 import {
   CHECK_OTP_COMMAND,
   CHECK_OTP_LUA,
@@ -13,7 +13,7 @@ import {
   ROTATE_REFRESH_LUA,
   registerCacheCommands,
   type RedisWithCacheCommands,
-} from "../../../../src/utils/cache/redis-cache.service.js";
+} from "../../../../src/utils/cache/redis.js";
 
 function serviceWith(commands: Record<string, unknown>): {
   service: RedisCacheService;

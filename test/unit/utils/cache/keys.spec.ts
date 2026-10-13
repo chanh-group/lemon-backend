@@ -4,7 +4,7 @@ import {
   resetOtpKey,
   sessionListKey,
   signupOtpKey,
-} from "../../../../src/utils/cache/cache.keys.js";
+} from "../../../../src/utils/cache/keys.js";
 
 describe("cache.keys", () => {
   it("builds refresh/session keys", () => {

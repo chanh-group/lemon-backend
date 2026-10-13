@@ -4,8 +4,8 @@
 // test runtime. Redis Lua is the real multi-process atomicity.
 // Ported from Rust `dsa/src/utils/cache/memory.rs`.
 import { Injectable } from "@nestjs/common";
-import { REFRESH_TOKEN_KEY_PREFIX } from "./cache.constants.js";
-import { CacheStoreExt } from "./cache-store.interface.js";
+import { REFRESH_TOKEN_KEY_PREFIX } from "./constants.js";
+import { CacheStoreExt } from "./store.js";
 import {
   OtpCheckOutcome,
   RotationOutcome,
@@ -13,7 +13,7 @@ import {
   type OtpEntry,
   type RefreshRotation,
   type RevokeRefreshSession,
-} from "./cache.types.js";
+} from "./types.js";
 
 @Injectable()
 export class MemoryCacheService extends CacheStoreExt {
