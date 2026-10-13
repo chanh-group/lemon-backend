@@ -121,7 +121,7 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 
 ## Logging Convention
 
-Dự án sử dụng NestJS `Logger` chuẩn (`@nestjs/common`) với cấu hình tập trung tại `src/utils/logger.module.ts`. Mọi service khởi tạo logger độc lập theo tên class:
+Dự án sử dụng NestJS `Logger` chuẩn (`@nestjs/common`) với cấu hình tập trung tại `src/utils/logger.ts`. Mọi service khởi tạo logger độc lập theo tên class:
 
 ```typescript
 import { Injectable, Logger } from '@nestjs/common';
@@ -141,7 +141,17 @@ export class ExampleService {
 - `log`: Business event thành công (ví dụ: `User signed up`, `Conversation created`).
 - `warn`: Attempt thất bại nhưng nằm trong dự tính nghiệp vụ (ví dụ: `Invalid invite code`, `Password mismatch`).
 - `error`: Exception / lỗi hệ thống không mong muốn (kèm `{ err }`).
-- `debug`: Chi tiết query / kỹ thuật hỗ trợ dev.
+- `debug`: Chi tiết query / kỹ thuật hỗ trợ dev (chỉ bật ở development).
+- `verbose`: Trace chi tiết hơn `debug` (chỉ bật ở development).
+- `fatal`: Lỗi làm process không thể tiếp tục.
+
+### Định dạng output:
+- **Development** (`NODE_ENV` khác `production`): human-readable, có màu, timestamp ISO 8601.
+- **Production** (`NODE_ENV=production`): 1 dòng JSON mỗi log, timestamp ISO 8601, tắt `debug`/`verbose`.
+
+```json
+{"level":"log","pid":123,"timestamp":"2026-10-13T03:00:00.000Z","message":"User signed up successfully","params":{"userId":"123"}}
+```
 
 ### Định dạng & Quy tắc:
 1. **Message**: Dùng string literal ổn định, ngắn gọn để dễ grep log (không nối chuỗi động vào message).
