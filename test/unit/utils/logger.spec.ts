@@ -4,7 +4,7 @@ import {
   AppLogger,
   createAppLogger,
   createAppLoggerOptions,
-} from './logger.js';
+} from '../../../src/utils/logger.js';
 
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const ISO_TIMESTAMP_IN_TEXT = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/;
