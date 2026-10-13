@@ -2,7 +2,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ExamplePgRepository } from '../../../src/domain/example/example.pg.js';
 import { UserPgRepository } from '../../../src/domain/user/user.pg.js';
-import { DatabaseModule } from '../../../src/infra/database/database.module.js';
+import { DatabaseModule } from '../../../src/configs/database.module.js';
 
 describe('NestJS Dependency Injection & Drizzle Module Verification', () => {
   let moduleRef: TestingModule;

@@ -1,6 +1,6 @@
 import { getTableColumns } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import * as schema from '../../../src/infra/database/schema.js';
+import * as schema from '../../../src/configs/schema.js';
 
 describe('Drizzle Table Constraints and Schema Metadata Verification', () => {
   describe('Users Table Metadata', () => {
