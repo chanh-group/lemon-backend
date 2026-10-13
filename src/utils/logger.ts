@@ -1,14 +1,26 @@
-import { ConsoleLogger, ConsoleLoggerOptions, Module } from '@nestjs/common';
+import { ConsoleLogger, ConsoleLoggerOptions, LogLevel } from '@nestjs/common';
 
-export const APP_LOGGER_OPTIONS = Symbol('APP_LOGGER_OPTIONS');
+type JsonLogOptions = {
+  context: string;
+  logLevel: LogLevel;
+  writeStreamType?: 'stdout' | 'stderr';
+  errorStack?: unknown;
+  params?: Record<string, any>;
+  error?: Error;
+};
 
 export class AppLogger extends ConsoleLogger {
   override getTimestamp(): string {
     return new Date().toISOString();
   }
 
-  getOptions(): ConsoleLoggerOptions {
-    return this.options;
+  protected override getJsonLogObject(
+    message: unknown,
+    options: JsonLogOptions,
+  ) {
+    const logObject = super.getJsonLogObject(message, options);
+    logObject.timestamp = new Date().toISOString() as unknown as number;
+    return logObject;
   }
 }
 
@@ -37,18 +49,3 @@ export function createAppLogger(
 ): AppLogger {
   return new AppLogger(createAppLoggerOptions(env));
 }
-
-@Module({
-  providers: [
-    {
-      provide: APP_LOGGER_OPTIONS,
-      useFactory: () => createAppLoggerOptions(),
-    },
-    {
-      provide: AppLogger,
-      useFactory: () => createAppLogger(),
-    },
-  ],
-  exports: [APP_LOGGER_OPTIONS, AppLogger],
-})
-export class AppLoggerModule {}
