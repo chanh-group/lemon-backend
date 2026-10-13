@@ -1,6 +1,6 @@
-import { Injectable, NestMiddleware, Optional } from '@nestjs/common';
-import type { NextFunction, Request, Response } from 'express';
-import { Logger } from '../utils/logger.js';
+import { Injectable, NestMiddleware, Optional } from "@nestjs/common";
+import type { NextFunction, Request, Response } from "express";
+import { Logger } from "../utils/logger.js";
 
 @Injectable()
 export class RequestLoggerMiddleware implements NestMiddleware {
@@ -22,23 +22,23 @@ export class RequestLoggerMiddleware implements NestMiddleware {
 
       const durationMs = Date.now() - startTime;
       const status = res.statusCode || 200;
-      const method = req.method || 'GET';
-      const rawPath = req.originalUrl || req.url || req.path || '/';
-      const path = rawPath.split('?')[0] || '/';
+      const method = req.method || "GET";
+      const rawPath = req.originalUrl || req.url || req.path || "/";
+      const path = rawPath.split("?")[0] || "/";
 
       const metadata = { method, path, status, durationMs };
 
       if (status >= 500) {
-        this.logger.error('Incoming request', metadata);
+        this.logger.error("Incoming request", metadata);
       } else if (status >= 400) {
-        this.logger.warn('Incoming request', metadata);
+        this.logger.warn("Incoming request", metadata);
       } else {
-        this.logger.log('Incoming request', metadata);
+        this.logger.log("Incoming request", metadata);
       }
     };
 
-    res.on('finish', logResponse);
-    res.on('close', logResponse);
+    res.on("finish", logResponse);
+    res.on("close", logResponse);
 
     next();
   }
