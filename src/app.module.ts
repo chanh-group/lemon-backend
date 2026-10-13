@@ -4,13 +4,11 @@ import { CacheModule } from "./configs/cache.module.js";
 import { DatabaseModule } from "./configs/database.module.js";
 import { RequestLoggerMiddleware } from "./middleware/request-logger.middleware.js";
 
-
 @Module({
   imports: [DatabaseModule, CacheModule, ExampleModule],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(RequestLoggerMiddleware).forRoutes('*');
+    consumer.apply(RequestLoggerMiddleware).forRoutes("*");
   }
 }
-

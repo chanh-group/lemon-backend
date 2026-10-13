@@ -3,7 +3,6 @@ import { get_env } from "../helpers/index.js";
 
 export { Logger };
 
-
 type JsonLogOptions = {
   context: string;
   logLevel: LogLevel;
