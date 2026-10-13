@@ -12,8 +12,6 @@ export const MAX_SESSIONS_PER_USER = 5;
 export const REFRESH_TOKEN_KEY_PREFIX = "refreshToken:";
 export const SESSION_KEY_PREFIX = "sessions:";
 export const USER_CACHE_KEY_PREFIX = "user:";
-export const GROUP_SUMMARY_KEY_PREFIX = "group_summary:";
-export const GROUP_MEMBERS_KEY_PREFIX = "group:members:";
 export const OTP_KEY_PREFIX = "otp:";
 export const FORGOT_OTP_KEY_PREFIX = "forgot_otp:";
 
