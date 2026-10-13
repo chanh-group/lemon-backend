@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { CacheError } from "../../../../src/utils/cache/cache.errors.js";
-import { OtpCheckOutcome, RotationOutcome } from "../../../../src/utils/cache/cache.types.js";
+import { CacheError } from "../../../../src/utils/cache/error.js";
+import { OtpCheckOutcome, RotationOutcome } from "../../../../src/utils/cache/types.js";
 
 describe("cache types", () => {
   it("CacheError carries op", () => {

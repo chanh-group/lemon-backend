@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { CacheStoreExt } from "../../../../src/utils/cache/cache-store.interface.js";
-import { CacheError } from "../../../../src/utils/cache/cache.errors.js";
+import { CacheStoreExt } from "../../../../src/utils/cache/store.js";
+import { CacheError } from "../../../../src/utils/cache/error.js";
 
 class Fake extends CacheStoreExt {
   store = new Map<string, string>();

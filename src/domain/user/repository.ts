@@ -1,4 +1,4 @@
-import { User } from "./user.schema.js";
+import { User } from "./schema.js";
 
 export interface UserRepository {
   findById(id: string): Promise<User | null>;

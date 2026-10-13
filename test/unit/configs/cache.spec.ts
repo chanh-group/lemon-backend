@@ -9,9 +9,9 @@ describe("CacheModule", () => {
   it("memory mode provides MemoryCacheService without redis", async () => {
     process.env.USE_MEMORY_CACHE = "true";
     const { Test } = await import("@nestjs/testing");
-    const { CacheModule } = await import("../../../src/configs/cache.module.js");
-    const { CACHE_STORE } = await import("../../../src/utils/cache/cache-store.interface.js");
-    const { MemoryCacheService } = await import("../../../src/utils/cache/memory-cache.service.js");
+    const { CacheModule } = await import("../../../src/configs/cache.js");
+    const { CACHE_STORE } = await import("../../../src/utils/cache/store.js");
+    const { MemoryCacheService } = await import("../../../src/utils/cache/memory.js");
     const mod = await Test.createTestingModule({ imports: [CacheModule] }).compile();
     expect(mod.get(CACHE_STORE)).toBeInstanceOf(MemoryCacheService);
     await mod.close();
@@ -21,10 +21,10 @@ describe("CacheModule", () => {
   it("redis mode provides RedisCacheService and quits on destroy", async () => {
     const quit = vi.fn().mockResolvedValue("OK");
     const { Test } = await import("@nestjs/testing");
-    const { CacheModule } = await import("../../../src/configs/cache.module.js");
+    const { CacheModule } = await import("../../../src/configs/cache.js");
     const { CACHE_STORE, REDIS_CLIENT } =
-      await import("../../../src/utils/cache/cache-store.interface.js");
-    const { RedisCacheService } = await import("../../../src/utils/cache/redis-cache.service.js");
+      await import("../../../src/utils/cache/store.js");
+    const { RedisCacheService } = await import("../../../src/utils/cache/redis.js");
     const mod = await Test.createTestingModule({ imports: [CacheModule] })
       .overrideProvider(REDIS_CLIENT)
       .useValue({ quit })

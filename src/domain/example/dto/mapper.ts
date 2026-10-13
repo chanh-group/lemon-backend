@@ -1,5 +1,5 @@
-import { ExampleEntity } from "../example.repository.js";
-import { ExampleResponse } from "./example.response.js";
+import { ExampleEntity } from "../repository.js";
+import { ExampleResponse } from "./response.js";
 
 export function toExampleResponse(entity: ExampleEntity): ExampleResponse {
   return {

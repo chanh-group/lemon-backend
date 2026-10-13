@@ -6,14 +6,14 @@ import { get_env } from "../helpers/index.js";
 import {
   REDIS_COMMAND_TIMEOUT_MS,
   REDIS_MAX_RETRIES_PER_REQUEST,
-} from "../utils/cache/cache.constants.js";
-import { CACHE_STORE, REDIS_CLIENT } from "../utils/cache/cache-store.interface.js";
-import { MemoryCacheService } from "../utils/cache/memory-cache.service.js";
+} from "../utils/cache/constants.js";
+import { CACHE_STORE, REDIS_CLIENT } from "../utils/cache/store.js";
+import { MemoryCacheService } from "../utils/cache/memory.js";
 import {
   RedisCacheService,
   registerCacheCommands,
   type RedisWithCacheCommands,
-} from "../utils/cache/redis-cache.service.js";
+} from "../utils/cache/redis.js";
 
 const logger = new Logger("Cache");
 

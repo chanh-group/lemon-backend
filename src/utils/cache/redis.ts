@@ -3,16 +3,16 @@
 // `dsa/src/utils/cache/redis.rs` (`cjson` ships with Redis Lua).
 import { Inject, Injectable } from "@nestjs/common";
 import type { Redis } from "ioredis";
-import { REFRESH_TOKEN_KEY_PREFIX } from "./cache.constants.js";
-import { CacheError } from "./cache.errors.js";
-import { CacheStoreExt, REDIS_CLIENT } from "./cache-store.interface.js";
+import { REFRESH_TOKEN_KEY_PREFIX } from "./constants.js";
+import { CacheError } from "./error.js";
+import { CacheStoreExt, REDIS_CLIENT } from "./store.js";
 import {
   OtpCheckOutcome,
   RotationOutcome,
   type NewRefreshSession,
   type RefreshRotation,
   type RevokeRefreshSession,
-} from "./cache.types.js";
+} from "./types.js";
 
 export const ROTATE_REFRESH_COMMAND = "rotateRefresh";
 export const CREATE_SESSION_COMMAND = "createSession";

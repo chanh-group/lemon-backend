@@ -12,8 +12,8 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { created, updated, uuidV7 } from "../../utils/database.js";
-import { messages } from "../message/message.schema.js";
-import { users } from "../user/user.schema.js";
+import { messages } from "../message/schema.js";
+import { users } from "../user/schema.js";
 
 export const conversationKindEnum = pgEnum("conversation_kind", ["DIRECT", "GROUP"]);
 export const participantRoleEnum = pgEnum("participant_role", ["MEMBER", "ADMIN", "OWNER"]);
