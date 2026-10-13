@@ -1,12 +1,12 @@
-import { eq } from 'drizzle-orm';
-import { alias } from 'drizzle-orm/pg-core';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
-import { beforeAll, describe, expect, it } from 'vitest';
-import type { DrizzleDb } from '../../../src/configs/database.module.js';
-import * as schema from '../../../src/configs/schema.js';
+import { eq } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import { beforeAll, describe, expect, it } from "vitest";
+import type { DrizzleDb } from "../../../src/configs/database.module.js";
+import * as schema from "../../../src/configs/schema.js";
 
-describe('SQL-First Joins via Foreign Keys Verification', () => {
+describe("SQL-First Joins via Foreign Keys Verification", () => {
   let db: DrizzleDb;
 
   beforeAll(() => {
@@ -14,7 +14,7 @@ describe('SQL-First Joins via Foreign Keys Verification', () => {
     db = drizzle(pool, { schema });
   });
 
-  it('should generate valid SQL joining conversations with participants and users', () => {
+  it("should generate valid SQL joining conversations with participants and users", () => {
     const query = db
       .select({
         conversationId: schema.conversations.id,
@@ -28,20 +28,19 @@ describe('SQL-First Joins via Foreign Keys Verification', () => {
         schema.conversationParticipants,
         eq(schema.conversations.id, schema.conversationParticipants.conversationId),
       )
-      .innerJoin(
-        schema.users,
-        eq(schema.conversationParticipants.userId, schema.users.id),
-      )
-      .where(eq(schema.conversations.id, '0193a2b1-0000-7000-8000-000000000001'))
+      .innerJoin(schema.users, eq(schema.conversationParticipants.userId, schema.users.id))
+      .where(eq(schema.conversations.id, "0193a2b1-0000-7000-8000-000000000001"))
       .toSQL();
 
     expect(query.sql).toContain('inner join "conversation_participants"');
     expect(query.sql).toContain('inner join "users"');
-    expect(query.sql).toContain('"conversations"."id" = "conversation_participants"."conversation_id"');
+    expect(query.sql).toContain(
+      '"conversations"."id" = "conversation_participants"."conversation_id"',
+    );
     expect(query.sql).toContain('"conversation_participants"."user_id" = "users"."id"');
   });
 
-  it('should generate valid SQL joining messages with sender and attachments', () => {
+  it("should generate valid SQL joining messages with sender and attachments", () => {
     const query = db
       .select({
         messageId: schema.messages.id,
@@ -55,7 +54,7 @@ describe('SQL-First Joins via Foreign Keys Verification', () => {
         schema.messageAttachments,
         eq(schema.messages.id, schema.messageAttachments.messageId),
       )
-      .where(eq(schema.messages.conversationId, '0193a2b1-0000-7000-8000-000000000002'))
+      .where(eq(schema.messages.conversationId, "0193a2b1-0000-7000-8000-000000000002"))
       .toSQL();
 
     expect(query.sql).toContain('left join "users"');
@@ -64,8 +63,8 @@ describe('SQL-First Joins via Foreign Keys Verification', () => {
     expect(query.sql).toContain('"messages"."id" = "message_attachments"."message_id"');
   });
 
-  it('should generate valid SQL joining self-referencing messages for reply-to', () => {
-    const replyMessages = alias(schema.messages, 'replied_msg');
+  it("should generate valid SQL joining self-referencing messages for reply-to", () => {
+    const replyMessages = alias(schema.messages, "replied_msg");
 
     const query = db
       .select({
@@ -75,16 +74,16 @@ describe('SQL-First Joins via Foreign Keys Verification', () => {
       })
       .from(schema.messages)
       .leftJoin(replyMessages, eq(schema.messages.replyToId, replyMessages.id))
-      .where(eq(schema.messages.conversationId, '0193a2b1-0000-7000-8000-000000000002'))
+      .where(eq(schema.messages.conversationId, "0193a2b1-0000-7000-8000-000000000002"))
       .toSQL();
 
     expect(query.sql).toContain('left join "messages" "replied_msg"');
     expect(query.sql).toContain('"messages"."reply_to_id" = "replied_msg"."id"');
   });
 
-  it('should generate valid SQL joining friendships with requester and addressee', () => {
-    const requester = alias(schema.users, 'requester');
-    const addressee = alias(schema.users, 'addressee');
+  it("should generate valid SQL joining friendships with requester and addressee", () => {
+    const requester = alias(schema.users, "requester");
+    const addressee = alias(schema.users, "addressee");
 
     const query = db
       .select({
@@ -96,7 +95,7 @@ describe('SQL-First Joins via Foreign Keys Verification', () => {
       .from(schema.friendships)
       .innerJoin(requester, eq(schema.friendships.requesterId, requester.id))
       .innerJoin(addressee, eq(schema.friendships.addresseeId, addressee.id))
-      .where(eq(schema.friendships.status, 'ACCEPTED'))
+      .where(eq(schema.friendships.status, "ACCEPTED"))
       .toSQL();
 
     expect(query.sql).toContain('inner join "users" "requester"');
@@ -105,9 +104,9 @@ describe('SQL-First Joins via Foreign Keys Verification', () => {
     expect(query.sql).toContain('"friendships"."addressee_id" = "addressee"."id"');
   });
 
-  it('should generate valid SQL joining calls with caller, callee, and conversation', () => {
-    const caller = alias(schema.users, 'caller');
-    const callee = alias(schema.users, 'callee');
+  it("should generate valid SQL joining calls with caller, callee, and conversation", () => {
+    const caller = alias(schema.users, "caller");
+    const callee = alias(schema.users, "callee");
 
     const query = db
       .select({
@@ -130,8 +129,8 @@ describe('SQL-First Joins via Foreign Keys Verification', () => {
     expect(query.sql).toContain('"calls"."callee_id" = "callee"."id"');
   });
 
-  it('should generate valid SQL joining stories with views and users', () => {
-    const viewer = alias(schema.users, 'viewer');
+  it("should generate valid SQL joining stories with views and users", () => {
+    const viewer = alias(schema.users, "viewer");
 
     const query = db
       .select({
@@ -153,4 +152,3 @@ describe('SQL-First Joins via Foreign Keys Verification', () => {
     expect(query.sql).toContain('"stories"."id" = "story_views"."story_id"');
   });
 });
-

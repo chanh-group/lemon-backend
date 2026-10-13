@@ -1,11 +1,11 @@
 {
-  "id": "da4a9888-de1e-45d8-84dd-c08a31f94c24",
+  "id": "6569580c-bbbb-4b63-8cf6-dc7516fc560a",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.calls": {
-      "name": "calls",
+    "public.users": {
+      "name": "users",
       "schema": "",
       "columns": {
         "id": {
@@ -14,322 +14,35 @@
           "primaryKey": true,
           "notNull": true
         },
-        "conversation_id": {
-          "name": "conversation_id",
-          "type": "uuid",
+        "email": {
+          "name": "email",
+          "type": "citext",
           "primaryKey": false,
           "notNull": true
         },
-        "caller_id": {
-          "name": "caller_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "callee_id": {
-          "name": "callee_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "media": {
-          "name": "media",
-          "type": "call_media",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "call_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'INITIATED'"
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "answered_at": {
-          "name": "answered_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ended_at": {
-          "name": "ended_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "end_reason": {
-          "name": "end_reason",
+        "password_hash": {
+          "name": "password_hash",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "duration_secs": {
-          "name": "duration_secs",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "generated": {
-            "as": "CASE WHEN answered_at IS NULL OR ended_at IS NULL THEN 0 ELSE GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (ended_at - answered_at))))::INT END",
-            "type": "stored"
-          }
-        }
-      },
-      "indexes": {
-        "calls_conv_idx": {
-          "name": "calls_conv_idx",
-          "columns": [
-            {
-              "expression": "conversation_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "started_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "calls_callee_idx": {
-          "name": "calls_callee_idx",
-          "columns": [
-            {
-              "expression": "callee_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "started_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "calls_conversation_id_conversations_id_fk": {
-          "name": "calls_conversation_id_conversations_id_fk",
-          "tableFrom": "calls",
-          "tableTo": "conversations",
-          "columnsFrom": [
-            "conversation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "calls_caller_id_users_id_fk": {
-          "name": "calls_caller_id_users_id_fk",
-          "tableFrom": "calls",
-          "tableTo": "users",
-          "columnsFrom": [
-            "caller_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "calls_callee_id_users_id_fk": {
-          "name": "calls_callee_id_users_id_fk",
-          "tableFrom": "calls",
-          "tableTo": "users",
-          "columnsFrom": [
-            "callee_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "calls_no_self_chk": {
-          "name": "calls_no_self_chk",
-          "value": "\"calls\".\"caller_id\" <> \"calls\".\"callee_id\""
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.conversation_participants": {
-      "name": "conversation_participants",
-      "schema": "",
-      "columns": {
-        "conversation_id": {
-          "name": "conversation_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "role": {
-          "name": "role",
-          "type": "participant_role",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'MEMBER'"
-        },
-        "last_read_message_id": {
-          "name": "last_read_message_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_read_at": {
-          "name": "last_read_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "muted_until": {
-          "name": "muted_until",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "joined_at": {
-          "name": "joined_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "left_at": {
-          "name": "left_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "participants_user_idx": {
-          "name": "participants_user_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"conversation_participants\".\"left_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "conversation_participants_conversation_id_conversations_id_fk": {
-          "name": "conversation_participants_conversation_id_conversations_id_fk",
-          "tableFrom": "conversation_participants",
-          "tableTo": "conversations",
-          "columnsFrom": [
-            "conversation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "conversation_participants_user_id_users_id_fk": {
-          "name": "conversation_participants_user_id_users_id_fk",
-          "tableFrom": "conversation_participants",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "conversation_participants_conversation_id_user_id_pk": {
-          "name": "conversation_participants_conversation_id_user_id_pk",
-          "columns": [
-            "conversation_id",
-            "user_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.conversations": {
-      "name": "conversations",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "conversation_kind",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'DIRECT'"
-        },
-        "direct_key": {
-          "name": "direct_key",
+        "google_id": {
+          "name": "google_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "title": {
-          "name": "title",
+        "username": {
+          "name": "username",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
+        },
+        "full_name": {
+          "name": "full_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
         },
         "avatar_url": {
           "name": "avatar_url",
@@ -337,23 +50,36 @@
           "primaryKey": false,
           "notNull": false
         },
-        "last_message_id": {
-          "name": "last_message_id",
-          "type": "uuid",
+        "bio": {
+          "name": "bio",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "last_message_at": {
-          "name": "last_message_at",
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email_verified_at": {
+          "name": "email_verified_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
-        "last_message_preview": {
-          "name": "last_message_preview",
-          "type": "text",
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
         },
         "deleted_at": {
           "name": "deleted_at",
@@ -377,29 +103,77 @@
         }
       },
       "indexes": {
-        "conversations_direct_key_uq": {
-          "name": "conversations_direct_key_uq",
+        "users_email_uq": {
+          "name": "users_email_uq",
           "columns": [
             {
-              "expression": "direct_key",
+              "expression": "email",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": true,
-          "where": "\"conversations\".\"direct_key\" IS NOT NULL",
+          "where": "\"users\".\"deleted_at\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
         },
-        "conversations_last_message_idx": {
-          "name": "conversations_last_message_idx",
+        "users_username_uq": {
+          "name": "users_username_uq",
           "columns": [
             {
-              "expression": "last_message_at",
+              "expression": "username",
               "isExpression": false,
-              "asc": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"users\".\"deleted_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "users_google_id_uq": {
+          "name": "users_google_id_uq",
+          "columns": [
+            {
+              "expression": "google_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"users\".\"google_id\" IS NOT NULL AND \"users\".\"deleted_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "users_phone_uq": {
+          "name": "users_phone_uq",
+          "columns": [
+            {
+              "expression": "phone",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"users\".\"phone\" IS NOT NULL AND \"users\".\"deleted_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "users_last_seen": {
+          "name": "users_last_seen",
+          "columns": [
+            {
+              "expression": "last_seen_at",
+              "isExpression": false,
+              "asc": true,
               "nulls": "last"
             }
           ],
@@ -414,9 +188,13 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "conversations_direct_chk": {
-          "name": "conversations_direct_chk",
-          "value": "\"conversations\".\"kind\" <> 'DIRECT' OR \"conversations\".\"direct_key\" IS NOT NULL"
+        "users_username_format_chk": {
+          "name": "users_username_format_chk",
+          "value": "\"users\".\"username\" ~ '^[a-z0-9_]{3,30}$'"
+        },
+        "users_full_name_chk": {
+          "name": "users_full_name_chk",
+          "value": "char_length(btrim(\"users\".\"full_name\")) BETWEEN 2 AND 100"
         }
       },
       "isRLSEnabled": false
@@ -565,12 +343,8 @@
           "name": "friendships_requester_id_users_id_fk",
           "tableFrom": "friendships",
           "tableTo": "users",
-          "columnsFrom": [
-            "requester_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["requester_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -578,12 +352,26 @@
           "name": "friendships_addressee_id_users_id_fk",
           "tableFrom": "friendships",
           "tableTo": "users",
-          "columnsFrom": [
-            "addressee_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["addressee_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "friendships_user_low_users_id_fk": {
+          "name": "friendships_user_low_users_id_fk",
+          "tableFrom": "friendships",
+          "tableTo": "users",
+          "columnsFrom": ["user_low"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "friendships_user_high_users_id_fk": {
+          "name": "friendships_user_high_users_id_fk",
+          "tableFrom": "friendships",
+          "tableTo": "users",
+          "columnsFrom": ["user_high"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -593,10 +381,7 @@
         "friendships_pair_uq": {
           "name": "friendships_pair_uq",
           "nullsNotDistinct": false,
-          "columns": [
-            "user_low",
-            "user_high"
-          ]
+          "columns": ["user_low", "user_high"]
         }
       },
       "policies": {},
@@ -608,6 +393,257 @@
         "friendships_pair_chk": {
           "name": "friendships_pair_chk",
           "value": "\"friendships\".\"user_low\" < \"friendships\".\"user_high\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.conversation_participants": {
+      "name": "conversation_participants",
+      "schema": "",
+      "columns": {
+        "conversation_id": {
+          "name": "conversation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "participant_role",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'MEMBER'"
+        },
+        "last_read_message_id": {
+          "name": "last_read_message_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_read_at": {
+          "name": "last_read_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "muted_until": {
+          "name": "muted_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "joined_at": {
+          "name": "joined_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "left_at": {
+          "name": "left_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "participants_user_idx": {
+          "name": "participants_user_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"conversation_participants\".\"left_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "conversation_participants_conversation_id_conversations_id_fk": {
+          "name": "conversation_participants_conversation_id_conversations_id_fk",
+          "tableFrom": "conversation_participants",
+          "tableTo": "conversations",
+          "columnsFrom": ["conversation_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "conversation_participants_user_id_users_id_fk": {
+          "name": "conversation_participants_user_id_users_id_fk",
+          "tableFrom": "conversation_participants",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "conversation_participants_conversation_id_user_id_pk": {
+          "name": "conversation_participants_conversation_id_user_id_pk",
+          "columns": ["conversation_id", "user_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.conversations": {
+      "name": "conversations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "conversation_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'DIRECT'"
+        },
+        "direct_key": {
+          "name": "direct_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "avatar_url": {
+          "name": "avatar_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_message_id": {
+          "name": "last_message_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_message_at": {
+          "name": "last_message_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_message_preview": {
+          "name": "last_message_preview",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "conversations_direct_key_uq": {
+          "name": "conversations_direct_key_uq",
+          "columns": [
+            {
+              "expression": "direct_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"conversations\".\"direct_key\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "conversations_last_message_idx": {
+          "name": "conversations_last_message_idx",
+          "columns": [
+            {
+              "expression": "last_message_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "conversations_active_idx": {
+          "name": "conversations_active_idx",
+          "columns": [
+            {
+              "expression": "last_message_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"conversations\".\"deleted_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "conversations_last_message_id_messages_id_fk": {
+          "name": "conversations_last_message_id_messages_id_fk",
+          "tableFrom": "conversations",
+          "tableTo": "messages",
+          "columnsFrom": ["last_message_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "conversations_direct_chk": {
+          "name": "conversations_direct_chk",
+          "value": "\"conversations\".\"kind\" <> 'DIRECT' OR \"conversations\".\"direct_key\" IS NOT NULL"
         }
       },
       "isRLSEnabled": false
@@ -713,12 +749,8 @@
           "name": "message_attachments_message_id_messages_id_fk",
           "tableFrom": "message_attachments",
           "tableTo": "messages",
-          "columnsFrom": [
-            "message_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["message_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -848,6 +880,27 @@
           "method": "btree",
           "with": {}
         },
+        "messages_sender_idx": {
+          "name": "messages_sender_idx",
+          "columns": [
+            {
+              "expression": "sender_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "messages_reply_idx": {
           "name": "messages_reply_idx",
           "columns": [
@@ -869,12 +922,8 @@
           "name": "messages_conversation_id_conversations_id_fk",
           "tableFrom": "messages",
           "tableTo": "conversations",
-          "columnsFrom": [
-            "conversation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["conversation_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -882,26 +931,18 @@
           "name": "messages_sender_id_users_id_fk",
           "tableFrom": "messages",
           "tableTo": "users",
-          "columnsFrom": [
-            "sender_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
+          "columnsFrom": ["sender_id"],
+          "columnsTo": ["id"],
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "messages_reply_to_id_messages_id_fk": {
           "name": "messages_reply_to_id_messages_id_fk",
           "tableFrom": "messages",
           "tableTo": "messages",
-          "columnsFrom": [
-            "reply_to_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
+          "columnsFrom": ["reply_to_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -920,8 +961,8 @@
       },
       "isRLSEnabled": false
     },
-    "public.notes": {
-      "name": "notes",
+    "public.calls": {
+      "name": "calls",
       "schema": "",
       "columns": {
         "id": {
@@ -930,50 +971,87 @@
           "primaryKey": true,
           "notNull": true
         },
-        "user_id": {
-          "name": "user_id",
+        "conversation_id": {
+          "name": "conversation_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "content": {
-          "name": "content",
-          "type": "text",
+        "caller_id": {
+          "name": "caller_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "background": {
-          "name": "background",
-          "type": "text",
+        "callee_id": {
+          "name": "callee_id",
+          "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
-        "created_at": {
-          "name": "created_at",
+        "media": {
+          "name": "media",
+          "type": "call_media",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "call_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'INITIATED'"
+        },
+        "started_at": {
+          "name": "started_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         },
-        "expires_at": {
-          "name": "expires_at",
+        "answered_at": {
+          "name": "answered_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "end_reason": {
+          "name": "end_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "duration_secs": {
+          "name": "duration_secs",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "generated": {
+            "as": "CASE WHEN answered_at IS NULL OR ended_at IS NULL THEN 0 ELSE GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (ended_at - answered_at))))::INT END",
+            "type": "stored"
+          }
         }
       },
       "indexes": {
-        "notes_user_idx": {
-          "name": "notes_user_idx",
+        "calls_conv_idx": {
+          "name": "calls_conv_idx",
           "columns": [
             {
-              "expression": "user_id",
+              "expression": "conversation_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             },
             {
-              "expression": "expires_at",
+              "expression": "started_at",
               "isExpression": false,
               "asc": false,
               "nulls": "last"
@@ -984,13 +1062,52 @@
           "method": "btree",
           "with": {}
         },
-        "notes_expiry_idx": {
-          "name": "notes_expiry_idx",
+        "calls_caller_idx": {
+          "name": "calls_caller_idx",
           "columns": [
             {
-              "expression": "expires_at",
+              "expression": "caller_id",
               "isExpression": false,
               "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "calls_callee_idx": {
+          "name": "calls_callee_idx",
+          "columns": [
+            {
+              "expression": "callee_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": false,
               "nulls": "last"
             }
           ],
@@ -1001,17 +1118,31 @@
         }
       },
       "foreignKeys": {
-        "notes_user_id_users_id_fk": {
-          "name": "notes_user_id_users_id_fk",
-          "tableFrom": "notes",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+        "calls_conversation_id_conversations_id_fk": {
+          "name": "calls_conversation_id_conversations_id_fk",
+          "tableFrom": "calls",
+          "tableTo": "conversations",
+          "columnsFrom": ["conversation_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "calls_caller_id_users_id_fk": {
+          "name": "calls_caller_id_users_id_fk",
+          "tableFrom": "calls",
+          "tableTo": "users",
+          "columnsFrom": ["caller_id"],
+          "columnsTo": ["id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "calls_callee_id_users_id_fk": {
+          "name": "calls_callee_id_users_id_fk",
+          "tableFrom": "calls",
+          "tableTo": "users",
+          "columnsFrom": ["callee_id"],
+          "columnsTo": ["id"],
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -1019,9 +1150,9 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "notes_content_len_chk": {
-          "name": "notes_content_len_chk",
-          "value": "char_length(\"notes\".\"content\") BETWEEN 1 AND 200"
+        "calls_no_self_chk": {
+          "name": "calls_no_self_chk",
+          "value": "\"calls\".\"caller_id\" <> \"calls\".\"callee_id\""
         }
       },
       "isRLSEnabled": false
@@ -1154,12 +1285,8 @@
           "name": "stories_user_id_users_id_fk",
           "tableFrom": "stories",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1174,7 +1301,7 @@
         },
         "stories_expiry_chk": {
           "name": "stories_expiry_chk",
-          "value": "\"stories\".\"expires_at\" = \"stories\".\"created_at\" + INTERVAL '24 hours'"
+          "value": "\"stories\".\"expires_at\" > \"stories\".\"created_at\" AND \"stories\".\"expires_at\" <= \"stories\".\"created_at\" + INTERVAL '25 hours'"
         }
       },
       "isRLSEnabled": false
@@ -1204,11 +1331,11 @@
         }
       },
       "indexes": {
-        "story_views_story_idx": {
-          "name": "story_views_story_idx",
+        "story_views_viewer_idx": {
+          "name": "story_views_viewer_idx",
           "columns": [
             {
-              "expression": "story_id",
+              "expression": "user_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1225,12 +1352,8 @@
           "name": "story_views_story_id_stories_id_fk",
           "tableFrom": "story_views",
           "tableTo": "stories",
-          "columnsFrom": [
-            "story_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["story_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1238,12 +1361,8 @@
           "name": "story_views_user_id_users_id_fk",
           "tableFrom": "story_views",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1251,10 +1370,7 @@
       "compositePrimaryKeys": {
         "story_views_story_id_user_id_pk": {
           "name": "story_views_story_id_user_id_pk",
-          "columns": [
-            "story_id",
-            "user_id"
-          ]
+          "columns": ["story_id", "user_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1262,8 +1378,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.users": {
-      "name": "users",
+    "public.notes": {
+      "name": "notes",
       "schema": "",
       "columns": {
         "id": {
@@ -1272,76 +1388,21 @@
           "primaryKey": true,
           "notNull": true
         },
-        "email": {
-          "name": "email",
-          "type": "citext",
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "password_hash": {
-          "name": "password_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "google_id": {
-          "name": "google_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "username": {
-          "name": "username",
+        "content": {
+          "name": "content",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "full_name": {
-          "name": "full_name",
+        "background": {
+          "name": "background",
           "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "avatar_url": {
-          "name": "avatar_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "bio": {
-          "name": "bio",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "phone": {
-          "name": "phone",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "email_verified_at": {
-          "name": "email_verified_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_seen_at": {
-          "name": "last_seen_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "is_active": {
-          "name": "is_active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "deleted_at": {
-          "name": "deleted_at",
-          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -1352,52 +1413,27 @@
           "notNull": true,
           "default": "now()"
         },
-        "updated_at": {
-          "name": "updated_at",
+        "expires_at": {
+          "name": "expires_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
+          "notNull": true
         }
       },
       "indexes": {
-        "users_email_uq": {
-          "name": "users_email_uq",
+        "notes_user_idx": {
+          "name": "notes_user_idx",
           "columns": [
             {
-              "expression": "email",
+              "expression": "user_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "users_username_uq": {
-          "name": "users_username_uq",
-          "columns": [
+            },
             {
-              "expression": "username",
+              "expression": "expires_at",
               "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "users_last_seen": {
-          "name": "users_last_seen",
-          "columns": [
-            {
-              "expression": "last_seen_at",
-              "isExpression": false,
-              "asc": true,
+              "asc": false,
               "nulls": "last"
             }
           ],
@@ -1406,73 +1442,75 @@
           "method": "btree",
           "with": {}
         },
-        "users_active_idx": {
-          "name": "users_active_idx",
+        "notes_expiry_idx": {
+          "name": "notes_expiry_idx",
           "columns": [
             {
-              "expression": "id",
+              "expression": "expires_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "where": "\"users\".\"deleted_at\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "notes_user_id_users_id_fk": {
+          "name": "notes_user_id_users_id_fk",
+          "tableFrom": "notes",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "users_google_id_unique": {
-          "name": "users_google_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "google_id"
-          ]
-        },
-        "users_phone_unique": {
-          "name": "users_phone_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "phone"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "users_username_format_chk": {
-          "name": "users_username_format_chk",
-          "value": "\"users\".\"username\" ~ '^[a-z0-9_]{3,30}$'"
-        },
-        "users_full_name_chk": {
-          "name": "users_full_name_chk",
-          "value": "char_length(btrim(\"users\".\"full_name\")) BETWEEN 2 AND 100"
+        "notes_content_len_chk": {
+          "name": "notes_content_len_chk",
+          "value": "char_length(\"notes\".\"content\") BETWEEN 1 AND 200"
         }
       },
       "isRLSEnabled": false
     }
   },
   "enums": {
+    "public.friendship_status": {
+      "name": "friendship_status",
+      "schema": "public",
+      "values": ["PENDING", "ACCEPTED", "BLOCKED"]
+    },
+    "public.conversation_kind": {
+      "name": "conversation_kind",
+      "schema": "public",
+      "values": ["DIRECT", "GROUP"]
+    },
+    "public.participant_role": {
+      "name": "participant_role",
+      "schema": "public",
+      "values": ["MEMBER", "ADMIN", "OWNER"]
+    },
     "public.attachment_kind": {
       "name": "attachment_kind",
       "schema": "public",
-      "values": [
-        "IMAGE",
-        "VIDEO",
-        "AUDIO",
-        "FILE"
-      ]
+      "values": ["IMAGE", "VIDEO", "AUDIO", "FILE"]
+    },
+    "public.message_kind": {
+      "name": "message_kind",
+      "schema": "public",
+      "values": ["TEXT", "IMAGE", "VIDEO", "AUDIO", "FILE", "SYSTEM"]
     },
     "public.call_media": {
       "name": "call_media",
       "schema": "public",
-      "values": [
-        "VOICE",
-        "VIDEO"
-      ]
+      "values": ["VOICE", "VIDEO"]
     },
     "public.call_status": {
       "name": "call_status",
@@ -1488,52 +1526,10 @@
         "FAILED"
       ]
     },
-    "public.conversation_kind": {
-      "name": "conversation_kind",
-      "schema": "public",
-      "values": [
-        "DIRECT",
-        "GROUP"
-      ]
-    },
-    "public.friendship_status": {
-      "name": "friendship_status",
-      "schema": "public",
-      "values": [
-        "PENDING",
-        "ACCEPTED",
-        "BLOCKED"
-      ]
-    },
-    "public.message_kind": {
-      "name": "message_kind",
-      "schema": "public",
-      "values": [
-        "TEXT",
-        "IMAGE",
-        "VIDEO",
-        "AUDIO",
-        "FILE",
-        "SYSTEM"
-      ]
-    },
-    "public.participant_role": {
-      "name": "participant_role",
-      "schema": "public",
-      "values": [
-        "MEMBER",
-        "ADMIN",
-        "OWNER"
-      ]
-    },
     "public.story_kind": {
       "name": "story_kind",
       "schema": "public",
-      "values": [
-        "IMAGE",
-        "VIDEO",
-        "TEXT"
-      ]
+      "values": ["IMAGE", "VIDEO", "TEXT"]
     }
   },
   "schemas": {},

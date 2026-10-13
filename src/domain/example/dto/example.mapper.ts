@@ -1,5 +1,5 @@
-import type { ExampleEntity } from './example.entity.js';
-import type { ExampleResponse } from './example.response.js';
+import { ExampleEntity } from "../example.repository.js";
+import { ExampleResponse } from "./example.response.js";
 
 export function toExampleResponse(entity: ExampleEntity): ExampleResponse {
   return {
@@ -7,4 +7,3 @@ export function toExampleResponse(entity: ExampleEntity): ExampleResponse {
     name: entity.name,
   };
 }
-

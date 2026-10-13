@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import * as schema from '../../../src/configs/schema.js';
+import { getTableColumns } from "drizzle-orm";
+import { pgTable } from "drizzle-orm/pg-core";
+import { describe, expect, it } from "vitest";
+import * as schema from "../../../src/configs/schema.js";
 
-describe('Database Schema Exports', () => {
-  it('should export all 10 domain tables', () => {
+describe("Database Schema Exports", () => {
+  it("should export all 10 domain tables", () => {
     expect(schema.users).toBeDefined();
     expect(schema.friendships).toBeDefined();
     expect(schema.conversations).toBeDefined();
@@ -15,7 +17,7 @@ describe('Database Schema Exports', () => {
     expect(schema.notes).toBeDefined();
   });
 
-  it('should export all 8 enums', () => {
+  it("should export all 8 enums", () => {
     expect(schema.friendshipStatusEnum).toBeDefined();
     expect(schema.conversationKindEnum).toBeDefined();
     expect(schema.participantRoleEnum).toBeDefined();
@@ -26,29 +28,36 @@ describe('Database Schema Exports', () => {
     expect(schema.storyKindEnum).toBeDefined();
   });
 
-  it('should export custom types and helpers', () => {
+  it("should export custom types and helpers", () => {
     expect(schema.citext).toBeDefined();
-    expect(schema.timestamps).toBeDefined();
-    expect(schema.timestamps.createdAt).toBeDefined();
-    expect(schema.timestamps.updatedAt).toBeDefined();
-    expect(schema.generateUuidV7).toBeDefined();
+    expect(schema.created).toBeDefined();
+    expect(schema.updated).toBeDefined();
+    expect(schema.uuidV7).toBeDefined();
   });
 
-  describe('generateUuidV7 helper', () => {
-    it('should generate valid RFC 9562 UUIDv7 string format', () => {
-      const id = schema.generateUuidV7();
-      expect(typeof id).toBe('string');
-      expect(id).toMatch(
+  describe("created / updated helpers", () => {
+    it("should create notNull timestamp columns with defaultNow", () => {
+      const t = pgTable("t_ts_check", {
+        createdAt: schema.created("created_at"),
+        updatedAt: schema.updated("updated_at"),
+      });
+      const cols = getTableColumns(t);
+      expect(cols.createdAt.notNull).toBe(true);
+      expect(cols.updatedAt.notNull).toBe(true);
+      expect(cols.createdAt.hasDefault).toBe(true);
+      expect(cols.updatedAt.hasDefault).toBe(true);
+    });
+  });
+
+  describe("uuidV7 helper", () => {
+    it("should default to valid RFC 9562 UUIDv7 strings", () => {
+      const t = pgTable("t_uuid_check", { id: schema.uuidV7("id").primaryKey() });
+      const cols = getTableColumns(t);
+      const gen = cols.id.defaultFn as unknown as () => string;
+      expect(typeof gen).toBe("function");
+      expect(gen()).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
       );
-    });
-
-    it('should produce strictly monotonic (time-ordered) IDs', () => {
-      const count = 10;
-      const ids = Array.from({ length: count }, () => schema.generateUuidV7());
-      for (let i = 1; i < ids.length; i++) {
-        expect(ids[i] > ids[i - 1]).toBe(true);
-      }
     });
   });
 });

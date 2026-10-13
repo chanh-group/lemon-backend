@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm';
+import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   bigint,
@@ -11,92 +11,84 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
-} from 'drizzle-orm/pg-core';
-import { conversations } from '../conversation/conversation.schema.js';
-import { users } from '../user/user.schema.js';
+} from "drizzle-orm/pg-core";
+import { created, uuidV7 } from "../../utils/database.js";
+import { conversations } from "../conversation/conversation.schema.js";
+import { users } from "../user/user.schema.js";
 
-export const messageKindEnum = pgEnum('message_kind', [
-  'TEXT',
-  'IMAGE',
-  'VIDEO',
-  'AUDIO',
-  'FILE',
-  'SYSTEM',
+export const messageKindEnum = pgEnum("message_kind", [
+  "TEXT",
+  "IMAGE",
+  "VIDEO",
+  "AUDIO",
+  "FILE",
+  "SYSTEM",
 ]);
 
-export const attachmentKindEnum = pgEnum('attachment_kind', [
-  'IMAGE',
-  'VIDEO',
-  'AUDIO',
-  'FILE',
-]);
+export const attachmentKindEnum = pgEnum("attachment_kind", ["IMAGE", "VIDEO", "AUDIO", "FILE"]);
 
 export const messages = pgTable(
-  'messages',
+  "messages",
   {
-    id: uuid('id').primaryKey(),
-    conversationId: uuid('conversation_id')
+    id: uuidV7("id").primaryKey(),
+    conversationId: uuid("conversation_id")
       .notNull()
-      .references(() => conversations.id, { onDelete: 'cascade' }),
-    senderId: uuid('sender_id')
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    senderId: uuid("sender_id")
       .notNull()
-      .references(() => users.id),
-    kind: messageKindEnum('kind').notNull().default('TEXT'),
-    body: text('body'),
-    replyToId: uuid('reply_to_id').references((): AnyPgColumn => messages.id),
-    clientMsgId: text('client_msg_id'),
-    editedAt: timestamp('edited_at', { withTimezone: true, mode: 'date' }),
-    deletedAt: timestamp('deleted_at', { withTimezone: true, mode: 'date' }),
-    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
-      .defaultNow()
-      .notNull(),
+      .references(() => users.id, { onDelete: "restrict" }),
+    kind: messageKindEnum("kind").notNull().default("TEXT"),
+    body: text("body"),
+    replyToId: uuid("reply_to_id").references((): AnyPgColumn => messages.id, {
+      onDelete: "set null",
+    }),
+    clientMsgId: text("client_msg_id"),
+    editedAt: timestamp("edited_at", { withTimezone: true, mode: "date" }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
+    createdAt: created("created_at"),
   },
   (table) => [
     check(
-      'messages_content_chk',
+      "messages_content_chk",
       sql`${table.body} IS NOT NULL OR ${table.kind} IN ('IMAGE', 'VIDEO', 'AUDIO', 'FILE')`,
     ),
     check(
-      'messages_body_len_chk',
+      "messages_body_len_chk",
       sql`${table.body} IS NULL OR char_length(${table.body}) <= 4000`,
     ),
-    uniqueIndex('messages_client_msg_uq')
+    uniqueIndex("messages_client_msg_uq")
       .on(table.conversationId, table.senderId, table.clientMsgId)
       .where(sql`${table.clientMsgId} IS NOT NULL`),
-    index('messages_timeline_idx')
+    index("messages_timeline_idx")
       .on(table.conversationId, table.id.desc())
       .where(sql`${table.deletedAt} IS NULL`),
-    index('messages_reply_idx').on(table.replyToId),
+    index("messages_sender_idx").on(table.senderId, table.id.desc()),
+    index("messages_reply_idx").on(table.replyToId),
   ],
 );
 
 export const messageAttachments = pgTable(
-  'message_attachments',
+  "message_attachments",
   {
-    id: uuid('id').primaryKey(),
-    messageId: uuid('message_id')
+    id: uuidV7("id").primaryKey(),
+    messageId: uuid("message_id")
       .notNull()
-      .references(() => messages.id, { onDelete: 'cascade' }),
-    kind: attachmentKindEnum('kind').notNull(),
-    bucket: text('bucket').notNull(),
-    objectKey: text('object_key').notNull(),
-    mimeType: text('mime_type').notNull(),
-    sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
-    width: integer('width'),
-    height: integer('height'),
-    durationMs: integer('duration_ms'),
-    checksum: text('checksum'),
-    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' })
-      .defaultNow()
-      .notNull(),
+      .references(() => messages.id, { onDelete: "cascade" }),
+    kind: attachmentKindEnum("kind").notNull(),
+    bucket: text("bucket").notNull(),
+    objectKey: text("object_key").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    width: integer("width"),
+    height: integer("height"),
+    durationMs: integer("duration_ms"),
+    checksum: text("checksum"),
+    createdAt: created("created_at"),
   },
-  (table) => [
-    index('message_attachments_msg_idx').on(table.messageId),
-  ],
+  (table) => [index("message_attachments_msg_idx").on(table.messageId)],
 );
 
 export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
 export type MessageAttachment = typeof messageAttachments.$inferSelect;
 export type NewMessageAttachment = typeof messageAttachments.$inferInsert;
-

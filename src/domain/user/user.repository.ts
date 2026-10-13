@@ -1,8 +1,7 @@
-import type { UserEntity } from './user.entity.js';
+import { User } from "./user.schema.js";
 
 export interface UserRepository {
-  findById(id: string): Promise<UserEntity | null>;
-  findByEmail(email: string): Promise<UserEntity | null>;
-  findByUsername(username: string): Promise<UserEntity | null>;
+  findById(id: string): Promise<User | null>;
+  findByEmail(email: string): Promise<User | null>;
+  findByUsername(username: string): Promise<User | null>;
 }
-
