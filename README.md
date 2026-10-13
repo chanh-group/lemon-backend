@@ -124,7 +124,7 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 Dự án sử dụng NestJS `Logger` chuẩn (`@nestjs/common`) với cấu hình tập trung tại `src/utils/logger.ts`. Mọi service khởi tạo logger độc lập theo tên class:
 
 ```typescript
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from "@nestjs/common";
 
 @Injectable()
 export class ExampleService {
@@ -132,12 +132,13 @@ export class ExampleService {
 
   someMethod() {
     // Thứ tự tham số chuẩn Nest: message trước, metadata/object sau (ngược với Pino)
-    this.logger.log('User signed up successfully', { userId: '123' });
+    this.logger.log("User signed up successfully", { userId: "123" });
   }
 }
 ```
 
 ### Quy ước log level:
+
 - `log`: Business event thành công (ví dụ: `User signed up`, `Conversation created`).
 - `warn`: Attempt thất bại nhưng nằm trong dự tính nghiệp vụ (ví dụ: `Invalid invite code`, `Password mismatch`).
 - `error`: Exception / lỗi hệ thống không mong muốn (kèm `{ err }`).
@@ -146,14 +147,22 @@ export class ExampleService {
 - `fatal`: Lỗi làm process không thể tiếp tục.
 
 ### Định dạng output:
+
 - **Development** (`NODE_ENV` khác `production`): human-readable, có màu, timestamp ISO 8601.
 - **Production** (`NODE_ENV=production`): 1 dòng JSON mỗi log, timestamp ISO 8601, tắt `debug`/`verbose`.
 
 ```json
-{"level":"log","pid":123,"timestamp":"2026-10-13T03:00:00.000Z","message":"User signed up successfully","params":{"userId":"123"}}
+{
+  "level": "log",
+  "pid": 123,
+  "timestamp": "2026-10-13T03:00:00.000Z",
+  "message": "User signed up successfully",
+  "params": { "userId": "123" }
+}
 ```
 
 ### Định dạng & Quy tắc:
+
 1. **Message**: Dùng string literal ổn định, ngắn gọn để dễ grep log (không nối chuỗi động vào message).
 2. **Metadata**: Dùng plain object truyền ở tham số thứ 2.
 3. **Thứ tự tham số**: `logger.log(message, context/meta)` — **Message trước, Object sau** (chú ý ngược với `(obj, msg)` của Pino).
