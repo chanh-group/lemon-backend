@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import * as schema from '../../../src/infra/database/schema.js';
+import * as schema from '../../../src/configs/schema.js';
 
 describe('Database Schema Exports', () => {
   it('should export all 10 domain tables', () => {
@@ -26,17 +26,29 @@ describe('Database Schema Exports', () => {
     expect(schema.storyKindEnum).toBeDefined();
   });
 
-  it('should export all domain relations', () => {
-    expect(schema.usersRelations).toBeDefined();
-    expect(schema.friendshipsRelations).toBeDefined();
-    expect(schema.conversationsRelations).toBeDefined();
-    expect(schema.conversationParticipantsRelations).toBeDefined();
-    expect(schema.messagesRelations).toBeDefined();
-    expect(schema.messageAttachmentsRelations).toBeDefined();
-    expect(schema.callsRelations).toBeDefined();
-    expect(schema.storiesRelations).toBeDefined();
-    expect(schema.storyViewsRelations).toBeDefined();
-    expect(schema.notesRelations).toBeDefined();
+  it('should export custom types and helpers', () => {
+    expect(schema.citext).toBeDefined();
+    expect(schema.timestamps).toBeDefined();
+    expect(schema.timestamps.createdAt).toBeDefined();
+    expect(schema.timestamps.updatedAt).toBeDefined();
+    expect(schema.generateUuidV7).toBeDefined();
+  });
+
+  describe('generateUuidV7 helper', () => {
+    it('should generate valid RFC 9562 UUIDv7 string format', () => {
+      const id = schema.generateUuidV7();
+      expect(typeof id).toBe('string');
+      expect(id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      );
+    });
+
+    it('should produce strictly monotonic (time-ordered) IDs', () => {
+      const count = 10;
+      const ids = Array.from({ length: count }, () => schema.generateUuidV7());
+      for (let i = 1; i < ids.length; i++) {
+        expect(ids[i] > ids[i - 1]).toBe(true);
+      }
+    });
   });
 });
-

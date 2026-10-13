@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { boolean, check, index, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
-import { citext, timestamps } from '../../infra/database/custom-types.js';
+import { citext, timestamps } from '../../utils/database.js';
 
 export const users = pgTable(
   'users',

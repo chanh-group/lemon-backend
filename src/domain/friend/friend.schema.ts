@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { check, index, pgEnum, pgTable, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
-import { timestamps } from '../../infra/database/custom-types.js';
+import { timestamps } from '../../utils/database.js';
 import { users } from '../user/user.schema.js';
 
 export const friendshipStatusEnum = pgEnum('friendship_status', [
