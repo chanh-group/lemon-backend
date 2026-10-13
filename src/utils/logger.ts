@@ -1,5 +1,8 @@
-import { ConsoleLogger, ConsoleLoggerOptions, LogLevel } from "@nestjs/common";
+import { ConsoleLogger, ConsoleLoggerOptions, Logger, LogLevel } from "@nestjs/common";
 import { get_env } from "../helpers/index.js";
+
+export { Logger };
+
 
 type JsonLogOptions = {
   context: string;
