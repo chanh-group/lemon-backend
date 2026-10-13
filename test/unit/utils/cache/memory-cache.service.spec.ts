@@ -92,7 +92,12 @@ describe("MemoryCacheService", () => {
     await c.setRaw("refreshToken:j2", "u", 100);
     await c.setRaw("sessions:u", JSON.stringify(["j1", "j2"]), 100);
     vi.advanceTimersByTime(10_000);
-    await c.revokeRefreshSession({ key: "refreshToken:j1", sessionKey: "sessions:u", jti: "j1", ttlSecs: 100 });
+    await c.revokeRefreshSession({
+      key: "refreshToken:j1",
+      sessionKey: "sessions:u",
+      jti: "j1",
+      ttlSecs: 100,
+    });
     expect(await c.getRaw("refreshToken:j1")).toBeNull();
     expect(await c.get("sessions:u")).toEqual(["j2"]);
     // Original TTL kept (not extended): 95s later the list is gone.
@@ -104,7 +109,12 @@ describe("MemoryCacheService", () => {
     const c = new MemoryCacheService();
     await c.setRaw("refreshToken:j1", "u", 100);
     await c.setRaw("sessions:u", JSON.stringify(["j1"]), 100);
-    await c.revokeRefreshSession({ key: "refreshToken:j1", sessionKey: "sessions:u", jti: "j1", ttlSecs: 100 });
+    await c.revokeRefreshSession({
+      key: "refreshToken:j1",
+      sessionKey: "sessions:u",
+      jti: "j1",
+      ttlSecs: 100,
+    });
     expect(await c.getRaw("sessions:u")).toBeNull();
   });
 
