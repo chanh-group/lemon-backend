@@ -14,6 +14,7 @@ export const SESSION_KEY_PREFIX = "sessions:";
 export const USER_CACHE_KEY_PREFIX = "user:";
 export const OTP_KEY_PREFIX = "otp:";
 export const FORGOT_OTP_KEY_PREFIX = "forgot_otp:";
+export const STORY_FEED_KEY_PREFIX = "stories:feed:";
 
 // ioredis client tuning (mirrors Rust ConnectionManager timeouts).
 export const REDIS_COMMAND_TIMEOUT_MS = 2000;
