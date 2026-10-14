@@ -5,6 +5,7 @@ import {
   sessionListKey,
   signupOtpKey,
   storyFeedKey,
+  noteFeedKey,
 } from "../../../../src/utils/cache/keys.js";
 
 describe("cache.keys", () => {
@@ -18,8 +19,9 @@ describe("cache.keys", () => {
     expect(resetOtpKey("B@X.com")).toBe("forgot_otp:b@x.com");
   });
 
-  it("builds story feed keys", () => {
+  it("builds story and note feed keys", () => {
     expect(storyFeedKey("user-123")).toBe("stories:feed:user-123");
+    expect(noteFeedKey("user-123")).toBe("notes:feed:user-123");
   });
 });
 
