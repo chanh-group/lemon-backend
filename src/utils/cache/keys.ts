@@ -3,6 +3,7 @@
 // Ported from Rust `dsa/src/utils/cache/keys.rs`.
 import {
   FORGOT_OTP_KEY_PREFIX,
+  NOTE_FEED_KEY_PREFIX,
   OTP_KEY_PREFIX,
   REFRESH_TOKEN_KEY_PREFIX,
   SESSION_KEY_PREFIX,
@@ -32,5 +33,9 @@ export function resetOtpKey(email: string): string {
 
 export function storyFeedKey(userId: string): string {
   return `${STORY_FEED_KEY_PREFIX}${userId}`;
+}
+
+export function noteFeedKey(userId: string): string {
+  return `${NOTE_FEED_KEY_PREFIX}${userId}`;
 }
 
