@@ -187,13 +187,12 @@ describe("StoryController", () => {
       expect(userId).toBe("user-from-auth-guard");
     });
 
-    it("extracts userId from request.headers['x-user-id'] when user object is missing", () => {
+    it("throws UnauthorizedException when request.user is missing (headers are never trusted)", () => {
       const ctx = createMockContext({
-        headers: { "x-user-id": "user-from-header" },
+        headers: { "x-user-id": "spoofed-user" },
       });
 
-      const userId = extractUserIdFromContext(ctx);
-      expect(userId).toBe("user-from-header");
+      expect(() => extractUserIdFromContext(ctx)).toThrow(UnauthorizedException);
     });
 
     it("throws UnauthorizedException when neither user.id nor header is present", () => {

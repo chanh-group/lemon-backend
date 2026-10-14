@@ -6,16 +6,18 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
+import {
+  STORY_DEFAULT_BUCKET,
+  STORY_FEED_TTL_SECS,
+  STORY_TTL_MS,
+} from "../../utils/cache/constants.js";
 import { CACHE_STORE, type CacheStoreExt } from "../../utils/cache/store.js";
 import { storyFeedKey } from "../../utils/cache/keys.js";
-import { groupStoriesByUser, toStoryItemResponse } from "./dto/mapper.js";
+import { groupStoriesByUser, reviveUserStoryFeed, toStoryItemResponse } from "./dto/mapper.js";
 import type { CreateStoryDto } from "./dto/request.js";
 import type { StoryItemResponse, StoryViewerResponse, UserStoryFeedResponse } from "./dto/response.js";
 import { STORY_REPOSITORY, type StoryRepository } from "./repository.js";
 import type { NewStory } from "./schema.js";
-
-const STORY_FEED_TTL_SECS = 60;
-const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class StoryService {
@@ -28,7 +30,7 @@ export class StoryService {
 
   async createStory(userId: string, dto: CreateStoryDto): Promise<StoryItemResponse> {
     if (dto.kind === "TEXT") {
-      if (!dto.caption && !dto.background) {
+      if (!dto.caption?.trim() && !dto.background) {
         throw new BadRequestException("TEXT story requires either caption or background");
       }
     } else if (dto.kind === "IMAGE" || dto.kind === "VIDEO") {
@@ -40,12 +42,12 @@ export class StoryService {
     }
 
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + TWENTY_FOUR_HOURS_MS);
+    const expiresAt = new Date(now.getTime() + STORY_TTL_MS);
 
     const newStoryData: NewStory = {
       userId,
       kind: dto.kind,
-      bucket: dto.bucket ?? "lemon-stories",
+      bucket: dto.bucket ?? STORY_DEFAULT_BUCKET,
       objectKey: dto.objectKey ?? null,
       mimeType: dto.mimeType ?? null,
       width: dto.width ?? null,
@@ -59,10 +61,10 @@ export class StoryService {
 
     const created = await this.storyRepo.create(newStoryData);
 
-    // Invalidate feed cache for owner and all accepted friends in parallel
+    // Invalidate feed cache for owner and all accepted friends in 1 round trip
     const friendIds = await this.storyRepo.getFriendUserIds(userId);
     const keysToInvalidate = [userId, ...friendIds].map(storyFeedKey);
-    await Promise.all(keysToInvalidate.map((key) => this.cache.deleteBestEffort(key)));
+    await this.cache.deleteManyBestEffort(keysToInvalidate);
 
     this.logger.log("Story created successfully", { storyId: created.id, userId, kind: dto.kind });
 
@@ -73,7 +75,7 @@ export class StoryService {
     const cacheKey = storyFeedKey(userId);
     const cached = await this.cache.getBestEffort<UserStoryFeedResponse[]>(cacheKey);
     if (cached) {
-      return cached;
+      return reviveUserStoryFeed(cached);
     }
 
     const friendIds = await this.storyRepo.getFriendUserIds(userId);
@@ -118,11 +120,15 @@ export class StoryService {
       throw new NotFoundException("STORY_NOT_FOUND: Story does not exist or has expired");
     }
 
-    if (story.userId !== userId) {
-      const friendIds = await this.storyRepo.getFriendUserIds(story.userId);
-      if (!friendIds.includes(userId)) {
-        throw new ForbiddenException("FORBIDDEN: You cannot view stories from non-friends");
-      }
+    if (story.userId === userId) {
+      // Self-views are a no-op: the owner already knows the content and must
+      // not appear in their own viewers list.
+      return;
+    }
+
+    const friendIds = await this.storyRepo.getFriendUserIds(story.userId);
+    if (!friendIds.includes(userId)) {
+      throw new ForbiddenException("FORBIDDEN: You cannot view stories from non-friends");
     }
 
     await this.storyRepo.markAsViewed(storyId, userId);
@@ -156,7 +162,7 @@ export class StoryService {
 
     const friendIds = await this.storyRepo.getFriendUserIds(userId);
     const keysToInvalidate = [userId, ...friendIds].map(storyFeedKey);
-    await Promise.all(keysToInvalidate.map((key) => this.cache.deleteBestEffort(key)));
+    await this.cache.deleteManyBestEffort(keysToInvalidate);
 
     this.logger.log("Story deleted", { storyId, userId });
   }

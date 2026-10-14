@@ -27,6 +27,7 @@ describe("StoryService", () => {
   let getBestEffortMock: Mock<(key: string) => Promise<unknown>>;
   let setBestEffortMock: Mock<(key: string, value: unknown, ttlSeconds?: number) => Promise<void>>;
   let deleteBestEffortMock: Mock<(key: string) => Promise<void>>;
+  let deleteManyBestEffortMock: Mock<(keys: string[]) => Promise<void>>;
 
   const mockStory: Story = {
     id: "0193a2b1-0000-7000-8000-000000000001",
@@ -103,6 +104,7 @@ describe("StoryService", () => {
       .fn<(key: string, value: unknown, ttlSeconds?: number) => Promise<void>>()
       .mockResolvedValue(undefined);
     deleteBestEffortMock = vi.fn<(key: string) => Promise<void>>().mockResolvedValue(undefined);
+    deleteManyBestEffortMock = vi.fn<(keys: string[]) => Promise<void>>().mockResolvedValue(undefined);
 
     const mockRepo: StoryRepository = {
       create: createStoryMock,
@@ -121,6 +123,7 @@ describe("StoryService", () => {
       getBestEffort: getBestEffortMock,
       setBestEffort: setBestEffortMock,
       deleteBestEffort: deleteBestEffortMock,
+      deleteManyBestEffort: deleteManyBestEffortMock,
     } as unknown as CacheStoreExt;
 
     service = new StoryService(mockRepo, mockCache);
@@ -137,7 +140,11 @@ describe("StoryService", () => {
       expect(result.id).toBe("story-id-new");
       expect(result.kind).toBe("IMAGE");
       expect(createStoryMock).toHaveBeenCalledTimes(1);
-      expect(deleteBestEffortMock).toHaveBeenCalled();
+      expect(deleteManyBestEffortMock).toHaveBeenCalledWith([
+        "stories:feed:user-owner-1",
+        "stories:feed:friend-1",
+        "stories:feed:friend-2",
+      ]);
     });
 
     it("creates a TEXT story with caption and background", async () => {
@@ -168,6 +175,15 @@ describe("StoryService", () => {
         }),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it("throws BadRequestException if TEXT caption is whitespace-only", async () => {
+      await expect(
+        service.createStory("user-owner-1", {
+          kind: "TEXT",
+          caption: "   ",
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
   });
 
   describe("getFeed", () => {
@@ -180,6 +196,39 @@ describe("StoryService", () => {
       const result = await service.getFeed("user-viewer-1");
       expect(result).toEqual(cachedFeed);
       expect(findActiveByUserIdsMock).not.toHaveBeenCalled();
+    });
+
+    it("revives Date objects from a JSON round-tripped cached feed", async () => {
+      const feed: UserStoryFeedResponse[] = [
+        {
+          user: { id: "u1", username: "u1", fullName: "U1", avatarUrl: null },
+          stories: [
+            {
+              id: "s1",
+              userId: "u1",
+              kind: "IMAGE",
+              bucket: "lemon-stories",
+              objectKey: "stories/u1/a.jpg",
+              mimeType: "image/jpeg",
+              width: 1080,
+              height: 1920,
+              durationMs: null,
+              caption: null,
+              background: null,
+              createdAt: new Date("2026-10-14T00:00:00Z"),
+              expiresAt: new Date("2026-10-15T00:00:00Z"),
+            },
+          ],
+        },
+      ];
+      getBestEffortMock.mockResolvedValueOnce(JSON.parse(JSON.stringify(feed)));
+
+      const result = await service.getFeed("user-viewer-1");
+      expect(result[0].stories[0].createdAt).toBeInstanceOf(Date);
+      expect(result[0].stories[0].expiresAt).toBeInstanceOf(Date);
+      expect(result[0].stories[0].createdAt.getTime()).toBe(
+        new Date("2026-10-14T00:00:00Z").getTime(),
+      );
     });
 
     it("queries repository, groups by user, and sets cache on cache miss", async () => {
@@ -234,6 +283,12 @@ describe("StoryService", () => {
       await expect(service.viewStory("stranger-user", mockStory.id)).rejects.toThrow(ForbiddenException);
     });
 
+    it("ignores self-views without polluting the viewers list", async () => {
+      await service.viewStory("user-owner-1", mockStory.id);
+
+      expect(markAsViewedMock).not.toHaveBeenCalled();
+    });
+
     it("throws NotFoundException if story not found", async () => {
       findActiveByIdMock.mockResolvedValueOnce(null);
       await expect(service.viewStory("friend-1", "bad-id")).rejects.toThrow(NotFoundException);
@@ -261,7 +316,11 @@ describe("StoryService", () => {
     it("deletes story if caller is owner and invalidates cache", async () => {
       await service.deleteStory("user-owner-1", mockStory.id);
       expect(deleteMock).toHaveBeenCalledWith(mockStory.id);
-      expect(deleteBestEffortMock).toHaveBeenCalled();
+      expect(deleteManyBestEffortMock).toHaveBeenCalledWith([
+        "stories:feed:user-owner-1",
+        "stories:feed:friend-1",
+        "stories:feed:friend-2",
+      ]);
     });
 
     it("throws ForbiddenException if caller is not the owner", async () => {

@@ -20,6 +20,22 @@ export function toStoryItemResponse(story: Story, hasViewed?: boolean): StoryIte
   };
 }
 
+/**
+ * Revive `Date` fields after a JSON cache round-trip (JSON has no Date type —
+ * `createdAt`/`expiresAt` come back as ISO strings). Safe to call on fresh
+ * (non-cached) feeds too: `new Date(date)` copies.
+ */
+export function reviveUserStoryFeed(feed: UserStoryFeedResponse[]): UserStoryFeedResponse[] {
+  return feed.map((entry) => ({
+    ...entry,
+    stories: entry.stories.map((story) => ({
+      ...story,
+      createdAt: new Date(story.createdAt),
+      expiresAt: new Date(story.expiresAt),
+    })),
+  }));
+}
+
 export function groupStoriesByUser(
   usersMap: Map<string, StoryUserSummary>,
   stories: Story[],
