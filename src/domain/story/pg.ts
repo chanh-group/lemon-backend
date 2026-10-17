@@ -103,7 +103,10 @@ export class StoryPgRepository implements StoryRepository {
   }
 
   async delete(id: string): Promise<boolean> {
-    const result = await this.db.delete(stories).where(eq(stories.id, id)).returning({ id: stories.id });
+    const result = await this.db
+      .delete(stories)
+      .where(eq(stories.id, id))
+      .returning({ id: stories.id });
     return result.length > 0;
   }
 

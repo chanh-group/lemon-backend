@@ -38,4 +38,3 @@ export function storyFeedKey(userId: string): string {
 export function noteFeedKey(userId: string): string {
   return `${NOTE_FEED_KEY_PREFIX}${userId}`;
 }
-

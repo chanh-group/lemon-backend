@@ -4,7 +4,10 @@ import type { CacheStoreExt } from "../../../../src/utils/cache/store.js";
 import type { StoryRepository } from "../../../../src/domain/story/repository.js";
 import { StoryService } from "../../../../src/domain/story/service.js";
 import type { NewStory, Story } from "../../../../src/domain/story/schema.js";
-import type { StoryViewerResponse, UserStoryFeedResponse } from "../../../../src/domain/story/dto/response.js";
+import type {
+  StoryViewerResponse,
+  UserStoryFeedResponse,
+} from "../../../../src/domain/story/dto/response.js";
 
 describe("StoryService", () => {
   let service: StoryService;
@@ -16,7 +19,9 @@ describe("StoryService", () => {
   let findUsersByIdsMock: Mock<
     (
       userIds: string[],
-    ) => Promise<Map<string, { id: string; username: string; fullName: string; avatarUrl: string | null }>>
+    ) => Promise<
+      Map<string, { id: string; username: string; fullName: string; avatarUrl: string | null }>
+    >
   >;
   let findViewersByStoryIdMock: Mock<(storyId: string) => Promise<StoryViewerResponse[]>>;
   let findViewedStoryIdsMock: Mock<(userId: string, storyIds: string[]) => Promise<Set<string>>>;
@@ -56,13 +61,19 @@ describe("StoryService", () => {
         }),
       );
     findByIdMock = vi.fn<(id: string) => Promise<Story | null>>().mockResolvedValue(mockStory);
-    findActiveByIdMock = vi.fn<(id: string) => Promise<Story | null>>().mockResolvedValue(mockStory);
-    findActiveByUserIdsMock = vi.fn<(userIds: string[]) => Promise<Story[]>>().mockResolvedValue([mockStory]);
+    findActiveByIdMock = vi
+      .fn<(id: string) => Promise<Story | null>>()
+      .mockResolvedValue(mockStory);
+    findActiveByUserIdsMock = vi
+      .fn<(userIds: string[]) => Promise<Story[]>>()
+      .mockResolvedValue([mockStory]);
     findUsersByIdsMock = vi
       .fn<
         (
           userIds: string[],
-        ) => Promise<Map<string, { id: string; username: string; fullName: string; avatarUrl: string | null }>>
+        ) => Promise<
+          Map<string, { id: string; username: string; fullName: string; avatarUrl: string | null }>
+        >
       >()
       .mockResolvedValue(
         new Map([
@@ -93,7 +104,9 @@ describe("StoryService", () => {
     findViewedStoryIdsMock = vi
       .fn<(userId: string, storyIds: string[]) => Promise<Set<string>>>()
       .mockResolvedValue(new Set());
-    markAsViewedMock = vi.fn<(storyId: string, viewerId: string) => Promise<void>>().mockResolvedValue(undefined);
+    markAsViewedMock = vi
+      .fn<(storyId: string, viewerId: string) => Promise<void>>()
+      .mockResolvedValue(undefined);
     deleteMock = vi.fn<(id: string) => Promise<boolean>>().mockResolvedValue(true);
     getFriendUserIdsMock = vi
       .fn<(userId: string) => Promise<string[]>>()
@@ -104,7 +117,9 @@ describe("StoryService", () => {
       .fn<(key: string, value: unknown, ttlSeconds?: number) => Promise<void>>()
       .mockResolvedValue(undefined);
     deleteBestEffortMock = vi.fn<(key: string) => Promise<void>>().mockResolvedValue(undefined);
-    deleteManyBestEffortMock = vi.fn<(keys: string[]) => Promise<void>>().mockResolvedValue(undefined);
+    deleteManyBestEffortMock = vi
+      .fn<(keys: string[]) => Promise<void>>()
+      .mockResolvedValue(undefined);
 
     const mockRepo: StoryRepository = {
       create: createStoryMock,
@@ -260,12 +275,16 @@ describe("StoryService", () => {
 
     it("throws ForbiddenException if viewer is not a friend", async () => {
       getFriendUserIdsMock.mockResolvedValueOnce(["friend-other"]);
-      await expect(service.getStoryById("stranger-user", mockStory.id)).rejects.toThrow(ForbiddenException);
+      await expect(service.getStoryById("stranger-user", mockStory.id)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it("throws NotFoundException if story is not found or expired", async () => {
       findActiveByIdMock.mockResolvedValueOnce(null);
-      await expect(service.getStoryById("user-owner-1", "non-existent-id")).rejects.toThrow(NotFoundException);
+      await expect(service.getStoryById("user-owner-1", "non-existent-id")).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -280,7 +299,9 @@ describe("StoryService", () => {
 
     it("throws ForbiddenException if viewer is not a friend", async () => {
       getFriendUserIdsMock.mockResolvedValueOnce(["friend-other"]);
-      await expect(service.viewStory("stranger-user", mockStory.id)).rejects.toThrow(ForbiddenException);
+      await expect(service.viewStory("stranger-user", mockStory.id)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it("ignores self-views without polluting the viewers list", async () => {
@@ -303,12 +324,16 @@ describe("StoryService", () => {
     });
 
     it("throws ForbiddenException if caller is NOT the story owner", async () => {
-      await expect(service.getViewers("not-owner-user", mockStory.id)).rejects.toThrow(ForbiddenException);
+      await expect(service.getViewers("not-owner-user", mockStory.id)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it("throws NotFoundException if story does not exist", async () => {
       findByIdMock.mockResolvedValueOnce(null);
-      await expect(service.getViewers("user-owner-1", "not-found-id")).rejects.toThrow(NotFoundException);
+      await expect(service.getViewers("user-owner-1", "not-found-id")).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -324,12 +349,16 @@ describe("StoryService", () => {
     });
 
     it("throws ForbiddenException if caller is not the owner", async () => {
-      await expect(service.deleteStory("intruder-user", mockStory.id)).rejects.toThrow(ForbiddenException);
+      await expect(service.deleteStory("intruder-user", mockStory.id)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it("throws NotFoundException if story does not exist", async () => {
       findByIdMock.mockResolvedValueOnce(null);
-      await expect(service.deleteStory("user-owner-1", "missing-id")).rejects.toThrow(NotFoundException);
+      await expect(service.deleteStory("user-owner-1", "missing-id")).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { groupStoriesByUser, toStoryItemResponse } from "../../../../src/domain/story/dto/mapper.js";
+import {
+  groupStoriesByUser,
+  toStoryItemResponse,
+} from "../../../../src/domain/story/dto/mapper.js";
 import type { Story } from "../../../../src/domain/story/schema.js";
 import type { StoryUserSummary } from "../../../../src/domain/story/dto/response.js";
 

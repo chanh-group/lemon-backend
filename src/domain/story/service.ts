@@ -15,7 +15,11 @@ import { CACHE_STORE, type CacheStoreExt } from "../../utils/cache/store.js";
 import { storyFeedKey } from "../../utils/cache/keys.js";
 import { groupStoriesByUser, reviveUserStoryFeed, toStoryItemResponse } from "./dto/mapper.js";
 import type { CreateStoryDto } from "./dto/request.js";
-import type { StoryItemResponse, StoryViewerResponse, UserStoryFeedResponse } from "./dto/response.js";
+import type {
+  StoryItemResponse,
+  StoryViewerResponse,
+  UserStoryFeedResponse,
+} from "./dto/response.js";
 import { STORY_REPOSITORY, type StoryRepository } from "./repository.js";
 import type { NewStory } from "./schema.js";
 
@@ -142,7 +146,9 @@ export class StoryService {
     }
 
     if (story.userId !== userId) {
-      throw new ForbiddenException("FORBIDDEN_VIEW_LIST: Only the story owner can view the viewers list");
+      throw new ForbiddenException(
+        "FORBIDDEN_VIEW_LIST: Only the story owner can view the viewers list",
+      );
     }
 
     return this.storyRepo.findViewersByStoryId(storyId);

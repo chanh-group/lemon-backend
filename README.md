@@ -4,14 +4,14 @@ Backend cho app chat LemonChat — NestJS + Drizzle ORM + PostgreSQL + Redis. Co
 
 ## Stack
 
-| Thành phần   | Công nghệ                          |
-| ------------ | ---------------------------------- |
-| Framework    | NestJS 12 + Express                |
-| ORM / DB     | Drizzle ORM + PostgreSQL 16        |
-| Cache        | Redis qua `ioredis`                |
-| Test         | Vitest (unit) + Supertest (e2e)    |
-| Lint / Format| oxlint (type-aware) + oxfmt       |
-| Package mgr  | Bun (`bun.lock`)                   |
+| Thành phần    | Công nghệ                       |
+| ------------- | ------------------------------- |
+| Framework     | NestJS 12 + Express             |
+| ORM / DB      | Drizzle ORM + PostgreSQL 16     |
+| Cache         | Redis qua `ioredis`             |
+| Test          | Vitest (unit) + Supertest (e2e) |
+| Lint / Format | oxlint (type-aware) + oxfmt     |
+| Package mgr   | Bun (`bun.lock`)                |
 
 ## Chạy local
 
@@ -30,31 +30,31 @@ bun run start:dev
 
 App mặc định nghe ở `http://localhost:3000` (đổi qua `PORT`).
 
-| Lệnh               | Để làm gì                              |
-| ------------------ | -------------------------------------- |
-| `bun run start:dev`| Chạy dev, tự reload                    |
-| `bun run build` + `bun run start:prod` | Build rồi chạy production |
-| `bun run typecheck`| `tsc --noEmit` — phải xanh             |
-| `bun run lint`     | oxlint type-aware — phải sạch          |
-| `bun run fmt`      | Format toàn repo (oxfmt)               |
-| `bun run test`     | Unit tests (`test/unit/**`)            |
-| `bun run test:e2e` | E2E tests (`test/e2e/**`, cần DB thật) |
-| `bun run test:cov` | Unit tests + coverage                  |
-| `bun run db:generate` / `db:migrate` / `db:studio` | Drizzle Kit |
+| Lệnh                                               | Để làm gì                              |
+| -------------------------------------------------- | -------------------------------------- |
+| `bun run start:dev`                                | Chạy dev, tự reload                    |
+| `bun run build` + `bun run start:prod`             | Build rồi chạy production              |
+| `bun run typecheck`                                | `tsc --noEmit` — phải xanh             |
+| `bun run lint`                                     | oxlint type-aware — phải sạch          |
+| `bun run fmt`                                      | Format toàn repo (oxfmt)               |
+| `bun run test`                                     | Unit tests (`test/unit/**`)            |
+| `bun run test:e2e`                                 | E2E tests (`test/e2e/**`, cần DB thật) |
+| `bun run test:cov`                                 | Unit tests + coverage                  |
+| `bun run db:generate` / `db:migrate` / `db:studio` | Drizzle Kit                            |
 
 ## Biến môi trường
 
 Xem đầy đủ ở `.env.example`. Các biến quan trọng:
 
-| Biến              | Ví dụ / Ghi chú                              |
-| ----------------- | -------------------------------------------- |
-| `DATABASE_URL`    | `postgres://postgres:postgres@localhost:5432/lemon_chat` |
-| `REDIS_URL`       | `redis://localhost:6379`                     |
-| `JWT_SECRET`      | Chuỗi bí mật **≥ 32 bytes**                  |
-| `JWT_ISSUER` / `JWT_AUDIENCE` | `lemon-chat` / `lemon-chat-client` |
-| `USE_MEMORY_CACHE`| `true` → dùng cache in-memory, khỏi cần Redis (dev/test) |
-| `NODE_ENV`        | `development` / `production` (quyết định format log) |
-| `FRONTEND_URL`    | URL FE, dùng cho CORS                        |
+| Biến                          | Ví dụ / Ghi chú                                          |
+| ----------------------------- | -------------------------------------------------------- |
+| `DATABASE_URL`                | `postgres://postgres:postgres@localhost:5432/lemon_chat` |
+| `REDIS_URL`                   | `redis://localhost:6379`                                 |
+| `JWT_SECRET`                  | Chuỗi bí mật **≥ 32 bytes**                              |
+| `JWT_ISSUER` / `JWT_AUDIENCE` | `lemon-chat` / `lemon-chat-client`                       |
+| `USE_MEMORY_CACHE`            | `true` → dùng cache in-memory, khỏi cần Redis (dev/test) |
+| `NODE_ENV`                    | `development` / `production` (quyết định format log)     |
+| `FRONTEND_URL`                | URL FE, dùng cho CORS                                    |
 
 Đọc env trong code luôn qua helper `get_env()` (`src/helpers/index.ts`) — thiếu biến bắt buộc là crash ngay lúc boot, không fail âm thầm.
 

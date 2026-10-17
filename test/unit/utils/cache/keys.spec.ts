@@ -24,4 +24,3 @@ describe("cache.keys", () => {
     expect(noteFeedKey("user-123")).toBe("notes:feed:user-123");
   });
 });
-
