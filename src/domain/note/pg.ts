@@ -16,19 +16,26 @@ export class NotePgRepository implements NoteRepository {
     userId: string,
     data: { content: string; background?: string | null; expiresAt: Date },
   ): Promise<Note> {
-    return await this.db.transaction(async (tx) => {
-      await tx.delete(notes).where(eq(notes.userId, userId));
-      const [inserted] = await tx
-        .insert(notes)
-        .values({
-          userId,
+    const now = new Date();
+    const [row] = await this.db
+      .insert(notes)
+      .values({
+        userId,
+        content: data.content,
+        background: data.background ?? null,
+        expiresAt: data.expiresAt,
+      })
+      .onConflictDoUpdate({
+        target: notes.userId,
+        set: {
           content: data.content,
           background: data.background ?? null,
           expiresAt: data.expiresAt,
-        })
-        .returning();
-      return inserted;
-    });
+          createdAt: now,
+        },
+      })
+      .returning();
+    return row;
   }
 
   async findActiveByUserId(userId: string): Promise<Note | null> {
