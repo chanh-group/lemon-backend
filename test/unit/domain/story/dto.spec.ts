@@ -6,7 +6,6 @@ describe("createStorySchema", () => {
     const result = createStorySchema.safeParse({
       kind: "IMAGE",
       objectKey: "stories/user-1/photo.jpg",
-      mimeType: "image/jpeg",
       width: 1080,
       height: 1920,
       caption: "A sunny day",
@@ -46,6 +45,20 @@ describe("createStorySchema", () => {
       throw new Error("expected the payload to be accepted");
     }
     expect(result.data).not.toHaveProperty("bucket");
+  });
+
+  it("strips client-supplied mimeType (server derives it from HEAD)", () => {
+    const result = createStorySchema.safeParse({
+      kind: "IMAGE",
+      objectKey: "stories/user-1/photo.jpg",
+      mimeType: "image/jpeg",
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      throw new Error("expected the payload to be accepted");
+    }
+    expect(result.data).not.toHaveProperty("mimeType");
   });
 
   it("rejects a non-integer durationMs", () => {

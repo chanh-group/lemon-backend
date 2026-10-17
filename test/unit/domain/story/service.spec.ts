@@ -8,6 +8,8 @@ import type {
   StoryViewerResponse,
   UserStoryFeedResponse,
 } from "../../../../src/domain/story/dto/response.js";
+import { StorageError } from "../../../../src/utils/storage/error.js";
+import type { StorageService } from "../../../../src/utils/storage/store.js";
 
 describe("StoryService", () => {
   let service: StoryService;
@@ -33,6 +35,12 @@ describe("StoryService", () => {
   let setBestEffortMock: Mock<(key: string, value: unknown, ttlSeconds?: number) => Promise<void>>;
   let deleteBestEffortMock: Mock<(key: string) => Promise<void>>;
   let deleteManyBestEffortMock: Mock<(keys: string[]) => Promise<void>>;
+
+  let headObjectMock: Mock<
+    (objectKey: string) => Promise<{ contentLength: number; contentType: string } | null>
+  >;
+  let getBucketMock: Mock<() => string>;
+  let storageMock: StorageService;
 
   const mockStory: Story = {
     id: "0193a2b1-0000-7000-8000-000000000001",
@@ -121,6 +129,10 @@ describe("StoryService", () => {
       .fn<(keys: string[]) => Promise<void>>()
       .mockResolvedValue(undefined);
 
+    headObjectMock = vi.fn().mockResolvedValue({ contentLength: 1000, contentType: "image/jpeg" });
+    getBucketMock = vi.fn().mockReturnValue("lemon-stories");
+    storageMock = { presignPut: vi.fn(), headObject: headObjectMock, getBucket: getBucketMock };
+
     const mockRepo: StoryRepository = {
       create: createStoryMock,
       findById: findByIdMock,
@@ -141,7 +153,7 @@ describe("StoryService", () => {
       deleteManyBestEffort: deleteManyBestEffortMock,
     } as unknown as CacheStoreExt;
 
-    service = new StoryService(mockRepo, mockCache);
+    service = new StoryService(mockRepo, mockCache, storageMock);
   });
 
   describe("createStory", () => {
@@ -155,6 +167,9 @@ describe("StoryService", () => {
       expect(result.id).toBe("story-id-new");
       expect(result.kind).toBe("IMAGE");
       expect(createStoryMock).toHaveBeenCalledTimes(1);
+      expect(createStoryMock).toHaveBeenCalledWith(
+        expect.objectContaining({ bucket: "lemon-stories", mimeType: "image/jpeg" }),
+      );
       expect(deleteManyBestEffortMock).toHaveBeenCalledWith([
         "stories:feed:user-owner-1",
         "stories:feed:friend-1",
@@ -201,9 +216,70 @@ describe("StoryService", () => {
 
       await service.createStory("user-owner-1", dto);
 
+      expect(getBucketMock).toHaveBeenCalled();
       expect(createStoryMock).toHaveBeenCalledWith(
         expect.objectContaining({ bucket: "lemon-stories" }),
       );
+    });
+
+    it("rejects when the object was not uploaded (HEAD miss)", async () => {
+      headObjectMock.mockResolvedValueOnce(null);
+      await expect(
+        service.createStory("user-owner-1", {
+          kind: "IMAGE",
+          objectKey: "stories/user-owner-1/photo.jpg",
+        }),
+      ).rejects.toMatchObject({ code: "OBJECT_NOT_UPLOADED" });
+      expect(createStoryMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects when the uploaded object exceeds the kind cap", async () => {
+      headObjectMock.mockResolvedValueOnce({
+        contentLength: 10 * 1024 * 1024 + 1,
+        contentType: "image/jpeg",
+      });
+      await expect(
+        service.createStory("user-owner-1", {
+          kind: "IMAGE",
+          objectKey: "stories/user-owner-1/photo.jpg",
+        }),
+      ).rejects.toMatchObject({ code: "FILE_TOO_LARGE", params: { maxMb: "10" } });
+      expect(createStoryMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects when the stored content type is not allowed for the kind", async () => {
+      headObjectMock.mockResolvedValueOnce({ contentLength: 1000, contentType: "video/mp4" });
+      await expect(
+        service.createStory("user-owner-1", {
+          kind: "IMAGE",
+          objectKey: "stories/user-owner-1/photo.jpg",
+        }),
+      ).rejects.toMatchObject({ code: "FILE_TYPE_NOT_ALLOWED" });
+      expect(createStoryMock).not.toHaveBeenCalled();
+    });
+
+    it("fails closed when storage is down at verify time (no insert)", async () => {
+      headObjectMock.mockRejectedValueOnce(new StorageError("s3 down"));
+      await expect(
+        service.createStory("user-owner-1", {
+          kind: "IMAGE",
+          objectKey: "stories/user-owner-1/photo.jpg",
+        }),
+      ).rejects.toBeInstanceOf(StorageError);
+      expect(createStoryMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects invalid media before touching storage", async () => {
+      await expect(service.createStory("user-owner-1", { kind: "IMAGE" })).rejects.toMatchObject({
+        code: "INVALID_MEDIA_TYPE",
+      });
+      await expect(
+        service.createStory("user-owner-1", {
+          kind: "IMAGE",
+          objectKey: "stories/other/photo.jpg",
+        }),
+      ).rejects.toMatchObject({ code: "INVALID_OBJECT_KEY" });
+      expect(headObjectMock).not.toHaveBeenCalled();
     });
 
     it("stores TEXT stories with a null bucket", async () => {
