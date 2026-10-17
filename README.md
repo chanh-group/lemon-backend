@@ -28,6 +28,19 @@ bun run db:migrate
 bun run start:dev
 ```
 
+> **Lưu ý migration `0001` (unique `notes.user_id`):** nếu DB đã có dữ liệu `notes` từ trước
+> (có thể tồn tại nhiều note/1 user do race đã fix), kiểm tra trước:
+> `SELECT user_id, count(*) FROM notes GROUP BY user_id HAVING count(*) > 1;`
+> Nếu có kết quả, chạy dedupe (giữ note mới nhất mỗi user) **trước khi** `db:migrate`:
+>
+> ```sql
+> DELETE FROM notes n USING notes o
+> WHERE n.user_id = o.user_id
+>   AND (n.created_at < o.created_at OR (n.created_at = o.created_at AND n.id < o.id));
+> ```
+>
+> Không sửa file SQL sinh tự động trong `drizzle/`.
+
 App mặc định nghe ở `http://localhost:3000` (đổi qua `PORT`).
 
 | Lệnh                                               | Để làm gì                              |
