@@ -1,8 +1,10 @@
 import { BadRequestException, UnauthorizedException, type ArgumentsHost } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ErrorFilter } from "../../../src/middleware/error-filter.js";
-import { BusinessError } from "../../../src/utils/errors/business.js";
+import { CacheError } from "../../../src/utils/cache/error.js";
+import { BUSINESS_STATUS, BusinessError } from "../../../src/utils/errors/business.js";
 import { SystemError } from "../../../src/utils/errors/system.js";
+import { t } from "../../../src/utils/i18n/index.js";
 import type { Logger } from "../../../src/utils/logger.js";
 
 function createHost(acceptLanguage?: string) {
@@ -101,6 +103,21 @@ describe("ErrorFilter", () => {
     expect(warnMock).not.toHaveBeenCalled();
   });
 
+  it("renders CacheError as generic 503 SERVICE_UNAVAILABLE and logs once", () => {
+    const { host, status, json } = createHost();
+
+    filter.catch(new CacheError("GET"), host);
+
+    expect(status).toHaveBeenCalledWith(503);
+    expect(json).toHaveBeenCalledWith({
+      success: false,
+      code: "SERVICE_UNAVAILABLE",
+      message: "Dịch vụ tạm thời không khả dụng, vui lòng thử lại sau",
+    });
+    expect(errorMock).toHaveBeenCalledTimes(1);
+    expect(warnMock).not.toHaveBeenCalled();
+  });
+
   it("renders unknown throws as generic 500 without leaking details", () => {
     const { host, status, json } = createHost();
 
@@ -126,5 +143,14 @@ describe("ErrorFilter", () => {
     filter.catch(new BadRequestException(), badRequest.host);
     expect(badRequest.status).toHaveBeenCalledWith(400);
     expect(badRequest.json).toHaveBeenCalledWith(expect.objectContaining({ code: "BAD_REQUEST" }));
+  });
+});
+
+describe("ErrorFilter catalogue invariant", () => {
+  it("resolves every BUSINESS_STATUS code via the catalogue in both locales", () => {
+    for (const code of Object.keys(BUSINESS_STATUS)) {
+      expect(t(code, "vi")).not.toBe(code);
+      expect(t(code, "en")).not.toBe(code);
+    }
   });
 });

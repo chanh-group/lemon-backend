@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ERROR_CODES } from "../../../src/utils/errors/codes.js";
 import { getLanguageFromHeader, t } from "../../../src/utils/i18n/index.js";
 
 describe("getLanguageFromHeader", () => {
@@ -41,5 +42,14 @@ describe("t", () => {
     expect(t("FILE_TOO_LARGE", "en", { maxMb: "10" })).toBe(
       "File exceeds the allowed limit (10MB) — choose a file under 10MB",
     );
+  });
+});
+
+describe("error code catalogue coverage", () => {
+  it("translates every ERROR_CODES value in both locales so no raw key reaches clients", () => {
+    for (const code of Object.values(ERROR_CODES)) {
+      expect(t(code, "vi")).not.toBe(code);
+      expect(t(code, "en")).not.toBe(code);
+    }
   });
 });
