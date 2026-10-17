@@ -37,6 +37,14 @@ export const stories = pgTable(
   (table) => [
     check("stories_media_chk", sql`${table.kind} = 'TEXT' OR ${table.objectKey} IS NOT NULL`),
     check(
+      "stories_caption_len_chk",
+      sql`${table.caption} IS NULL OR char_length(${table.caption}) <= 500`,
+    ),
+    check(
+      "stories_media_dims_chk",
+      sql`${table.width} >= 0 AND ${table.height} >= 0 AND ${table.durationMs} >= 0`,
+    ),
+    check(
       "stories_expiry_chk",
       sql`${table.expiresAt} > ${table.createdAt} AND ${table.expiresAt} <= ${table.createdAt} + INTERVAL '25 hours'`,
     ),

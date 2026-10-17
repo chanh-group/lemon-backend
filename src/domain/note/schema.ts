@@ -17,6 +17,7 @@ export const notes = pgTable(
   },
   (table) => [
     check("notes_content_len_chk", sql`char_length(${table.content}) BETWEEN 1 AND 200`),
+    check("notes_background_len_chk", sql`char_length(${table.background}) <= 200`),
     uniqueIndex("notes_user_uq").on(table.userId),
     index("notes_expiry_idx").on(table.expiresAt),
   ],

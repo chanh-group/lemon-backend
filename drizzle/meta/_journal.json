@@ -15,6 +15,13 @@
       "when": 1792238402861,
       "tag": "0001_acoustic_grim_reaper",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792243248193,
+      "tag": "0002_plain_the_santerians",
+      "breakpoints": true
     }
   ]
 }
