@@ -1,11 +1,4 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Inject,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import {
   STORY_DEFAULT_BUCKET,
   STORY_FEED_TTL_SECS,
@@ -13,6 +6,7 @@ import {
 } from "../../utils/cache/constants.js";
 import { CACHE_STORE, type CacheStoreExt } from "../../utils/cache/store.js";
 import { storyFeedKey } from "../../utils/cache/keys.js";
+import { BusinessError } from "../../utils/errors/business.js";
 import { groupStoriesByUser, reviveUserStoryFeed, toStoryItemResponse } from "./dto/mapper.js";
 import type { CreateStoryDto } from "./dto/request.js";
 import type {
@@ -35,19 +29,17 @@ export class StoryService {
   async createStory(userId: string, dto: CreateStoryDto): Promise<StoryItemResponse> {
     if (dto.kind === "IMAGE" || dto.kind === "VIDEO") {
       if (!dto.objectKey) {
-        throw new BadRequestException("INVALID_MEDIA_TYPE: Media story requires objectKey");
+        throw new BusinessError("INVALID_MEDIA_TYPE");
       }
       if (!dto.objectKey.startsWith(`stories/${userId}/`)) {
-        throw new BadRequestException(
-          "INVALID_OBJECT_KEY: objectKey must be scoped to your user folder",
-        );
+        throw new BusinessError("INVALID_OBJECT_KEY");
       }
     }
 
     const caption = dto.caption?.trim() || null;
     const background = dto.background?.trim() || null;
     if (dto.kind === "TEXT" && !caption && !background) {
-      throw new BadRequestException("TEXT story requires either caption or background");
+      throw new BusinessError("TEXT_STORY_REQUIRES_CONTENT");
     }
 
     const now = new Date();
@@ -109,13 +101,13 @@ export class StoryService {
   async getStoryById(userId: string, storyId: string): Promise<StoryItemResponse> {
     const story = await this.storyRepo.findActiveById(storyId);
     if (!story) {
-      throw new NotFoundException("STORY_NOT_FOUND: Story does not exist or has expired");
+      throw new BusinessError("STORY_NOT_FOUND");
     }
 
     if (story.userId !== userId) {
       const friendIds = await this.storyRepo.getFriendUserIds(story.userId);
       if (!friendIds.includes(userId)) {
-        throw new ForbiddenException("FORBIDDEN: You cannot view stories from non-friends");
+        throw new BusinessError("STORY_VIEW_FORBIDDEN");
       }
     }
 
@@ -126,7 +118,7 @@ export class StoryService {
   async viewStory(userId: string, storyId: string): Promise<void> {
     const story = await this.storyRepo.findActiveById(storyId);
     if (!story) {
-      throw new NotFoundException("STORY_NOT_FOUND: Story does not exist or has expired");
+      throw new BusinessError("STORY_NOT_FOUND");
     }
 
     if (story.userId === userId) {
@@ -137,7 +129,7 @@ export class StoryService {
 
     const friendIds = await this.storyRepo.getFriendUserIds(story.userId);
     if (!friendIds.includes(userId)) {
-      throw new ForbiddenException("FORBIDDEN: You cannot view stories from non-friends");
+      throw new BusinessError("STORY_VIEW_FORBIDDEN");
     }
 
     await this.storyRepo.markAsViewed(storyId, userId);
@@ -147,13 +139,11 @@ export class StoryService {
   async getViewers(userId: string, storyId: string): Promise<StoryViewerResponse[]> {
     const story = await this.storyRepo.findById(storyId);
     if (!story) {
-      throw new NotFoundException("STORY_NOT_FOUND: Story does not exist");
+      throw new BusinessError("STORY_NOT_FOUND");
     }
 
     if (story.userId !== userId) {
-      throw new ForbiddenException(
-        "FORBIDDEN_VIEW_LIST: Only the story owner can view the viewers list",
-      );
+      throw new BusinessError("STORY_VIEWERS_FORBIDDEN");
     }
 
     return this.storyRepo.findViewersByStoryId(storyId);
@@ -162,11 +152,11 @@ export class StoryService {
   async deleteStory(userId: string, storyId: string): Promise<void> {
     const story = await this.storyRepo.findById(storyId);
     if (!story) {
-      throw new NotFoundException("STORY_NOT_FOUND: Story does not exist");
+      throw new BusinessError("STORY_NOT_FOUND");
     }
 
     if (story.userId !== userId) {
-      throw new ForbiddenException("FORBIDDEN: You can only delete your own stories");
+      throw new BusinessError("STORY_DELETE_FORBIDDEN");
     }
 
     await this.storyRepo.delete(storyId);

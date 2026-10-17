@@ -1,4 +1,3 @@
-import { UnauthorizedException } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { StoryController } from "../../../../src/domain/story/controller.js";
 import { StoryService } from "../../../../src/domain/story/service.js";
@@ -164,8 +163,8 @@ describe("StoryController", () => {
   });
 
   describe("auth contract", () => {
-    it("throws UnauthorizedException when req.user is absent", async () => {
-      await expect(controller.getFeed({})).rejects.toThrow(UnauthorizedException);
+    it("throws UNAUTHORIZED when req.user is absent", async () => {
+      await expect(controller.getFeed({})).rejects.toMatchObject({ code: "UNAUTHORIZED" });
     });
 
     it("passes the injected id to the service", async () => {

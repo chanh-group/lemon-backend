@@ -1,4 +1,3 @@
-import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { CacheStoreExt } from "../../../../src/utils/cache/store.js";
 import type { NoteRepository } from "../../../../src/domain/note/repository.js";
@@ -122,13 +121,13 @@ describe("NoteService", () => {
       ]);
     });
 
-    it("throws BadRequestException if content is empty or whitespace", async () => {
-      await expect(service.upsertNote("user-1", { content: "" })).rejects.toThrow(
-        BadRequestException,
-      );
-      await expect(service.upsertNote("user-1", { content: "    " })).rejects.toThrow(
-        BadRequestException,
-      );
+    it("throws NOTE_EMPTY_CONTENT if content is empty or whitespace", async () => {
+      await expect(service.upsertNote("user-1", { content: "" })).rejects.toMatchObject({
+        code: "NOTE_EMPTY_CONTENT",
+      });
+      await expect(service.upsertNote("user-1", { content: "    " })).rejects.toMatchObject({
+        code: "NOTE_EMPTY_CONTENT",
+      });
     });
   });
 
@@ -207,10 +206,12 @@ describe("NoteService", () => {
       ]);
     });
 
-    it("throws NotFoundException if no active note was deleted", async () => {
+    it("throws NOTE_NOT_FOUND if no active note was deleted", async () => {
       deleteByUserIdMock.mockResolvedValueOnce(false);
 
-      await expect(service.deleteMyNote("user-1")).rejects.toThrow(NotFoundException);
+      await expect(service.deleteMyNote("user-1")).rejects.toMatchObject({
+        code: "NOTE_NOT_FOUND",
+      });
     });
   });
 });
