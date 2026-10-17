@@ -4,7 +4,7 @@
 // fail-closed no-op instead.
 import { Global, Logger, Module } from "@nestjs/common";
 import { S3_PRESIGN_TTL_SECS, STORY_DEFAULT_BUCKET } from "../utils/cache/constants.js";
-import { S3StorageService } from "../utils/storage/s3.js";
+import type { S3StorageService } from "../utils/storage/s3.js";
 import { STORAGE_SERVICE } from "../utils/storage/store.js";
 import { UnavailableStorageService } from "../utils/storage/unavailable.js";
 
@@ -66,7 +66,12 @@ export function resolveStorageConfig(env: StorageEnv): StorageConfig {
   };
 }
 
-async function createS3Storage(config: Extract<StorageConfig, { mode: "s3" }>) {
+async function createS3Storage(
+  config: Extract<StorageConfig, { mode: "s3" }>,
+): Promise<S3StorageService> {
+  // Dynamic imports keep both the service module and the AWS SDK out of the
+  // module graph until storage is actually configured.
+  const { S3StorageService } = await import("../utils/storage/s3.js");
   const { S3Client } = await import("@aws-sdk/client-s3");
   const client = new S3Client({
     region: config.region,

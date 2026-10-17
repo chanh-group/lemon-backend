@@ -94,7 +94,7 @@ describe("StorageModule", () => {
     await mod.close();
   }, 15000);
 
-  it("fully configured env provides S3StorageService without loading AWS at boot", async () => {
+  it("fully configured env provides S3StorageService", async () => {
     process.env.S3_ACCESS_KEY_ID = "k";
     process.env.S3_SECRET_ACCESS_KEY = "s";
     const { Test } = await import("@nestjs/testing");
