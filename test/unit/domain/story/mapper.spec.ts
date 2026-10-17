@@ -19,6 +19,7 @@ function makeStory(overrides: Partial<Story> & { id: string; userId: string }): 
     background: null,
     createdAt: new Date("2026-10-14T00:00:00Z"),
     expiresAt: new Date("2026-10-15T00:00:00Z"),
+    deletedAt: null,
     ...overrides,
   };
 }

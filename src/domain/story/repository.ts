@@ -11,7 +11,7 @@ export interface StoryRepository {
   findViewersByStoryId(storyId: string): Promise<StoryViewerResponse[]>;
   findViewedStoryIds(userId: string, storyIds: string[]): Promise<Set<string>>;
   markAsViewed(storyId: string, userId: string): Promise<void>;
-  delete(id: string): Promise<boolean>;
+  markDeleted(id: string): Promise<boolean>;
   getFriendUserIds(userId: string): Promise<string[]>;
 }
 

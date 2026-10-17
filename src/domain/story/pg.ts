@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, asc, desc, eq, gt, inArray, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { friendships } from "../friend/schema.js";
 import { users } from "../user/schema.js";
@@ -19,7 +19,10 @@ export class StoryPgRepository implements StoryRepository {
   }
 
   async findById(id: string): Promise<Story | null> {
-    const [story] = await this.db.select().from(stories).where(eq(stories.id, id));
+    const [story] = await this.db
+      .select()
+      .from(stories)
+      .where(and(eq(stories.id, id), isNull(stories.deletedAt)));
     return story ?? null;
   }
 
@@ -28,7 +31,7 @@ export class StoryPgRepository implements StoryRepository {
     const [story] = await this.db
       .select()
       .from(stories)
-      .where(and(eq(stories.id, id), gt(stories.expiresAt, now)));
+      .where(and(eq(stories.id, id), gt(stories.expiresAt, now), isNull(stories.deletedAt)));
     return story ?? null;
   }
 
@@ -38,7 +41,13 @@ export class StoryPgRepository implements StoryRepository {
     return this.db
       .select()
       .from(stories)
-      .where(and(inArray(stories.userId, userIds), gt(stories.expiresAt, now)))
+      .where(
+        and(
+          inArray(stories.userId, userIds),
+          gt(stories.expiresAt, now),
+          isNull(stories.deletedAt),
+        ),
+      )
       .orderBy(asc(stories.createdAt));
   }
 
@@ -103,12 +112,13 @@ export class StoryPgRepository implements StoryRepository {
       .onConflictDoNothing();
   }
 
-  async delete(id: string): Promise<boolean> {
-    const result = await this.db
-      .delete(stories)
-      .where(eq(stories.id, id))
+  async markDeleted(id: string): Promise<boolean> {
+    const rows = await this.db
+      .update(stories)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(stories.id, id), isNull(stories.deletedAt)))
       .returning({ id: stories.id });
-    return result.length > 0;
+    return rows.length > 0;
   }
 
   async getFriendUserIds(userId: string): Promise<string[]> {

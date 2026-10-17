@@ -196,7 +196,10 @@ export class StoryService {
       throw new BusinessError("STORY_DELETE_FORBIDDEN");
     }
 
-    await this.storyRepo.delete(storyId);
+    const deleted = await this.storyRepo.markDeleted(storyId);
+    if (!deleted) {
+      throw new BusinessError("STORY_NOT_FOUND");
+    }
 
     const friendIds = await this.storyRepo.getFriendUserIds(userId);
     const keysToInvalidate = [userId, ...friendIds].map(storyFeedKey);
