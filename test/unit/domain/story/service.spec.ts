@@ -249,6 +249,18 @@ describe("StoryService", () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it("TEXT story with a client objectKey stores none", async () => {
+      const dto: CreateStoryDto & { objectKey?: string } = {
+        kind: "TEXT",
+        caption: "hello",
+        objectKey: "stories/victim/photo.jpg",
+      };
+
+      await service.createStory("user-owner-1", dto);
+
+      expect(createStoryMock).toHaveBeenCalledWith(expect.objectContaining({ objectKey: null }));
+    });
+
     it("throws BadRequestException if TEXT story has neither caption nor background", async () => {
       await expect(
         service.createStory("user-owner-1", {

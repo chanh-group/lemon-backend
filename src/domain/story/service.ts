@@ -65,7 +65,7 @@ export class StoryService {
       userId,
       kind: dto.kind,
       bucket: dto.kind === "TEXT" ? null : STORY_DEFAULT_BUCKET,
-      objectKey: dto.objectKey ?? null,
+      objectKey: dto.kind === "TEXT" ? null : (dto.objectKey ?? null),
       mimeType: dto.mimeType ?? null,
       width: dto.width ?? null,
       height: dto.height ?? null,
