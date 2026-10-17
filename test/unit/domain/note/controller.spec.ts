@@ -27,19 +27,17 @@ describe("NoteController", () => {
     upsertNoteMock = vi
       .fn<(userId: string, dto: UpsertNoteDto) => Promise<NoteResponse>>()
       .mockResolvedValue(mockNoteResponse);
-    getFeedMock = vi
-      .fn<(userId: string) => Promise<UserNoteFeedResponse[]>>()
-      .mockResolvedValue([
-        {
-          user: {
-            id: "user-1",
-            username: "user1",
-            fullName: "User One",
-            avatarUrl: null,
-          },
-          note: mockNoteResponse,
+    getFeedMock = vi.fn<(userId: string) => Promise<UserNoteFeedResponse[]>>().mockResolvedValue([
+      {
+        user: {
+          id: "user-1",
+          username: "user1",
+          fullName: "User One",
+          avatarUrl: null,
         },
-      ]);
+        note: mockNoteResponse,
+      },
+    ]);
     deleteMyNoteMock = vi.fn<(userId: string) => Promise<void>>().mockResolvedValue(undefined);
 
     const mockService = {
@@ -54,7 +52,7 @@ describe("NoteController", () => {
   describe("upsertNote", () => {
     it("delegates to noteService.upsertNote and wraps in envelope", async () => {
       const dto: UpsertNoteDto = { content: "Sunny day note", background: "#ffcc00" };
-      const result = await controller.upsertNote("user-1", dto);
+      const result = await controller.upsertNote({ user: { id: "user-1" } }, dto);
 
       expect(upsertNoteMock).toHaveBeenCalledWith("user-1", dto);
       expect(result).toEqual({
@@ -67,7 +65,7 @@ describe("NoteController", () => {
 
   describe("getFeed", () => {
     it("delegates to noteService.getFeed and wraps in envelope", async () => {
-      const result = await controller.getFeed("user-1");
+      const result = await controller.getFeed({ user: { id: "user-1" } });
 
       expect(getFeedMock).toHaveBeenCalledWith("user-1");
       expect(result.success).toBe(true);
@@ -78,7 +76,7 @@ describe("NoteController", () => {
 
   describe("deleteMyNote", () => {
     it("delegates to noteService.deleteMyNote and returns confirmation envelope", async () => {
-      const result = await controller.deleteMyNote("user-1");
+      const result = await controller.deleteMyNote({ user: { id: "user-1" } });
 
       expect(deleteMyNoteMock).toHaveBeenCalledWith("user-1");
       expect(result).toEqual({

@@ -1,36 +1,18 @@
 import {
   Body,
   Controller,
-  createParamDecorator,
   Delete,
-  type ExecutionContext,
   Get,
   HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
-  UnauthorizedException,
+  Req,
 } from "@nestjs/common";
+import { getAuthUser, type AuthUser } from "../shared.js";
 import type { CreateStoryDto } from "./dto/request.js";
 import { StoryService } from "./service.js";
-
-export function extractUserIdFromContext(ctx: ExecutionContext): string {
-  // Only the authenticated user object populated by the AuthGuard is trusted.
-  // Request headers are NEVER accepted as identity (client-spoofable).
-  // Until the auth vertical lands, endpoints using this decorator fail closed with 401.
-  const request = ctx.switchToHttp().getRequest<{ user?: { id?: string } }>();
-  const userId = request.user?.id;
-
-  if (!userId) {
-    throw new UnauthorizedException("Unauthorized: missing user context");
-  }
-  return userId;
-}
-
-export const CurrentUserId = createParamDecorator(
-  (_data: unknown, ctx: ExecutionContext): string => extractUserIdFromContext(ctx),
-);
 
 @Controller("stories")
 export class StoryController {
@@ -38,7 +20,8 @@ export class StoryController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  async createStory(@CurrentUserId() userId: string, @Body() dto: CreateStoryDto) {
+  async createStory(@Req() req: { user?: unknown }, @Body() dto: CreateStoryDto) {
+    const { id: userId }: AuthUser = getAuthUser(req);
     const data = await this.storyService.createStory(userId, dto);
     return {
       success: true,
@@ -48,7 +31,8 @@ export class StoryController {
   }
 
   @Get("feed")
-  async getFeed(@CurrentUserId() userId: string) {
+  async getFeed(@Req() req: { user?: unknown }) {
+    const { id: userId }: AuthUser = getAuthUser(req);
     const data = await this.storyService.getFeed(userId);
     return {
       success: true,
@@ -58,10 +42,8 @@ export class StoryController {
   }
 
   @Get(":id")
-  async getStoryById(
-    @CurrentUserId() userId: string,
-    @Param("id", ParseUUIDPipe) storyId: string,
-  ) {
+  async getStoryById(@Req() req: { user?: unknown }, @Param("id", ParseUUIDPipe) storyId: string) {
+    const { id: userId }: AuthUser = getAuthUser(req);
     const data = await this.storyService.getStoryById(userId, storyId);
     return {
       success: true,
@@ -72,10 +54,8 @@ export class StoryController {
 
   @Post(":id/view")
   @HttpCode(HttpStatus.OK)
-  async viewStory(
-    @CurrentUserId() userId: string,
-    @Param("id", ParseUUIDPipe) storyId: string,
-  ) {
+  async viewStory(@Req() req: { user?: unknown }, @Param("id", ParseUUIDPipe) storyId: string) {
+    const { id: userId }: AuthUser = getAuthUser(req);
     await this.storyService.viewStory(userId, storyId);
     return {
       success: true,
@@ -84,10 +64,8 @@ export class StoryController {
   }
 
   @Get(":id/views")
-  async getViewers(
-    @CurrentUserId() userId: string,
-    @Param("id", ParseUUIDPipe) storyId: string,
-  ) {
+  async getViewers(@Req() req: { user?: unknown }, @Param("id", ParseUUIDPipe) storyId: string) {
+    const { id: userId }: AuthUser = getAuthUser(req);
     const data = await this.storyService.getViewers(userId, storyId);
     return {
       success: true,
@@ -97,10 +75,8 @@ export class StoryController {
   }
 
   @Delete(":id")
-  async deleteStory(
-    @CurrentUserId() userId: string,
-    @Param("id", ParseUUIDPipe) storyId: string,
-  ) {
+  async deleteStory(@Req() req: { user?: unknown }, @Param("id", ParseUUIDPipe) storyId: string) {
+    const { id: userId }: AuthUser = getAuthUser(req);
     await this.storyService.deleteStory(userId, storyId);
     return {
       success: true,

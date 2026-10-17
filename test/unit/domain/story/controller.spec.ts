@@ -1,6 +1,6 @@
-import { UnauthorizedException, type ExecutionContext } from "@nestjs/common";
+import { UnauthorizedException } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import { StoryController, extractUserIdFromContext } from "../../../../src/domain/story/controller.js";
+import { StoryController } from "../../../../src/domain/story/controller.js";
 import { StoryService } from "../../../../src/domain/story/service.js";
 import type { CreateStoryDto } from "../../../../src/domain/story/dto/request.js";
 import type {
@@ -39,19 +39,17 @@ describe("StoryController", () => {
     createStoryMock = vi
       .fn<(userId: string, dto: CreateStoryDto) => Promise<StoryItemResponse>>()
       .mockResolvedValue(mockStoryItem);
-    getFeedMock = vi
-      .fn<(userId: string) => Promise<UserStoryFeedResponse[]>>()
-      .mockResolvedValue([
-        {
-          user: {
-            id: "user-1",
-            username: "user1",
-            fullName: "User One",
-            avatarUrl: null,
-          },
-          stories: [mockStoryItem],
+    getFeedMock = vi.fn<(userId: string) => Promise<UserStoryFeedResponse[]>>().mockResolvedValue([
+      {
+        user: {
+          id: "user-1",
+          username: "user1",
+          fullName: "User One",
+          avatarUrl: null,
         },
-      ]);
+        stories: [mockStoryItem],
+      },
+    ]);
     getStoryByIdMock = vi
       .fn<(userId: string, storyId: string) => Promise<StoryItemResponse>>()
       .mockResolvedValue(mockStoryItem);
@@ -95,7 +93,7 @@ describe("StoryController", () => {
         caption: "A sunny day",
       };
 
-      const result = await controller.createStory("user-1", dto);
+      const result = await controller.createStory({ user: { id: "user-1" } }, dto);
 
       expect(createStoryMock).toHaveBeenCalledWith("user-1", dto);
       expect(result).toEqual({
@@ -108,7 +106,7 @@ describe("StoryController", () => {
 
   describe("getFeed", () => {
     it("delegates to storyService.getFeed and wraps in response envelope", async () => {
-      const result = await controller.getFeed("user-1");
+      const result = await controller.getFeed({ user: { id: "user-1" } });
 
       expect(getFeedMock).toHaveBeenCalledWith("user-1");
       expect(result.success).toBe(true);
@@ -119,7 +117,7 @@ describe("StoryController", () => {
 
   describe("getStoryById", () => {
     it("delegates to storyService.getStoryById and wraps in response envelope", async () => {
-      const result = await controller.getStoryById("user-1", mockStoryItem.id);
+      const result = await controller.getStoryById({ user: { id: "user-1" } }, mockStoryItem.id);
 
       expect(getStoryByIdMock).toHaveBeenCalledWith("user-1", mockStoryItem.id);
       expect(result).toEqual({
@@ -132,7 +130,7 @@ describe("StoryController", () => {
 
   describe("viewStory", () => {
     it("delegates to storyService.viewStory and returns confirmation envelope", async () => {
-      const result = await controller.viewStory("viewer-1", mockStoryItem.id);
+      const result = await controller.viewStory({ user: { id: "viewer-1" } }, mockStoryItem.id);
 
       expect(viewStoryMock).toHaveBeenCalledWith("viewer-1", mockStoryItem.id);
       expect(result).toEqual({
@@ -144,7 +142,7 @@ describe("StoryController", () => {
 
   describe("getViewers", () => {
     it("delegates to storyService.getViewers and wraps viewers in response envelope", async () => {
-      const result = await controller.getViewers("user-1", mockStoryItem.id);
+      const result = await controller.getViewers({ user: { id: "user-1" } }, mockStoryItem.id);
 
       expect(getViewersMock).toHaveBeenCalledWith("user-1", mockStoryItem.id);
       expect(result.success).toBe(true);
@@ -155,7 +153,7 @@ describe("StoryController", () => {
 
   describe("deleteStory", () => {
     it("delegates to storyService.deleteStory and returns deletion message", async () => {
-      const result = await controller.deleteStory("user-1", mockStoryItem.id);
+      const result = await controller.deleteStory({ user: { id: "user-1" } }, mockStoryItem.id);
 
       expect(deleteStoryMock).toHaveBeenCalledWith("user-1", mockStoryItem.id);
       expect(result).toEqual({
@@ -165,42 +163,14 @@ describe("StoryController", () => {
     });
   });
 
-  describe("extractUserIdFromContext", () => {
-    function createMockContext(request: {
-      user?: { id?: string };
-      headers: Record<string, string | string[] | undefined>;
-    }): ExecutionContext {
-      return {
-        switchToHttp: () => ({
-          getRequest: () => request,
-        }),
-      } as unknown as ExecutionContext;
-    }
-
-    it("extracts userId from request.user.id when present", () => {
-      const ctx = createMockContext({
-        user: { id: "user-from-auth-guard" },
-        headers: {},
-      });
-
-      const userId = extractUserIdFromContext(ctx);
-      expect(userId).toBe("user-from-auth-guard");
+  describe("auth contract", () => {
+    it("throws UnauthorizedException when req.user is absent", async () => {
+      await expect(controller.getFeed({})).rejects.toThrow(UnauthorizedException);
     });
 
-    it("throws UnauthorizedException when request.user is missing (headers are never trusted)", () => {
-      const ctx = createMockContext({
-        headers: { "x-user-id": "spoofed-user" },
-      });
-
-      expect(() => extractUserIdFromContext(ctx)).toThrow(UnauthorizedException);
-    });
-
-    it("throws UnauthorizedException when neither user.id nor header is present", () => {
-      const ctx = createMockContext({
-        headers: {},
-      });
-
-      expect(() => extractUserIdFromContext(ctx)).toThrow(UnauthorizedException);
+    it("passes the injected id to the service", async () => {
+      await controller.getFeed({ user: { id: "injected-user" } });
+      expect(getFeedMock).toHaveBeenCalledWith("injected-user");
     });
   });
 });

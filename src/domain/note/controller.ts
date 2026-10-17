@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, Put } from "@nestjs/common";
-import { CurrentUserId } from "../story/controller.js";
+import { Body, Controller, Delete, Get, Put, Req } from "@nestjs/common";
+import { getAuthUser, type AuthUser } from "../shared.js";
 import type { UpsertNoteDto } from "./dto/request.js";
 import { NoteService } from "./service.js";
 
@@ -8,7 +8,8 @@ export class NoteController {
   constructor(private readonly noteService: NoteService) {}
 
   @Put()
-  async upsertNote(@CurrentUserId() userId: string, @Body() dto: UpsertNoteDto) {
+  async upsertNote(@Req() req: { user?: unknown }, @Body() dto: UpsertNoteDto) {
+    const { id: userId }: AuthUser = getAuthUser(req);
     const data = await this.noteService.upsertNote(userId, dto);
     return {
       success: true,
@@ -18,7 +19,8 @@ export class NoteController {
   }
 
   @Get("feed")
-  async getFeed(@CurrentUserId() userId: string) {
+  async getFeed(@Req() req: { user?: unknown }) {
+    const { id: userId }: AuthUser = getAuthUser(req);
     const data = await this.noteService.getFeed(userId);
     return {
       success: true,
@@ -28,7 +30,8 @@ export class NoteController {
   }
 
   @Delete("me")
-  async deleteMyNote(@CurrentUserId() userId: string) {
+  async deleteMyNote(@Req() req: { user?: unknown }) {
+    const { id: userId }: AuthUser = getAuthUser(req);
     await this.noteService.deleteMyNote(userId);
     return {
       success: true,
