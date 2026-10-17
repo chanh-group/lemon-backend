@@ -14,6 +14,18 @@ export const SESSION_KEY_PREFIX = "sessions:";
 export const USER_CACHE_KEY_PREFIX = "user:";
 export const OTP_KEY_PREFIX = "otp:";
 export const FORGOT_OTP_KEY_PREFIX = "forgot_otp:";
+export const STORY_FEED_KEY_PREFIX = "stories:feed:";
+
+export const STORY_FEED_TTL_SECS = 60; // 1 minute — per-viewer feed tray cache
+export const STORY_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours — story lifetime
+export const STORY_DEFAULT_BUCKET = "lemon-stories";
+export const STORY_MAX_CAPTION_LENGTH = 500;
+
+// Note domain TTLs/limits (24h expiry, 200 char limit).
+export const NOTE_FEED_KEY_PREFIX = "notes:feed:";
+export const NOTE_FEED_TTL_SECS = 60; // 1 minute — per-viewer note feed tray cache
+export const NOTE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours — note lifetime
+export const NOTE_MAX_CONTENT_LENGTH = 200;
 
 // ioredis client tuning (mirrors Rust ConnectionManager timeouts).
 export const REDIS_COMMAND_TIMEOUT_MS = 2000;

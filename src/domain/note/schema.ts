@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { check, index, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { created, uuidV7 } from "../../utils/database.js";
 import { users } from "../user/schema.js";
 
@@ -17,7 +17,7 @@ export const notes = pgTable(
   },
   (table) => [
     check("notes_content_len_chk", sql`char_length(${table.content}) BETWEEN 1 AND 200`),
-    index("notes_user_idx").on(table.userId, table.expiresAt.desc()),
+    uniqueIndex("notes_user_uq").on(table.userId),
     index("notes_expiry_idx").on(table.expiresAt),
   ],
 );
