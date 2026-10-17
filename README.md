@@ -94,7 +94,7 @@ Media (story/note) upload trực tiếp lên S3-compatible storage bằng presig
 
 - **Cloudflare R2**: `S3_REGION=auto` + `S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com` (giữ `S3_FORCE_PATH_STYLE=false`).
 - **MinIO (local)**: `S3_ENDPOINT=http://localhost:9000` + `S3_FORCE_PATH_STYLE=true`.
-- Production thiếu `S3_BUCKET`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` → **crash ngay lúc boot** (fail fast). Dev/test thiếu config → `UnavailableStorageService`, mọi thao tác fail closed (503).
+- Production (nhận biết khi `APP_ENV` **hoặc** `NODE_ENV` = `production`) thiếu `S3_BUCKET`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` → **crash ngay lúc boot** (fail fast). Dev/test thiếu config → `UnavailableStorageService`, mọi thao tác fail closed (503).
 
 > **Known limitation (D9):** object đã upload lên prefix `stories/` nhưng verify thất bại (sai MIME/kích thước, chưa gắn story) hiện **không được dọn** trong batch này. Khuyến nghị đặt S3 lifecycle rule tự xoá object prefix `stories/` chưa gắn story sau N ngày (Batch C/D sẽ xử lý).
 

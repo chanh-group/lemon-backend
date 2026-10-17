@@ -1,4 +1,4 @@
-import { HeadObjectCommand, NotFound, PutObjectCommand, type S3Client } from "@aws-sdk/client-s3";
+import { HeadObjectCommand, NotFound, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { describe, expect, it, vi } from "vitest";
 import { StorageError } from "../../../../src/utils/storage/error.js";
 import { S3StorageService } from "../../../../src/utils/storage/s3.js";
@@ -84,5 +84,38 @@ describe("S3StorageService", () => {
   it("exposes the configured bucket", () => {
     const { service } = createStorage(vi.fn());
     expect(service.getBucket()).toBe("test-bucket");
+  });
+
+  it("real signing with WHEN_REQUIRED produces a checksum-free PUT URL (socket-free)", async () => {
+    const client = new S3Client({
+      region: "us-east-1",
+      credentials: { accessKeyId: "test-key", secretAccessKey: "test-secret" },
+      requestChecksumCalculation: "WHEN_REQUIRED",
+    });
+    const service = new S3StorageService({ client, bucket: "test-bucket", presignTtlSecs: 300 });
+
+    const { uploadUrl } = await service.presignPut({
+      objectKey: "stories/u1/abc.jpg",
+      mimeType: "image/jpeg",
+    });
+
+    expect(uploadUrl).not.toContain("x-amz-checksum-crc32");
+    expect(uploadUrl).not.toContain("x-amz-sdk-checksum-algorithm");
+    expect(uploadUrl).toContain("X-Amz-SignedHeaders=content-type");
+  });
+
+  it("control: an SDK-default client embeds the empty-body checksum params", async () => {
+    const client = new S3Client({
+      region: "us-east-1",
+      credentials: { accessKeyId: "test-key", secretAccessKey: "test-secret" },
+    });
+    const service = new S3StorageService({ client, bucket: "test-bucket", presignTtlSecs: 300 });
+
+    const { uploadUrl } = await service.presignPut({
+      objectKey: "stories/u1/abc.jpg",
+      mimeType: "image/jpeg",
+    });
+
+    expect(uploadUrl).toContain("x-amz-checksum-crc32");
   });
 });

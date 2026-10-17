@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveStorageConfig } from "../../../src/configs/storage.js";
+import type { S3StorageService } from "../../../src/utils/storage/s3.js";
 
 const COMPLETE_ENV = {
   APP_ENV: "development",
@@ -55,6 +56,12 @@ describe("resolveStorageConfig", () => {
     ).toThrow("Environment variable S3_SECRET_ACCESS_KEY is not set");
   });
 
+  it("treats NODE_ENV=production as production even when APP_ENV says development", () => {
+    expect(() => resolveStorageConfig({ APP_ENV: "development", NODE_ENV: "production" })).toThrow(
+      "Environment variable S3_BUCKET is not set",
+    );
+  });
+
   it("applies optional overrides (endpoint, region, path style, TTL)", () => {
     expect(
       resolveStorageConfig({
@@ -75,12 +82,23 @@ describe("resolveStorageConfig", () => {
 });
 
 describe("StorageModule", () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+
   beforeEach(() => {
+    process.env.NODE_ENV = "test";
     delete process.env.S3_BUCKET;
     delete process.env.S3_ACCESS_KEY_ID;
     delete process.env.S3_SECRET_ACCESS_KEY;
     delete process.env.APP_ENV;
     vi.resetModules();
+  });
+
+  afterAll(() => {
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
   });
 
   it("dev without S3 env provides UnavailableStorageService", async () => {
@@ -104,6 +122,26 @@ describe("StorageModule", () => {
 
     const mod = await Test.createTestingModule({ imports: [StorageModule] }).compile();
     expect(mod.get(STORAGE_SERVICE)).toBeInstanceOf(S3StorageService);
+    await mod.close();
+  }, 15000);
+
+  it("configured module signs presigned PUTs without SDK checksum params", async () => {
+    process.env.S3_ACCESS_KEY_ID = "k";
+    process.env.S3_SECRET_ACCESS_KEY = "s";
+    const { Test } = await import("@nestjs/testing");
+    const { StorageModule } = await import("../../../src/configs/storage.js");
+    const { STORAGE_SERVICE } = await import("../../../src/utils/storage/store.js");
+
+    const mod = await Test.createTestingModule({ imports: [StorageModule] }).compile();
+    const storage = mod.get<S3StorageService>(STORAGE_SERVICE);
+
+    const { uploadUrl } = await storage.presignPut({
+      objectKey: "stories/u1/abc.jpg",
+      mimeType: "image/jpeg",
+    });
+    expect(uploadUrl).not.toContain("x-amz-checksum-crc32");
+    expect(uploadUrl).not.toContain("x-amz-sdk-checksum-algorithm");
+    expect(uploadUrl).toContain("X-Amz-SignedHeaders=content-type");
     await mod.close();
   }, 15000);
 });

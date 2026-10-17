@@ -34,7 +34,9 @@ function required(env: StorageEnv, key: string): string {
 }
 
 export function resolveStorageConfig(env: StorageEnv): StorageConfig {
-  const isProduction = (env.APP_ENV ?? "development") === "production";
+  // Fail-fast bias: either signal marks production, so a stale APP_ENV cannot
+  // mask NODE_ENV=production.
+  const isProduction = env.APP_ENV === "production" || env.NODE_ENV === "production";
 
   // Prod: fail fast on missing config. Dev/test: default bucket, no creds → unavailable.
   const bucket = isProduction
@@ -77,6 +79,9 @@ async function createS3Storage(
     region: config.region,
     ...(config.endpoint !== undefined && { endpoint: config.endpoint }),
     forcePathStyle: config.forcePathStyle,
+    // SDK default (WHEN_SUPPORTED) signs an empty-body CRC32 into presigned
+    // PUT URLs; MinIO/R2/B2 reject it. WHEN_REQUIRED is the AWS-documented opt-out.
+    requestChecksumCalculation: "WHEN_REQUIRED",
     credentials: {
       accessKeyId: config.accessKeyId,
       secretAccessKey: config.secretAccessKey,
