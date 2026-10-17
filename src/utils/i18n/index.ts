@@ -37,7 +37,7 @@ export const t = (key: string, lang: string, params?: Record<string, string>): s
 
   if (params) {
     for (const [k, v] of Object.entries(params)) {
-      text = text.replace(`{${k}}`, v);
+      text = text.replaceAll(`{${k}}`, v);
     }
   }
 

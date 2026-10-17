@@ -1,3 +1,25 @@
 {
-  "WELCOME": "Chào mừng bạn đến với ứng dụng"
+  "WELCOME": "Chào mừng bạn đến với ứng dụng",
+  "UNAUTHORIZED": "Bạn cần đăng nhập để tiếp tục",
+  "FORBIDDEN": "Bạn không có quyền thực hiện thao tác này",
+  "BAD_REQUEST": "Yêu cầu không hợp lệ",
+  "NOT_FOUND": "Không tìm thấy tài nguyên",
+  "CONFLICT": "Dữ liệu đã tồn tại hoặc xung đột",
+  "VALIDATION_ERROR": "Dữ liệu không hợp lệ",
+  "TOO_MANY_REQUESTS": "Bạn thao tác quá nhanh, vui lòng thử lại sau",
+  "INTERNAL_SERVER_ERROR": "Đã có lỗi xảy ra, vui lòng thử lại sau",
+  "SERVICE_UNAVAILABLE": "Dịch vụ tạm thời không khả dụng, vui lòng thử lại sau",
+  "STORY_NOT_FOUND": "Story không tồn tại hoặc đã hết hạn",
+  "STORY_VIEW_FORBIDDEN": "Bạn chỉ có thể xem story của bạn bè",
+  "STORY_VIEWERS_FORBIDDEN": "Chỉ chủ story mới xem được danh sách người xem",
+  "STORY_DELETE_FORBIDDEN": "Bạn chỉ có thể xoá story của chính mình",
+  "INVALID_MEDIA_TYPE": "Story ảnh/video phải có objectKey",
+  "INVALID_OBJECT_KEY": "objectKey phải nằm trong thư mục stories của bạn",
+  "TEXT_STORY_REQUIRES_CONTENT": "Story dạng chữ cần có caption hoặc background",
+  "FILE_TOO_LARGE": "File vượt quá giới hạn cho phép ({maxMb}MB) — hãy chọn file nhỏ hơn {maxMb}MB",
+  "FILE_TYPE_NOT_ALLOWED": "Định dạng file không được hỗ trợ",
+  "OBJECT_NOT_UPLOADED": "File chưa được upload lên storage",
+  "PRESIGN_FAILED": "Không cấp được URL upload, vui lòng thử lại sau",
+  "NOTE_NOT_FOUND": "Note không tồn tại hoặc đã hết hạn",
+  "NOTE_EMPTY_CONTENT": "Nội dung note không được để trống"
 }

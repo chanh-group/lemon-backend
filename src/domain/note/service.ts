@@ -1,7 +1,8 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { CACHE_STORE, type CacheStoreExt } from "../../utils/cache/store.js";
 import { NOTE_FEED_TTL_SECS, NOTE_TTL_MS } from "../../utils/cache/constants.js";
 import { noteFeedKey } from "../../utils/cache/keys.js";
+import { BusinessError } from "../../utils/errors/business.js";
 import { Logger } from "../../utils/logger.js";
 import type { UpsertNoteDto } from "./dto/request.js";
 import type { NoteResponse, UserNoteFeedResponse } from "./dto/response.js";
@@ -19,7 +20,7 @@ export class NoteService {
 
   async upsertNote(userId: string, dto: UpsertNoteDto): Promise<NoteResponse> {
     if (!dto.content || dto.content.trim().length === 0) {
-      throw new BadRequestException("Note content cannot be empty");
+      throw new BusinessError("NOTE_EMPTY_CONTENT");
     }
 
     const trimmedContent = dto.content.trim();
@@ -79,7 +80,7 @@ export class NoteService {
   async deleteMyNote(userId: string): Promise<void> {
     const deleted = await this.noteRepo.deleteByUserId(userId);
     if (!deleted) {
-      throw new NotFoundException("Active note not found");
+      throw new BusinessError("NOTE_NOT_FOUND");
     }
 
     await this.invalidateUserAndFriendFeeds(userId);

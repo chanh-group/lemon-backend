@@ -1,9 +1,8 @@
 import {
-  BadRequestException,
-  HttpStatus,
   StandardSchemaValidationPipe,
   type StandardSchemaValidationPipeOptions,
 } from "@nestjs/common";
+import { BusinessError } from "./errors/business.js";
 
 type SchemaIssues = Parameters<
   NonNullable<StandardSchemaValidationPipeOptions["exceptionFactory"]>
@@ -22,8 +21,6 @@ function formatIssue(issue: SchemaIssues[number]): string {
 export function standardSchemaPipe(): StandardSchemaValidationPipe {
   return new StandardSchemaValidationPipe({
     transform: true,
-    errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY,
-    exceptionFactory: (issues) =>
-      new BadRequestException(`VALIDATION_ERROR: ${issues.map(formatIssue).join("; ")}`),
+    exceptionFactory: (issues) => BusinessError.validation(issues.map(formatIssue).join("; ")),
   });
 }

@@ -1,4 +1,3 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { CacheStoreExt } from "../../../../src/utils/cache/store.js";
 import type { StoryRepository } from "../../../../src/domain/story/repository.js";
@@ -175,13 +174,13 @@ describe("StoryService", () => {
       expect(createStoryMock).toHaveBeenCalledTimes(1);
     });
 
-    it("throws BadRequestException if media story lacks objectKey", async () => {
+    it("throws INVALID_MEDIA_TYPE if media story lacks objectKey", async () => {
       await expect(
         service.createStory("user-owner-1", {
           kind: "IMAGE",
           caption: "No photo key",
         }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toMatchObject({ code: "INVALID_MEDIA_TYPE" });
     });
 
     it("rejects a media objectKey outside the owner's folder", async () => {
@@ -190,7 +189,7 @@ describe("StoryService", () => {
           kind: "IMAGE",
           objectKey: "stories/other-user/photo.jpg",
         }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toMatchObject({ code: "INVALID_OBJECT_KEY" });
     });
 
     it("ignores any client-supplied bucket", async () => {
@@ -237,7 +236,7 @@ describe("StoryService", () => {
           caption: "   ",
           background: "   ",
         }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toMatchObject({ code: "TEXT_STORY_REQUIRES_CONTENT" });
     });
 
     it("TEXT story with a client objectKey stores none", async () => {
@@ -252,21 +251,21 @@ describe("StoryService", () => {
       expect(createStoryMock).toHaveBeenCalledWith(expect.objectContaining({ objectKey: null }));
     });
 
-    it("throws BadRequestException if TEXT story has neither caption nor background", async () => {
+    it("throws TEXT_STORY_REQUIRES_CONTENT if TEXT story has neither caption nor background", async () => {
       await expect(
         service.createStory("user-owner-1", {
           kind: "TEXT",
         }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toMatchObject({ code: "TEXT_STORY_REQUIRES_CONTENT" });
     });
 
-    it("throws BadRequestException if TEXT caption is whitespace-only", async () => {
+    it("throws TEXT_STORY_REQUIRES_CONTENT if TEXT caption is whitespace-only", async () => {
       await expect(
         service.createStory("user-owner-1", {
           kind: "TEXT",
           caption: "   ",
         }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toMatchObject({ code: "TEXT_STORY_REQUIRES_CONTENT" });
     });
   });
 
@@ -342,18 +341,18 @@ describe("StoryService", () => {
       expect(result.id).toBe(mockStory.id);
     });
 
-    it("throws ForbiddenException if viewer is not a friend", async () => {
+    it("throws STORY_VIEW_FORBIDDEN if viewer is not a friend", async () => {
       getFriendUserIdsMock.mockResolvedValueOnce(["friend-other"]);
-      await expect(service.getStoryById("stranger-user", mockStory.id)).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(service.getStoryById("stranger-user", mockStory.id)).rejects.toMatchObject({
+        code: "STORY_VIEW_FORBIDDEN",
+      });
     });
 
-    it("throws NotFoundException if story is not found or expired", async () => {
+    it("throws STORY_NOT_FOUND if story is not found or expired", async () => {
       findActiveByIdMock.mockResolvedValueOnce(null);
-      await expect(service.getStoryById("user-owner-1", "non-existent-id")).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.getStoryById("user-owner-1", "non-existent-id")).rejects.toMatchObject({
+        code: "STORY_NOT_FOUND",
+      });
     });
   });
 
@@ -366,11 +365,11 @@ describe("StoryService", () => {
       expect(deleteBestEffortMock).toHaveBeenCalledWith("stories:feed:friend-1");
     });
 
-    it("throws ForbiddenException if viewer is not a friend", async () => {
+    it("throws STORY_VIEW_FORBIDDEN if viewer is not a friend", async () => {
       getFriendUserIdsMock.mockResolvedValueOnce(["friend-other"]);
-      await expect(service.viewStory("stranger-user", mockStory.id)).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(service.viewStory("stranger-user", mockStory.id)).rejects.toMatchObject({
+        code: "STORY_VIEW_FORBIDDEN",
+      });
     });
 
     it("ignores self-views without polluting the viewers list", async () => {
@@ -379,9 +378,11 @@ describe("StoryService", () => {
       expect(markAsViewedMock).not.toHaveBeenCalled();
     });
 
-    it("throws NotFoundException if story not found", async () => {
+    it("throws STORY_NOT_FOUND if story not found", async () => {
       findActiveByIdMock.mockResolvedValueOnce(null);
-      await expect(service.viewStory("friend-1", "bad-id")).rejects.toThrow(NotFoundException);
+      await expect(service.viewStory("friend-1", "bad-id")).rejects.toMatchObject({
+        code: "STORY_NOT_FOUND",
+      });
     });
   });
 
@@ -392,17 +393,17 @@ describe("StoryService", () => {
       expect(viewers[0].user.id).toBe("viewer-1");
     });
 
-    it("throws ForbiddenException if caller is NOT the story owner", async () => {
-      await expect(service.getViewers("not-owner-user", mockStory.id)).rejects.toThrow(
-        ForbiddenException,
-      );
+    it("throws STORY_VIEWERS_FORBIDDEN if caller is NOT the story owner", async () => {
+      await expect(service.getViewers("not-owner-user", mockStory.id)).rejects.toMatchObject({
+        code: "STORY_VIEWERS_FORBIDDEN",
+      });
     });
 
-    it("throws NotFoundException if story does not exist", async () => {
+    it("throws STORY_NOT_FOUND if story does not exist", async () => {
       findByIdMock.mockResolvedValueOnce(null);
-      await expect(service.getViewers("user-owner-1", "not-found-id")).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.getViewers("user-owner-1", "not-found-id")).rejects.toMatchObject({
+        code: "STORY_NOT_FOUND",
+      });
     });
   });
 
@@ -417,17 +418,17 @@ describe("StoryService", () => {
       ]);
     });
 
-    it("throws ForbiddenException if caller is not the owner", async () => {
-      await expect(service.deleteStory("intruder-user", mockStory.id)).rejects.toThrow(
-        ForbiddenException,
-      );
+    it("throws STORY_DELETE_FORBIDDEN if caller is not the owner", async () => {
+      await expect(service.deleteStory("intruder-user", mockStory.id)).rejects.toMatchObject({
+        code: "STORY_DELETE_FORBIDDEN",
+      });
     });
 
-    it("throws NotFoundException if story does not exist", async () => {
+    it("throws STORY_NOT_FOUND if story does not exist", async () => {
       findByIdMock.mockResolvedValueOnce(null);
-      await expect(service.deleteStory("user-owner-1", "missing-id")).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.deleteStory("user-owner-1", "missing-id")).rejects.toMatchObject({
+        code: "STORY_NOT_FOUND",
+      });
     });
   });
 });

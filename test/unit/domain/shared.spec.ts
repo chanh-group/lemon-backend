@@ -1,4 +1,4 @@
-import { UnauthorizedException } from "@nestjs/common";
+import { BusinessError } from "../../../src/utils/errors/business.js";
 import { describe, expect, it } from "vitest";
 import { getAuthUser } from "../../../src/domain/shared.js";
 
@@ -7,17 +7,18 @@ describe("getAuthUser", () => {
     expect(getAuthUser({ user: { id: "user-1" } })).toEqual({ id: "user-1" });
   });
 
-  it("throws UnauthorizedException when req.user is missing", () => {
-    expect(() => getAuthUser({})).toThrow(UnauthorizedException);
+  it("throws UNAUTHORIZED when req.user is missing", () => {
+    expect(() => getAuthUser({})).toThrow(BusinessError);
+    expect(() => getAuthUser({})).toThrow(expect.objectContaining({ code: "UNAUTHORIZED" }));
   });
 
-  it("throws UnauthorizedException when req.user is malformed (missing or non-string id)", () => {
-    expect(() => getAuthUser({ user: {} })).toThrow(UnauthorizedException);
-    expect(() => getAuthUser({ user: { id: 42 } })).toThrow(UnauthorizedException);
+  it("throws UNAUTHORIZED when req.user is malformed (missing or non-string id)", () => {
+    expect(() => getAuthUser({ user: {} })).toThrow(BusinessError);
+    expect(() => getAuthUser({ user: { id: 42 } })).toThrow(BusinessError);
   });
 
   it("ignores spoofable headers entirely", () => {
     const reqWithSpoofedHeader = { headers: { "x-user-id": "spoofed" }, user: undefined };
-    expect(() => getAuthUser(reqWithSpoofedHeader)).toThrow(UnauthorizedException);
+    expect(() => getAuthUser(reqWithSpoofedHeader)).toThrow(BusinessError);
   });
 });
