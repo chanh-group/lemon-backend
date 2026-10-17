@@ -95,6 +95,7 @@ describe("ErrorFilter", () => {
     expect(status).toHaveBeenCalledWith(503);
     const payload = json.mock.calls[0][0] as { code: string; message: string };
     expect(payload.code).toBe("SERVICE_UNAVAILABLE");
+    expect(payload.message).toBe("Dịch vụ tạm thời không khả dụng, vui lòng thử lại sau");
     expect(payload.message).not.toContain("redis");
     expect(errorMock).toHaveBeenCalledTimes(1);
     expect(warnMock).not.toHaveBeenCalled();
@@ -108,6 +109,7 @@ describe("ErrorFilter", () => {
     expect(status).toHaveBeenCalledWith(500);
     const payload = json.mock.calls[0][0] as { code: string; message: string };
     expect(payload.code).toBe("INTERNAL_SERVER_ERROR");
+    expect(payload.message).toBe("Đã có lỗi xảy ra, vui lòng thử lại sau");
     expect(payload.message).not.toContain("secret db detail");
     expect(errorMock).toHaveBeenCalledTimes(1);
   });
