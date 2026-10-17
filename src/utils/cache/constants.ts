@@ -19,6 +19,7 @@ export const STORY_FEED_KEY_PREFIX = "stories:feed:";
 export const STORY_FEED_TTL_SECS = 60; // 1 minute — per-viewer feed tray cache
 export const STORY_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours — story lifetime
 export const STORY_DEFAULT_BUCKET = "lemon-stories";
+export const STORY_MAX_CAPTION_LENGTH = 500;
 
 // Note domain TTLs/limits (24h expiry, 200 char limit).
 export const NOTE_FEED_KEY_PREFIX = "notes:feed:";

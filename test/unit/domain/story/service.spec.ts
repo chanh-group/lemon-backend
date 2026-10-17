@@ -218,6 +218,37 @@ describe("StoryService", () => {
       );
     });
 
+    it("stores caption and background trimmed", async () => {
+      await service.createStory("user-owner-1", {
+        kind: "TEXT",
+        caption: "  hi  ",
+        background: " #fff ",
+      });
+
+      expect(createStoryMock).toHaveBeenCalledWith(
+        expect.objectContaining({ caption: "hi", background: "#fff" }),
+      );
+    });
+
+    it("rejects a caption longer than 500 characters", async () => {
+      await expect(
+        service.createStory("user-owner-1", {
+          kind: "TEXT",
+          caption: "a".repeat(501),
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("rejects TEXT stories whose caption and background are both whitespace-only", async () => {
+      await expect(
+        service.createStory("user-owner-1", {
+          kind: "TEXT",
+          caption: "   ",
+          background: "   ",
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it("throws BadRequestException if TEXT story has neither caption nor background", async () => {
       await expect(
         service.createStory("user-owner-1", {

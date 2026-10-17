@@ -9,6 +9,7 @@ import {
 import {
   STORY_DEFAULT_BUCKET,
   STORY_FEED_TTL_SECS,
+  STORY_MAX_CAPTION_LENGTH,
   STORY_TTL_MS,
 } from "../../utils/cache/constants.js";
 import { CACHE_STORE, type CacheStoreExt } from "../../utils/cache/store.js";
@@ -33,11 +34,7 @@ export class StoryService {
   ) {}
 
   async createStory(userId: string, dto: CreateStoryDto): Promise<StoryItemResponse> {
-    if (dto.kind === "TEXT") {
-      if (!dto.caption?.trim() && !dto.background) {
-        throw new BadRequestException("TEXT story requires either caption or background");
-      }
-    } else if (dto.kind === "IMAGE" || dto.kind === "VIDEO") {
+    if (dto.kind === "IMAGE" || dto.kind === "VIDEO") {
       if (!dto.objectKey) {
         throw new BadRequestException("INVALID_MEDIA_TYPE: Media story requires objectKey");
       }
@@ -46,8 +43,19 @@ export class StoryService {
           "INVALID_OBJECT_KEY: objectKey must be scoped to your user folder",
         );
       }
-    } else {
+    } else if (dto.kind !== "TEXT") {
       throw new BadRequestException("INVALID_MEDIA_TYPE: Unsupported story kind");
+    }
+
+    const caption = dto.caption?.trim() || null;
+    const background = dto.background?.trim() || null;
+    if (caption && caption.length > STORY_MAX_CAPTION_LENGTH) {
+      throw new BadRequestException(
+        `STORY_CAPTION_TOO_LONG: caption must not exceed ${STORY_MAX_CAPTION_LENGTH} characters`,
+      );
+    }
+    if (dto.kind === "TEXT" && !caption && !background) {
+      throw new BadRequestException("TEXT story requires either caption or background");
     }
 
     const now = new Date();
@@ -62,8 +70,8 @@ export class StoryService {
       width: dto.width ?? null,
       height: dto.height ?? null,
       durationMs: dto.durationMs ?? null,
-      caption: dto.caption ?? null,
-      background: dto.background ?? null,
+      caption,
+      background,
       createdAt: now,
       expiresAt,
     };
