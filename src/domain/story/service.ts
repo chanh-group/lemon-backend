@@ -1,12 +1,16 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import {
-  STORY_DEFAULT_BUCKET,
+  STORY_ALLOWED_IMAGE_MIME,
+  STORY_ALLOWED_VIDEO_MIME,
   STORY_FEED_TTL_SECS,
+  STORY_MAX_IMAGE_BYTES,
+  STORY_MAX_VIDEO_BYTES,
   STORY_TTL_MS,
 } from "../../utils/cache/constants.js";
 import { CACHE_STORE, type CacheStoreExt } from "../../utils/cache/store.js";
 import { storyFeedKey } from "../../utils/cache/keys.js";
 import { BusinessError } from "../../utils/errors/business.js";
+import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.js";
 import { groupStoriesByUser, reviveUserStoryFeed, toStoryItemResponse } from "./dto/mapper.js";
 import type { CreateStoryDto } from "./dto/request.js";
 import type {
@@ -17,6 +21,16 @@ import type {
 import { STORY_REPOSITORY, type StoryRepository } from "./repository.js";
 import type { NewStory } from "./schema.js";
 
+const BYTES_PER_MB = 1024 * 1024;
+
+const STORY_MEDIA_RULES: Record<
+  "IMAGE" | "VIDEO",
+  { maxBytes: number; allowedMimes: readonly string[] }
+> = {
+  IMAGE: { maxBytes: STORY_MAX_IMAGE_BYTES, allowedMimes: STORY_ALLOWED_IMAGE_MIME },
+  VIDEO: { maxBytes: STORY_MAX_VIDEO_BYTES, allowedMimes: STORY_ALLOWED_VIDEO_MIME },
+};
+
 @Injectable()
 export class StoryService {
   private readonly logger = new Logger(StoryService.name);
@@ -24,16 +38,39 @@ export class StoryService {
   constructor(
     @Inject(STORY_REPOSITORY) private readonly storyRepo: StoryRepository,
     @Inject(CACHE_STORE) private readonly cache: CacheStoreExt,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
   async createStory(userId: string, dto: CreateStoryDto): Promise<StoryItemResponse> {
-    if (dto.kind === "IMAGE" || dto.kind === "VIDEO") {
+    const isMedia = dto.kind === "IMAGE" || dto.kind === "VIDEO";
+
+    let bucket: string | null = null;
+    let head: { contentLength: number; contentType: string } | null = null;
+
+    if (isMedia) {
       if (!dto.objectKey) {
         throw new BusinessError("INVALID_MEDIA_TYPE");
       }
       if (!dto.objectKey.startsWith(`stories/${userId}/`)) {
         throw new BusinessError("INVALID_OBJECT_KEY");
       }
+
+      head = await this.storage.headObject(dto.objectKey);
+      if (!head) {
+        throw new BusinessError("OBJECT_NOT_UPLOADED");
+      }
+
+      const rules = dto.kind === "IMAGE" ? STORY_MEDIA_RULES.IMAGE : STORY_MEDIA_RULES.VIDEO;
+      if (head.contentLength > rules.maxBytes) {
+        throw new BusinessError("FILE_TOO_LARGE", {
+          maxMb: String(Math.floor(rules.maxBytes / BYTES_PER_MB)),
+        });
+      }
+      if (!rules.allowedMimes.includes(head.contentType)) {
+        throw new BusinessError("FILE_TYPE_NOT_ALLOWED", { mimeType: head.contentType });
+      }
+
+      bucket = this.storage.getBucket();
     }
 
     const caption = dto.caption?.trim() || null;
@@ -48,9 +85,9 @@ export class StoryService {
     const newStoryData: NewStory = {
       userId,
       kind: dto.kind,
-      bucket: dto.kind === "TEXT" ? null : STORY_DEFAULT_BUCKET,
-      objectKey: dto.kind === "TEXT" ? null : (dto.objectKey ?? null),
-      mimeType: dto.mimeType ?? null,
+      bucket,
+      objectKey: isMedia ? (dto.objectKey ?? null) : null,
+      mimeType: isMedia ? (head?.contentType ?? null) : null,
       width: dto.width ?? null,
       height: dto.height ?? null,
       durationMs: dto.durationMs ?? null,
