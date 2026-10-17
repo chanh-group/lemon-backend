@@ -3,7 +3,11 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { StorageError } from "./error.js";
 import type { StorageService } from "./store.js";
 
-type PresignerFn = typeof getSignedUrl;
+export type PresignerFn = (
+  client: S3Client,
+  command: PutObjectCommand,
+  options: { expiresIn: number; signableHeaders: Set<string> },
+) => Promise<string>;
 
 export interface S3StorageOptions {
   client: S3Client;

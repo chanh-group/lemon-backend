@@ -31,7 +31,7 @@ export const STORY_ALLOWED_IMAGE_MIME = [
   "image/gif",
 ] as const;
 export const STORY_ALLOWED_VIDEO_MIME = ["video/mp4", "video/webm", "video/quicktime"] as const;
-export const MIME_EXTENSION_MAP: Record<string, string> = {
+export const MIME_EXTENSION_MAP: Record<string, string | undefined> = {
   "image/jpeg": "jpg",
   "image/png": "png",
   "image/webp": "webp",

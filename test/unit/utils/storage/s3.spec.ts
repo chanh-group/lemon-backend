@@ -1,15 +1,18 @@
 import { HeadObjectCommand, NotFound, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type Mock } from "vitest";
 import { StorageError } from "../../../../src/utils/storage/error.js";
-import { S3StorageService } from "../../../../src/utils/storage/s3.js";
+import { S3StorageService, type PresignerFn } from "../../../../src/utils/storage/s3.js";
 
-function createStorage(send: ReturnType<typeof vi.fn>, signer = vi.fn()) {
+function createStorage(
+  send: ReturnType<typeof vi.fn>,
+  signer: Mock<PresignerFn> = vi.fn<PresignerFn>(),
+) {
   const client = { send } as unknown as S3Client;
   const service = new S3StorageService({
     client,
     bucket: "test-bucket",
     presignTtlSecs: 300,
-    presigner: signer as never,
+    presigner: signer,
   });
   return { service, signer };
 }
@@ -17,7 +20,7 @@ function createStorage(send: ReturnType<typeof vi.fn>, signer = vi.fn()) {
 describe("S3StorageService", () => {
   it("presigns a PUT with the exact content type and TTL", async () => {
     const send = vi.fn();
-    const signer = vi.fn().mockResolvedValue("https://s3.example/signed");
+    const signer = vi.fn<PresignerFn>().mockResolvedValue("https://s3.example/signed");
     const { service } = createStorage(send, signer);
 
     const result = await service.presignPut({
@@ -38,7 +41,7 @@ describe("S3StorageService", () => {
   });
 
   it("wraps presigner failures in StorageError", async () => {
-    const signer = vi.fn().mockRejectedValue(new Error("no creds"));
+    const signer = vi.fn<PresignerFn>().mockRejectedValue(new Error("no creds"));
     const { service } = createStorage(vi.fn(), signer);
 
     await expect(
