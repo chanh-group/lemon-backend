@@ -28,7 +28,7 @@ describe("StoryService", () => {
   let findViewersByStoryIdMock: Mock<(storyId: string) => Promise<StoryViewerResponse[]>>;
   let findViewedStoryIdsMock: Mock<(userId: string, storyIds: string[]) => Promise<Set<string>>>;
   let markAsViewedMock: Mock<(storyId: string, viewerId: string) => Promise<void>>;
-  let deleteMock: Mock<(id: string) => Promise<boolean>>;
+  let markDeletedMock: Mock<(id: string) => Promise<boolean>>;
   let getFriendUserIdsMock: Mock<(userId: string) => Promise<string[]>>;
 
   let getBestEffortMock: Mock<(key: string) => Promise<unknown>>;
@@ -116,7 +116,7 @@ describe("StoryService", () => {
     markAsViewedMock = vi
       .fn<(storyId: string, viewerId: string) => Promise<void>>()
       .mockResolvedValue(undefined);
-    deleteMock = vi.fn<(id: string) => Promise<boolean>>().mockResolvedValue(true);
+    markDeletedMock = vi.fn<(id: string) => Promise<boolean>>().mockResolvedValue(true);
     getFriendUserIdsMock = vi
       .fn<(userId: string) => Promise<string[]>>()
       .mockResolvedValue(["friend-1", "friend-2"]);
@@ -143,7 +143,7 @@ describe("StoryService", () => {
       findViewersByStoryId: findViewersByStoryIdMock,
       findViewedStoryIds: findViewedStoryIdsMock,
       markAsViewed: markAsViewedMock,
-      delete: deleteMock,
+      markDeleted: markDeletedMock,
       getFriendUserIds: getFriendUserIdsMock,
     };
 
@@ -485,9 +485,10 @@ describe("StoryService", () => {
   });
 
   describe("deleteStory", () => {
-    it("deletes story if caller is owner and invalidates cache", async () => {
+    it("tombstones the story and invalidates owner and friend feeds", async () => {
       await service.deleteStory("user-owner-1", mockStory.id);
-      expect(deleteMock).toHaveBeenCalledWith(mockStory.id);
+
+      expect(markDeletedMock).toHaveBeenCalledWith(mockStory.id);
       expect(deleteManyBestEffortMock).toHaveBeenCalledWith([
         "stories:feed:user-owner-1",
         "stories:feed:friend-1",
@@ -495,17 +496,28 @@ describe("StoryService", () => {
       ]);
     });
 
+    it("a losing concurrent delete is not found and leaves cache untouched", async () => {
+      markDeletedMock.mockResolvedValueOnce(false);
+
+      await expect(service.deleteStory("user-owner-1", mockStory.id)).rejects.toMatchObject({
+        code: "STORY_NOT_FOUND",
+      });
+      expect(deleteManyBestEffortMock).not.toHaveBeenCalled();
+    });
+
     it("throws STORY_DELETE_FORBIDDEN if caller is not the owner", async () => {
       await expect(service.deleteStory("intruder-user", mockStory.id)).rejects.toMatchObject({
         code: "STORY_DELETE_FORBIDDEN",
       });
+      expect(markDeletedMock).not.toHaveBeenCalled();
     });
 
-    it("throws STORY_NOT_FOUND if story does not exist", async () => {
+    it("throws STORY_NOT_FOUND if the story is missing or already tombstoned", async () => {
       findByIdMock.mockResolvedValueOnce(null);
       await expect(service.deleteStory("user-owner-1", "missing-id")).rejects.toMatchObject({
         code: "STORY_NOT_FOUND",
       });
+      expect(markDeletedMock).not.toHaveBeenCalled();
     });
   });
 });
