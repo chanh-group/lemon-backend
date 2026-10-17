@@ -1,0 +1,3 @@
+ALTER TABLE "stories" ADD CONSTRAINT "stories_caption_len_chk" CHECK ("stories"."caption" IS NULL OR char_length("stories"."caption") <= 500);--> statement-breakpoint
+ALTER TABLE "stories" ADD CONSTRAINT "stories_media_dims_chk" CHECK ("stories"."width" >= 0 AND "stories"."height" >= 0 AND "stories"."duration_ms" >= 0);--> statement-breakpoint
+ALTER TABLE "notes" ADD CONSTRAINT "notes_background_len_chk" CHECK (char_length("notes"."background") <= 200);

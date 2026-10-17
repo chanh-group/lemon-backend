@@ -39,6 +39,13 @@ bun run start:dev
 >   AND (n.created_at < o.created_at OR (n.created_at = o.created_at AND n.id < o.id));
 > ```
 >
+> **Lưu ý migration `0002` (CHECK constraints cho `stories`/`notes`):** các rule mới
+> (caption ≤ 500 ký tự, `width`/`height`/`duration_ms` ≥ 0, background ≤ 200 ký tự)
+> chưa được code cũ enforce, nên row cũ có thể vi phạm. Kiểm tra trước:
+> `SELECT id FROM stories WHERE char_length(caption) > 500 OR width < 0 OR height < 0 OR duration_ms < 0;`
+> và `SELECT id FROM notes WHERE char_length(background) > 200;`
+> Nếu có kết quả, dọn các row vi phạm (sửa hoặc xóa) **trước khi** `db:migrate`.
+>
 > Không sửa file SQL sinh tự động trong `drizzle/`.
 
 App mặc định nghe ở `http://localhost:3000` (đổi qua `PORT`).

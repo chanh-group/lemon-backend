@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Put, Req } from "@nestjs/common";
 import { getAuthUser, type AuthUser } from "../shared.js";
-import type { UpsertNoteDto } from "./dto/request.js";
+import { upsertNoteSchema, type UpsertNoteDto } from "./dto/request.js";
 import { NoteService } from "./service.js";
 
 @Controller("notes")
@@ -8,7 +8,10 @@ export class NoteController {
   constructor(private readonly noteService: NoteService) {}
 
   @Put()
-  async upsertNote(@Req() req: { user?: unknown }, @Body() dto: UpsertNoteDto) {
+  async upsertNote(
+    @Req() req: { user?: unknown },
+    @Body({ schema: upsertNoteSchema }) dto: UpsertNoteDto,
+  ) {
     const { id: userId }: AuthUser = getAuthUser(req);
     const data = await this.noteService.upsertNote(userId, dto);
     return {

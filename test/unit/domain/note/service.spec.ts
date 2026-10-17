@@ -130,13 +130,6 @@ describe("NoteService", () => {
         BadRequestException,
       );
     });
-
-    it("throws BadRequestException if content exceeds 200 characters", async () => {
-      const longContent = "a".repeat(201);
-      await expect(service.upsertNote("user-1", { content: longContent })).rejects.toThrow(
-        BadRequestException,
-      );
-    });
   });
 
   describe("getFeed", () => {

@@ -1,10 +1,6 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { CACHE_STORE, type CacheStoreExt } from "../../utils/cache/store.js";
-import {
-  NOTE_FEED_TTL_SECS,
-  NOTE_MAX_CONTENT_LENGTH,
-  NOTE_TTL_MS,
-} from "../../utils/cache/constants.js";
+import { NOTE_FEED_TTL_SECS, NOTE_TTL_MS } from "../../utils/cache/constants.js";
 import { noteFeedKey } from "../../utils/cache/keys.js";
 import { Logger } from "../../utils/logger.js";
 import type { UpsertNoteDto } from "./dto/request.js";
@@ -27,11 +23,6 @@ export class NoteService {
     }
 
     const trimmedContent = dto.content.trim();
-    if (trimmedContent.length > NOTE_MAX_CONTENT_LENGTH) {
-      throw new BadRequestException(
-        `Note content must not exceed ${NOTE_MAX_CONTENT_LENGTH} characters`,
-      );
-    }
 
     const expiresAt = new Date(Date.now() + NOTE_TTL_MS);
     const note = await this.noteRepo.upsert(userId, {
