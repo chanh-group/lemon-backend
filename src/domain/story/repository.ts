@@ -2,6 +2,8 @@ import type { NewStory, Story } from "./schema.js";
 import type { StoryViewerResponse } from "./dto/response.js";
 import type { UserSummary } from "../user/dto/response.js";
 
+export type PurgeableStory = { id: string; objectKey: string | null };
+
 export interface StoryRepository {
   create(data: NewStory): Promise<Story>;
   findById(id: string): Promise<Story | null>;
@@ -13,6 +15,8 @@ export interface StoryRepository {
   markAsViewed(storyId: string, userId: string): Promise<void>;
   markDeleted(id: string): Promise<boolean>;
   getFriendUserIds(userId: string): Promise<string[]>;
+  findPurgeable(limit: number): Promise<PurgeableStory[]>;
+  deleteByIds(ids: string[]): Promise<number>;
 }
 
 export const STORY_REPOSITORY: unique symbol = Symbol("STORY_REPOSITORY");

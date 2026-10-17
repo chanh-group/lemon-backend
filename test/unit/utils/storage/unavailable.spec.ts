@@ -15,6 +15,10 @@ describe("UnavailableStorageService", () => {
     await expect(storage.headObject("k")).rejects.toThrow(StorageError);
   });
 
+  it("throws StorageError on deleteObjects", async () => {
+    await expect(storage.deleteObjects(["k"])).rejects.toThrow(StorageError);
+  });
+
   it("throws StorageError on getBucket (no bucket exists)", () => {
     expect(() => storage.getBucket()).toThrow(StorageError);
   });

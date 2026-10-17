@@ -40,6 +40,14 @@ class Fake extends CacheStoreExt {
   async checkOtpCode(): Promise<never> {
     throw new CacheError("OTP");
   }
+
+  async tryAcquireLock(): Promise<never> {
+    throw new CacheError("LOCK");
+  }
+
+  async releaseLock(): Promise<never> {
+    throw new CacheError("UNLOCK");
+  }
 }
 
 describe("CacheStoreExt", () => {

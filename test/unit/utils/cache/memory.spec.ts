@@ -145,4 +145,38 @@ describe("MemoryCacheService", () => {
     expect(await c.getRaw("otp:num@x.com")).toBeNull();
     expect(await c.getRaw("otp:str@x.com")).toBeNull();
   });
+
+  it("tryAcquireLock grants the lock to the first caller only", async () => {
+    const c = new MemoryCacheService();
+    expect(await c.tryAcquireLock("lock:k", "t1", 60)).toBe(true);
+    expect(await c.tryAcquireLock("lock:k", "t2", 60)).toBe(false);
+  });
+
+  it("tryAcquireLock grants again after the TTL expires", async () => {
+    const c = new MemoryCacheService();
+    await c.tryAcquireLock("lock:k", "t1", 60);
+    vi.advanceTimersByTime(61_000);
+    expect(await c.tryAcquireLock("lock:k", "t2", 60)).toBe(true);
+  });
+
+  it("releaseLock with the owning token frees the lock", async () => {
+    const c = new MemoryCacheService();
+    await c.tryAcquireLock("lock:k", "t1", 60);
+    await c.releaseLock("lock:k", "t1");
+    expect(await c.tryAcquireLock("lock:k", "t2", 60)).toBe(true);
+  });
+
+  it("releaseLock with a stale token keeps the current owner's lock", async () => {
+    const c = new MemoryCacheService();
+    await c.tryAcquireLock("lock:k", "t1", 60);
+    await c.releaseLock("lock:k", "stale");
+    expect(await c.tryAcquireLock("lock:k", "t2", 60)).toBe(false);
+  });
+
+  it("releaseLock after expiry is a no-op", async () => {
+    const c = new MemoryCacheService();
+    await c.tryAcquireLock("lock:k", "t1", 60);
+    vi.advanceTimersByTime(61_000);
+    await expect(c.releaseLock("lock:k", "t1")).resolves.toBeUndefined();
+  });
 });

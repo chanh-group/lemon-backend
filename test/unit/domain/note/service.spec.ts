@@ -20,6 +20,8 @@ describe("NoteService", () => {
   let findUsersByIdsMock: Mock<(userIds: string[]) => Promise<Map<string, UserSummary>>>;
   let getFriendUserIdsMock: Mock<(userId: string) => Promise<string[]>>;
   let deleteByUserIdMock: Mock<(userId: string) => Promise<boolean>>;
+  let findExpiredIdsMock: Mock<(limit: number) => Promise<string[]>>;
+  let deleteByIdsMock: Mock<(ids: string[]) => Promise<number>>;
 
   let getBestEffortMock: Mock<(key: string) => Promise<unknown>>;
   let setBestEffortMock: Mock<(key: string, value: unknown, ttlSeconds?: number) => Promise<void>>;
@@ -77,6 +79,8 @@ describe("NoteService", () => {
       .fn<(userId: string) => Promise<string[]>>()
       .mockResolvedValue(["friend-1", "friend-2"]);
     deleteByUserIdMock = vi.fn<(userId: string) => Promise<boolean>>().mockResolvedValue(true);
+    findExpiredIdsMock = vi.fn<(limit: number) => Promise<string[]>>().mockResolvedValue([]);
+    deleteByIdsMock = vi.fn<(ids: string[]) => Promise<number>>().mockResolvedValue(0);
 
     getBestEffortMock = vi.fn<(key: string) => Promise<unknown>>().mockResolvedValue(null);
     setBestEffortMock = vi
@@ -93,6 +97,8 @@ describe("NoteService", () => {
       findUsersByIds: findUsersByIdsMock,
       getFriendUserIds: getFriendUserIdsMock,
       deleteByUserId: deleteByUserIdMock,
+      findExpiredIds: findExpiredIdsMock,
+      deleteByIds: deleteByIdsMock,
     };
 
     const mockCache = {

@@ -1,5 +1,12 @@
-import { HeadObjectCommand, NotFound, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectsCommand,
+  HeadObjectCommand,
+  NotFound,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { describe, expect, it, vi, type Mock } from "vitest";
+import { S3_DELETE_BATCH_SIZE } from "../../../../src/utils/cache/constants.js";
 import { StorageError } from "../../../../src/utils/storage/error.js";
 import { S3StorageService, type PresignerFn } from "../../../../src/utils/storage/s3.js";
 
@@ -82,6 +89,65 @@ describe("S3StorageService", () => {
       kind: "storage",
       cause,
     });
+  });
+
+  it("deleteObjects returns an empty result without calling S3", async () => {
+    const send = vi.fn();
+    const { service } = createStorage(send);
+    await expect(service.deleteObjects([])).resolves.toEqual({ deleted: [], failed: [] });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("deleteObjects sends one quiet batch command with the configured bucket", async () => {
+    const send = vi.fn().mockResolvedValue({ Deleted: [{ Key: "a" }, { Key: "b" }] });
+    const { service } = createStorage(send);
+    await expect(service.deleteObjects(["a", "b"])).resolves.toEqual({
+      deleted: ["a", "b"],
+      failed: [],
+    });
+    const command = send.mock.calls[0][0];
+    expect(command).toBeInstanceOf(DeleteObjectsCommand);
+    expect(command.input).toMatchObject({
+      Bucket: "test-bucket",
+      Delete: { Quiet: false, Objects: [{ Key: "a" }, { Key: "b" }] },
+    });
+  });
+
+  it("deleteObjects sends a single batch at exactly S3_DELETE_BATCH_SIZE", async () => {
+    const send = vi.fn().mockResolvedValue({ Deleted: [] });
+    const { service } = createStorage(send);
+    const keys = Array.from({ length: S3_DELETE_BATCH_SIZE }, (_, i) => `k${i}`);
+    await service.deleteObjects(keys);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0].input.Delete.Objects).toHaveLength(S3_DELETE_BATCH_SIZE);
+  });
+
+  it("deleteObjects chunks beyond S3_DELETE_BATCH_SIZE", async () => {
+    const send = vi.fn().mockResolvedValue({ Deleted: [] });
+    const { service } = createStorage(send);
+    const keys = Array.from({ length: S3_DELETE_BATCH_SIZE + 1 }, (_, i) => `k${i}`);
+    await service.deleteObjects(keys);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[0][0].input.Delete.Objects).toHaveLength(S3_DELETE_BATCH_SIZE);
+    expect(send.mock.calls[1][0].input.Delete.Objects).toHaveLength(1);
+  });
+
+  it("deleteObjects reports per-key errors as failed", async () => {
+    const send = vi.fn().mockResolvedValue({
+      Deleted: [{ Key: "a" }],
+      Errors: [{ Key: "b", Code: "AccessDenied" }],
+    });
+    const { service } = createStorage(send);
+    await expect(service.deleteObjects(["a", "b"])).resolves.toEqual({
+      deleted: ["a"],
+      failed: ["b"],
+    });
+  });
+
+  it("wraps delete transport failures in StorageError", async () => {
+    const send = vi.fn().mockRejectedValue(new Error("network down"));
+    const { service } = createStorage(send);
+    await expect(service.deleteObjects(["a"])).rejects.toBeInstanceOf(StorageError);
   });
 
   it("exposes the configured bucket", () => {

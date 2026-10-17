@@ -16,6 +16,10 @@ export class UnavailableStorageService implements StorageService {
     throw new StorageError("storage is not configured");
   }
 
+  async deleteObjects(_objectKeys: string[]): Promise<{ deleted: string[]; failed: string[] }> {
+    throw new StorageError("storage is not configured");
+  }
+
   getBucket(): string {
     throw new StorageError("storage is not configured");
   }

@@ -1,5 +1,12 @@
-import { HeadObjectCommand, NotFound, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectsCommand,
+  HeadObjectCommand,
+  NotFound,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { S3_DELETE_BATCH_SIZE } from "../cache/constants.js";
 import { StorageError } from "./error.js";
 import type { StorageService } from "./store.js";
 
@@ -68,6 +75,35 @@ export class S3StorageService implements StorageService {
         return null;
       }
       throw new StorageError("Failed to inspect object", err);
+    }
+  }
+
+  async deleteObjects(objectKeys: string[]): Promise<{ deleted: string[]; failed: string[] }> {
+    try {
+      const deleted: string[] = [];
+      const failed: string[] = [];
+      for (let i = 0; i < objectKeys.length; i += S3_DELETE_BATCH_SIZE) {
+        const chunk = objectKeys.slice(i, i + S3_DELETE_BATCH_SIZE);
+        const result = await this.client.send(
+          new DeleteObjectsCommand({
+            Bucket: this.bucket,
+            Delete: { Objects: chunk.map((Key) => ({ Key })), Quiet: false },
+          }),
+        );
+        for (const entry of result.Deleted ?? []) {
+          if (entry.Key !== undefined) {
+            deleted.push(entry.Key);
+          }
+        }
+        for (const entry of result.Errors ?? []) {
+          if (entry.Key !== undefined) {
+            failed.push(entry.Key);
+          }
+        }
+      }
+      return { deleted, failed };
+    } catch (err) {
+      throw new StorageError("Failed to delete objects", err);
     }
   }
 

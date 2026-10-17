@@ -41,12 +41,19 @@ export const MIME_EXTENSION_MAP: Record<string, string | undefined> = {
   "video/quicktime": "mov",
 };
 export const S3_PRESIGN_TTL_SECS = 300;
+export const S3_DELETE_BATCH_SIZE = 1000;
 
 // Note domain TTLs/limits (24h expiry, 200 char limit).
 export const NOTE_FEED_KEY_PREFIX = "notes:feed:";
 export const NOTE_FEED_TTL_SECS = 60; // 1 minute — per-viewer note feed tray cache
 export const NOTE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours — note lifetime
 export const NOTE_MAX_CONTENT_LENGTH = 200;
+
+// Purge job: leader lock so only one instance sweeps expired stories/notes.
+export const PURGE_LOCK_KEY = "lock:purge-stories-notes";
+export const PURGE_LOCK_TTL_SECS = 60;
+export const PURGE_CRON_EXPRESSION = "*/5 * * * *";
+export const PURGE_BATCH_LIMIT = 500;
 
 // ioredis client tuning (mirrors Rust ConnectionManager timeouts).
 export const REDIS_COMMAND_TIMEOUT_MS = 2000;
