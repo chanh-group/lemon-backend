@@ -4,6 +4,7 @@ import type { CacheStoreExt } from "../../../../src/utils/cache/store.js";
 import type { StoryRepository } from "../../../../src/domain/story/repository.js";
 import { StoryService } from "../../../../src/domain/story/service.js";
 import type { NewStory, Story } from "../../../../src/domain/story/schema.js";
+import type { CreateStoryDto } from "../../../../src/domain/story/dto/request.js";
 import type {
   StoryViewerResponse,
   UserStoryFeedResponse,
@@ -181,6 +182,40 @@ describe("StoryService", () => {
           caption: "No photo key",
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it("rejects a media objectKey outside the owner's folder", async () => {
+      await expect(
+        service.createStory("user-owner-1", {
+          kind: "IMAGE",
+          objectKey: "stories/other-user/photo.jpg",
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("ignores any client-supplied bucket", async () => {
+      const dto: CreateStoryDto & { bucket?: string } = {
+        kind: "IMAGE",
+        objectKey: "stories/user-owner-1/photo.jpg",
+        bucket: "attacker-bucket",
+      };
+
+      await service.createStory("user-owner-1", dto);
+
+      expect(createStoryMock).toHaveBeenCalledWith(
+        expect.objectContaining({ bucket: "lemon-stories" }),
+      );
+    });
+
+    it("stores TEXT stories with a null bucket", async () => {
+      await service.createStory("user-owner-1", {
+        kind: "TEXT",
+        caption: "Good morning!",
+      });
+
+      expect(createStoryMock).toHaveBeenCalledWith(
+        expect.objectContaining({ bucket: null, objectKey: null }),
+      );
     });
 
     it("throws BadRequestException if TEXT story has neither caption nor background", async () => {

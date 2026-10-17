@@ -41,6 +41,11 @@ export class StoryService {
       if (!dto.objectKey) {
         throw new BadRequestException("INVALID_MEDIA_TYPE: Media story requires objectKey");
       }
+      if (!dto.objectKey.startsWith(`stories/${userId}/`)) {
+        throw new BadRequestException(
+          "INVALID_OBJECT_KEY: objectKey must be scoped to your user folder",
+        );
+      }
     } else {
       throw new BadRequestException("INVALID_MEDIA_TYPE: Unsupported story kind");
     }
@@ -51,7 +56,7 @@ export class StoryService {
     const newStoryData: NewStory = {
       userId,
       kind: dto.kind,
-      bucket: dto.bucket ?? STORY_DEFAULT_BUCKET,
+      bucket: dto.kind === "TEXT" ? null : STORY_DEFAULT_BUCKET,
       objectKey: dto.objectKey ?? null,
       mimeType: dto.mimeType ?? null,
       width: dto.width ?? null,

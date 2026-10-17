@@ -1,7 +1,6 @@
 export interface CreateStoryDto {
   kind: "IMAGE" | "VIDEO" | "TEXT";
   objectKey?: string;
-  bucket?: string;
   mimeType?: string;
   width?: number;
   height?: number;
