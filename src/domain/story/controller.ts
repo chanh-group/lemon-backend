@@ -11,7 +11,7 @@ import {
   Req,
 } from "@nestjs/common";
 import { getAuthUser, type AuthUser } from "../shared.js";
-import type { CreateStoryDto } from "./dto/request.js";
+import { createStorySchema, type CreateStoryDto } from "./dto/request.js";
 import { StoryService } from "./service.js";
 
 @Controller("stories")
@@ -20,7 +20,10 @@ export class StoryController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  async createStory(@Req() req: { user?: unknown }, @Body() dto: CreateStoryDto) {
+  async createStory(
+    @Req() req: { user?: unknown },
+    @Body({ schema: createStorySchema }) dto: CreateStoryDto,
+  ) {
     const { id: userId }: AuthUser = getAuthUser(req);
     const data = await this.storyService.createStory(userId, dto);
     return {

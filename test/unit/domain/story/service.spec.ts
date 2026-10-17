@@ -230,15 +230,6 @@ describe("StoryService", () => {
       );
     });
 
-    it("rejects a caption longer than 500 characters", async () => {
-      await expect(
-        service.createStory("user-owner-1", {
-          kind: "TEXT",
-          caption: "a".repeat(501),
-        }),
-      ).rejects.toThrow(BadRequestException);
-    });
-
     it("rejects TEXT stories whose caption and background are both whitespace-only", async () => {
       await expect(
         service.createStory("user-owner-1", {
