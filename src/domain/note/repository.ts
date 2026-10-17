@@ -13,4 +13,6 @@ export interface NoteRepository {
   findUsersByIds(userIds: string[]): Promise<Map<string, UserSummary>>;
   getFriendUserIds(userId: string): Promise<string[]>;
   deleteByUserId(userId: string): Promise<boolean>;
+  findExpiredIds(limit: number): Promise<string[]>;
+  deleteByIds(ids: string[]): Promise<number>;
 }

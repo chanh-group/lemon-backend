@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, or } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
 import type { DrizzleDb } from "../../configs/database.js";
@@ -96,5 +96,24 @@ export class NotePgRepository implements NoteRepository {
       .where(eq(notes.userId, userId))
       .returning({ id: notes.id });
     return result.length > 0;
+  }
+
+  async findExpiredIds(limit: number): Promise<string[]> {
+    const rows = await this.db
+      .select({ id: notes.id })
+      .from(notes)
+      .where(lt(notes.expiresAt, sql`now()`))
+      .orderBy(asc(notes.expiresAt))
+      .limit(limit);
+    return rows.map((row) => row.id);
+  }
+
+  async deleteByIds(ids: string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    const rows = await this.db
+      .delete(notes)
+      .where(inArray(notes.id, ids))
+      .returning({ id: notes.id });
+    return rows.length;
   }
 }
