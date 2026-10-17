@@ -33,6 +33,7 @@ export const stories = pgTable(
     background: text("background"),
     createdAt: created("created_at"),
     expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
   },
   (table) => [
     check("stories_media_chk", sql`${table.kind} = 'TEXT' OR ${table.objectKey} IS NOT NULL`),

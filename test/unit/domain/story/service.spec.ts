@@ -56,6 +56,7 @@ describe("StoryService", () => {
     background: null,
     createdAt: new Date("2026-10-14T00:00:00Z"),
     expiresAt: new Date("2026-10-15T00:00:00Z"),
+    deletedAt: null,
   };
 
   beforeEach(() => {
