@@ -13,6 +13,10 @@ import { presenceOnlineKey, presenceUserKey, typingKey } from "../../utils/cache
 import { Inject, Optional } from "@nestjs/common";
 import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
+import { InjectDrizzle } from "@nestjs/drizzle";
+import { and, eq, isNull } from "drizzle-orm";
+import type { DrizzleDb } from "../../configs/database.js";
+import { conversationParticipants } from "../conversation/schema.js";
 
 const logger = new Logger("ChatGateway");
 
@@ -35,7 +39,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // Track disconnect timers for 60s grace period: userId -> timer
   private readonly graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  constructor(@Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null) {}
+  constructor(
+    @InjectDrizzle() private readonly db: DrizzleDb,
+    @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
+  ) {}
 
   async handleConnection(client: Socket): Promise<void> {
     const userId = this.extractUserId(client);
@@ -92,22 +99,49 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleJoinConversation(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { conversationId: string },
-  ): Promise<void> {
+  ): Promise<{ success: boolean; conversationId: string } | void> {
     if (!data?.conversationId) return;
+    const userId = client.data?.userId as string;
+    if (!userId) return;
+
+    // Verify user is an active participant in this conversation
+    const [membership] = await this.db
+      .select({ conversationId: conversationParticipants.conversationId })
+      .from(conversationParticipants)
+      .where(
+        and(
+          eq(conversationParticipants.conversationId, data.conversationId),
+          eq(conversationParticipants.userId, userId),
+          isNull(conversationParticipants.leftAt),
+        ),
+      )
+      .limit(1);
+
+    if (!membership) {
+      logger.warn(`Unauthorized conv:join attempt by user ${userId} for conversation ${data.conversationId}`);
+      client.emit("error", {
+        code: "NOT_PARTICIPANT",
+        message: "Bạn không phải thành viên của cuộc trò chuyện này",
+      });
+      return { success: false, conversationId: data.conversationId };
+    }
+
     const room = `conv:${data.conversationId}`;
     await client.join(room);
-    logger.debug(`Socket ${client.id} joined ${room}`);
+    logger.debug(`Socket ${client.id} (user ${userId}) joined ${room}`);
+    return { success: true, conversationId: data.conversationId };
   }
 
   @SubscribeMessage("conv:leave")
   async handleLeaveConversation(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { conversationId: string },
-  ): Promise<void> {
+  ): Promise<{ success: boolean; conversationId: string } | void> {
     if (!data?.conversationId) return;
     const room = `conv:${data.conversationId}`;
     await client.leave(room);
     logger.debug(`Socket ${client.id} left ${room}`);
+    return { success: true, conversationId: data.conversationId };
   }
 
   @SubscribeMessage("typing:start")
@@ -117,6 +151,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ): Promise<void> {
     const userId = client.data?.userId as string;
     if (!userId || !data?.conversationId) return;
+
+    const room = `conv:${data.conversationId}`;
+    if (!client.rooms.has(room)) {
+      return;
+    }
 
     // Cache typing indicator in Redis with 3s TTL
     if (this.redis) {
@@ -128,7 +167,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     // Broadcast to room excluding the sender
-    client.to(`conv:${data.conversationId}`).emit("typing", {
+    client.to(room).emit("typing", {
       conversationId: data.conversationId,
       userId,
       isTyping: true,
@@ -143,6 +182,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const userId = client.data?.userId as string;
     if (!userId || !data?.conversationId) return;
 
+    const room = `conv:${data.conversationId}`;
+    if (!client.rooms.has(room)) {
+      return;
+    }
+
     if (this.redis) {
       try {
         await this.redis.del(typingKey(data.conversationId, userId));
@@ -151,7 +195,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
     }
 
-    client.to(`conv:${data.conversationId}`).emit("typing", {
+    client.to(room).emit("typing", {
       conversationId: data.conversationId,
       userId,
       isTyping: false,

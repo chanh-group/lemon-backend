@@ -40,7 +40,7 @@ export class MessageService {
     }
 
     // 2. Persist message in PostgreSQL with transaction
-    const message = await this.messageRepo.createMessageWithConversationUpdate({
+    const { message, isNew } = await this.messageRepo.createMessageWithConversationUpdate({
       conversationId,
       senderId,
       body: dto.body,
@@ -49,23 +49,25 @@ export class MessageService {
       replyToId: dto.replyToId,
     });
 
-    const recipientIds = participantIds.filter((id) => id !== senderId);
+    if (isNew) {
+      const recipientIds = participantIds.filter((id) => id !== senderId);
 
-    // 3. Atomically increment unread counter in Redis for recipients
-    if (this.redis && recipientIds.length > 0) {
-      try {
-        const pipeline = this.redis.pipeline();
-        for (const recipientId of recipientIds) {
-          pipeline.incr(unreadCountKey(recipientId, conversationId));
+      // 3. Atomically increment unread counter in Redis for recipients
+      if (this.redis && recipientIds.length > 0) {
+        try {
+          const pipeline = this.redis.pipeline();
+          for (const recipientId of recipientIds) {
+            pipeline.incr(unreadCountKey(recipientId, conversationId));
+          }
+          await pipeline.exec();
+        } catch {
+          // Best-effort cache
         }
-        await pipeline.exec();
-      } catch {
-        // Best-effort cache
       }
-    }
 
-    // 4. Emit realtime event to conversation room and recipients
-    this.realtimeService.emitNewMessage(conversationId, message, recipientIds);
+      // 4. Emit realtime event to conversation room and recipients
+      this.realtimeService.emitNewMessage(conversationId, message, recipientIds);
+    }
 
     return message;
   }

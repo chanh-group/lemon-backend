@@ -6,6 +6,11 @@ export interface MessageTimelineResult {
   hasMore: boolean;
 }
 
+export interface CreatedMessageResult {
+  message: Message;
+  isNew: boolean;
+}
+
 export interface MessageRepository {
   findByClientMsgId(conversationId: string, senderId: string, clientMsgId: string): Promise<Message | null>;
   createMessageWithConversationUpdate(
@@ -17,7 +22,7 @@ export interface MessageRepository {
       clientMsgId?: string | null;
       replyToId?: string | null;
     },
-  ): Promise<Message>;
+  ): Promise<CreatedMessageResult>;
   findTimeline(conversationId: string, cursor?: string, limit?: number, after?: string): Promise<MessageTimelineResult>;
   findById(messageId: string): Promise<Message | null>;
   updateBody(messageId: string, senderId: string, body: string): Promise<Message | null>;

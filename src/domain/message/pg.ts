@@ -3,7 +3,7 @@ import { InjectDrizzle } from "@nestjs/drizzle";
 import { and, desc, eq, gt, isNull, lt } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { conversations } from "../conversation/schema.js";
-import type { MessageRepository, MessageTimelineResult } from "./repository.js";
+import type { CreatedMessageResult, MessageRepository, MessageTimelineResult } from "./repository.js";
 import { type Message, messages } from "./schema.js";
 
 @Injectable()
@@ -32,7 +32,7 @@ export class MessagePgRepository implements MessageRepository {
     kind?: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "FILE" | "SYSTEM";
     clientMsgId?: string | null;
     replyToId?: string | null;
-  }): Promise<Message> {
+  }): Promise<CreatedMessageResult> {
     return await this.db.transaction(async (tx) => {
       // 1. Idempotency check with clientMsgId
       if (messageData.clientMsgId) {
@@ -47,7 +47,7 @@ export class MessagePgRepository implements MessageRepository {
             ),
           )
           .limit(1);
-        if (existing) return existing;
+        if (existing) return { message: existing, isNew: false };
       }
 
       // 2. Insert new message
@@ -75,7 +75,7 @@ export class MessagePgRepository implements MessageRepository {
         })
         .where(eq(conversations.id, messageData.conversationId));
 
-      return newMsg;
+      return { message: newMsg, isNew: true };
     });
   }
 
@@ -128,26 +128,55 @@ export class MessagePgRepository implements MessageRepository {
   }
 
   async updateBody(messageId: string, senderId: string, body: string): Promise<Message | null> {
-    const [updated] = await this.db
-      .update(messages)
-      .set({
-        body,
-        editedAt: new Date(),
-      })
-      .where(and(eq(messages.id, messageId), eq(messages.senderId, senderId), isNull(messages.deletedAt)))
-      .returning();
-    return updated ?? null;
+    return await this.db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(messages)
+        .set({
+          body,
+          editedAt: new Date(),
+        })
+        .where(and(eq(messages.id, messageId), eq(messages.senderId, senderId), isNull(messages.deletedAt)))
+        .returning();
+
+      if (!updated) return null;
+
+      // Update conversation preview if this is the last message
+      const preview = updated.body ? updated.body.slice(0, 80) : "[Tệp đính kèm]";
+      await tx
+        .update(conversations)
+        .set({
+          lastMessagePreview: preview,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(conversations.id, updated.conversationId), eq(conversations.lastMessageId, messageId)));
+
+      return updated;
+    });
   }
 
   async softDelete(messageId: string, senderId: string): Promise<Message | null> {
-    const [deleted] = await this.db
-      .update(messages)
-      .set({
-        deletedAt: new Date(),
-      })
-      .where(and(eq(messages.id, messageId), eq(messages.senderId, senderId), isNull(messages.deletedAt)))
-      .returning();
-    return deleted ?? null;
+    return await this.db.transaction(async (tx) => {
+      const [deleted] = await tx
+        .update(messages)
+        .set({
+          deletedAt: new Date(),
+        })
+        .where(and(eq(messages.id, messageId), eq(messages.senderId, senderId), isNull(messages.deletedAt)))
+        .returning();
+
+      if (!deleted) return null;
+
+      // Update conversation preview if this is the last message
+      await tx
+        .update(conversations)
+        .set({
+          lastMessagePreview: "Tin nhắn đã bị thu hồi",
+          updatedAt: new Date(),
+        })
+        .where(and(eq(conversations.id, deleted.conversationId), eq(conversations.lastMessageId, messageId)));
+
+      return deleted;
+    });
   }
 }
 

@@ -8,6 +8,7 @@ export interface ConversationWithPartner {
     username: string;
     fullName: string;
     avatarUrl: string | null;
+    isOnline?: boolean;
   };
   lastMessagePreview: string | null;
   lastMessageAt: Date | null;

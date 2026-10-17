@@ -4,7 +4,7 @@ import { USER_REPOSITORY, type UserRepository } from "../user/repository.js";
 import { CONVERSATION_REPOSITORY, type ConversationRepository, type ConversationWithPartner } from "./repository.js";
 import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
-import { unreadCountKey } from "../../utils/cache/keys.js";
+import { presenceUserKey, unreadCountKey } from "../../utils/cache/keys.js";
 import { RealtimeService } from "../realtime/realtime.service.js";
 
 @Injectable()
@@ -17,6 +17,10 @@ export class ConversationService {
   ) {}
 
   async getOrCreateDirect(userId: string, targetUserId: string): Promise<ConversationWithPartner> {
+    if (!targetUserId || typeof targetUserId !== "string" || targetUserId.trim().length === 0) {
+      throw new AppHttpException(HttpStatus.BAD_REQUEST, "BAD_REQUEST", "targetUserId là bắt buộc");
+    }
+
     if (userId === targetUserId) {
       throw new AppHttpException(HttpStatus.BAD_REQUEST, "CANNOT_CHAT_WITH_SELF", "Không thể tự tạo hội thoại với chính mình");
     }
@@ -37,25 +41,44 @@ export class ConversationService {
   async listConversations(userId: string, limit = 20): Promise<ConversationWithPartner[]> {
     const list = await this.convRepo.findUserConversations(userId, limit);
 
-    // Enrich with unread counts from Redis
+    // Enrich with unread counts and presence from Redis
     if (this.redis && list.length > 0) {
       try {
         const pipeline = this.redis.pipeline();
         for (const conv of list) {
           pipeline.get(unreadCountKey(userId, conv.id));
         }
+        for (const conv of list) {
+          if (conv.partner) {
+            pipeline.get(presenceUserKey(conv.partner.id));
+          }
+        }
         const results = await pipeline.exec();
         if (results) {
-          results.forEach(([err, val], idx) => {
-            if (!err && val) {
-              list[idx].unreadCount = parseInt(val as string, 10) || 0;
-            } else {
-              list[idx].unreadCount = 0;
+          for (let i = 0; i < list.length; i++) {
+            const [err, val] = results[i];
+            list[i].unreadCount = !err && val ? parseInt(val as string, 10) || 0 : 0;
+          }
+
+          let partnerIdx = list.length;
+          for (let i = 0; i < list.length; i++) {
+            if (list[i].partner) {
+              const [err, val] = results[partnerIdx++];
+              if (!err && val) {
+                try {
+                  const presence = JSON.parse(val as string);
+                  list[i].partner!.isOnline = presence.state === "online";
+                } catch {
+                  list[i].partner!.isOnline = false;
+                }
+              } else {
+                list[i].partner!.isOnline = false;
+              }
             }
-          });
+          }
         }
       } catch {
-        // Fallback gracefully to 0 if Redis fails
+        // Fallback gracefully
       }
     }
 
@@ -72,10 +95,46 @@ export class ConversationService {
     if (!conv) {
       throw new AppHttpException(HttpStatus.FORBIDDEN, "NOT_PARTICIPANT", "Không phải thành viên cuộc trò chuyện");
     }
+
+    // Enrich with unreadCount and presence from Redis
+    if (this.redis) {
+      try {
+        const pipeline = this.redis.pipeline();
+        pipeline.get(unreadCountKey(userId, conversationId));
+        if (conv.partner) {
+          pipeline.get(presenceUserKey(conv.partner.id));
+        }
+        const results = await pipeline.exec();
+        if (results) {
+          const [errCount, valCount] = results[0];
+          conv.unreadCount = !errCount && valCount ? parseInt(valCount as string, 10) || 0 : 0;
+          if (conv.partner && results.length > 1) {
+            const [errPres, valPres] = results[1];
+            if (!errPres && valPres) {
+              try {
+                const presence = JSON.parse(valPres as string);
+                conv.partner.isOnline = presence.state === "online";
+              } catch {
+                conv.partner.isOnline = false;
+              }
+            } else {
+              conv.partner.isOnline = false;
+            }
+          }
+        }
+      } catch {
+        conv.unreadCount = 0;
+      }
+    }
+
     return conv;
   }
 
   async markAsRead(conversationId: string, userId: string, lastReadMessageId: string): Promise<void> {
+    if (!lastReadMessageId || typeof lastReadMessageId !== "string" || lastReadMessageId.trim().length === 0) {
+      throw new AppHttpException(HttpStatus.BAD_REQUEST, "BAD_REQUEST", "lastReadMessageId là bắt buộc");
+    }
+
     await this.getById(conversationId, userId);
 
     await this.convRepo.updateLastRead(conversationId, userId, lastReadMessageId);

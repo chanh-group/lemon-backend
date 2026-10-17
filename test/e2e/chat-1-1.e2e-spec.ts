@@ -267,4 +267,67 @@ describe("Direct Chat 1-1 (E2E)", () => {
     expect(res.body.success).toBe(false);
     expect(res.body.code).toBe("FORBIDDEN");
   });
+
+  it("POST /api/conversations/direct - should reject empty targetUserId with 400 BAD_REQUEST", async () => {
+    const res = await request(app.getHttpServer())
+      .post("/api/conversations/direct")
+      .set("x-user-id", userA)
+      .send({ targetUserId: "" })
+      .expect(400);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.code).toBe("BAD_REQUEST");
+  });
+
+  it("POST /api/conversations/:id/read - should reject empty lastReadMessageId with 400 BAD_REQUEST", async () => {
+    const res = await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/read`)
+      .set("x-user-id", userB)
+      .send({ lastReadMessageId: "" })
+      .expect(400);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.code).toBe("BAD_REQUEST");
+  });
+
+  it("POST /api/conversations/:id/messages - clientMsgId idempotency returns existing message", async () => {
+    const uniqueClientMsgId = `idem-${Date.now()}`;
+    const res1 = await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/messages`)
+      .set("x-user-id", userA)
+      .send({ body: "Tin nhắn idempotent", clientMsgId: uniqueClientMsgId })
+      .expect(201);
+
+    const res2 = await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/messages`)
+      .set("x-user-id", userA)
+      .send({ body: "Tin nhắn idempotent", clientMsgId: uniqueClientMsgId })
+      .expect(201);
+
+    expect(res1.body.data.id).toBe(res2.body.data.id);
+  });
+
+  it("DELETE /api/messages/:id - should update conversation lastMessagePreview to 'Tin nhắn đã bị thu hồi'", async () => {
+    const sendRes = await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/messages`)
+      .set("x-user-id", userA)
+      .send({ body: "Tin nhắn sắp bị thu hồi" })
+      .expect(201);
+
+    const targetMsgId = sendRes.body.data.id;
+
+    // Revoke the message
+    await request(app.getHttpServer())
+      .delete(`/api/messages/${targetMsgId}`)
+      .set("x-user-id", userA)
+      .expect(200);
+
+    // Verify conversation inbox preview
+    const convRes = await request(app.getHttpServer())
+      .get(`/api/conversations/${conversationId}`)
+      .set("x-user-id", userA)
+      .expect(200);
+
+    expect(convRes.body.data.lastMessagePreview).toBe("Tin nhắn đã bị thu hồi");
+  });
 });

@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { users } from "../user/schema.js";
 import type { ConversationRepository, ConversationWithPartner } from "./repository.js";
@@ -142,7 +142,7 @@ export class ConversationPgRepository implements ConversationRepository {
       })
       .from(conversations)
       .where(and(inArray(conversations.id, convIds), isNull(conversations.deletedAt)))
-      .orderBy(desc(conversations.lastMessageAt))
+      .orderBy(desc(sql`COALESCE(${conversations.lastMessageAt}, ${conversations.createdAt})`))
       .limit(limit);
 
     // 3. For DIRECT conversations, find partner info
