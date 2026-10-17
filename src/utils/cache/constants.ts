@@ -41,6 +41,7 @@ export const MIME_EXTENSION_MAP: Record<string, string | undefined> = {
   "video/quicktime": "mov",
 };
 export const S3_PRESIGN_TTL_SECS = 300;
+export const S3_DELETE_BATCH_SIZE = 1000;
 
 // Note domain TTLs/limits (24h expiry, 200 char limit).
 export const NOTE_FEED_KEY_PREFIX = "notes:feed:";

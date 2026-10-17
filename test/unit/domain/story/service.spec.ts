@@ -132,7 +132,12 @@ describe("StoryService", () => {
 
     headObjectMock = vi.fn().mockResolvedValue({ contentLength: 1000, contentType: "image/jpeg" });
     getBucketMock = vi.fn().mockReturnValue("lemon-stories");
-    storageMock = { presignPut: vi.fn(), headObject: headObjectMock, getBucket: getBucketMock };
+    storageMock = {
+      presignPut: vi.fn(),
+      headObject: headObjectMock,
+      deleteObjects: vi.fn(),
+      getBucket: getBucketMock,
+    };
 
     const mockRepo: StoryRepository = {
       create: createStoryMock,
