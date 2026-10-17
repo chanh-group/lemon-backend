@@ -52,6 +52,8 @@ export const NOTE_MAX_CONTENT_LENGTH = 200;
 // Purge job: leader lock so only one instance sweeps expired stories/notes.
 export const PURGE_LOCK_KEY = "lock:purge-stories-notes";
 export const PURGE_LOCK_TTL_SECS = 60;
+export const PURGE_CRON_EXPRESSION = "*/5 * * * *";
+export const PURGE_BATCH_LIMIT = 500;
 
 // ioredis client tuning (mirrors Rust ConnectionManager timeouts).
 export const REDIS_COMMAND_TIMEOUT_MS = 2000;
