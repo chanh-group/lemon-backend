@@ -1,12 +1,12 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, asc, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { friendships } from "../friend/schema.js";
 import { users } from "../user/schema.js";
 import type { StoryViewerResponse } from "./dto/response.js";
 import type { UserSummary } from "../user/dto/response.js";
-import type { StoryRepository } from "./repository.js";
+import type { PurgeableStory, StoryRepository } from "./repository.js";
 import { type NewStory, type Story, stories, storyViews } from "./schema.js";
 
 @Injectable()
@@ -136,5 +136,23 @@ export class StoryPgRepository implements StoryRepository {
       );
 
     return rows.map((r) => (r.userLow === userId ? r.userHigh : r.userLow));
+  }
+
+  async findPurgeable(limit: number): Promise<PurgeableStory[]> {
+    return this.db
+      .select({ id: stories.id, objectKey: stories.objectKey })
+      .from(stories)
+      .where(or(lt(stories.expiresAt, sql`now()`), isNotNull(stories.deletedAt)))
+      .orderBy(asc(stories.expiresAt))
+      .limit(limit);
+  }
+
+  async deleteByIds(ids: string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    const rows = await this.db
+      .delete(stories)
+      .where(inArray(stories.id, ids))
+      .returning({ id: stories.id });
+    return rows.length;
   }
 }

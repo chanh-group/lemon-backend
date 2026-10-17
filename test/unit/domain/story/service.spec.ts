@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { CacheStoreExt } from "../../../../src/utils/cache/store.js";
-import type { StoryRepository } from "../../../../src/domain/story/repository.js";
+import type { PurgeableStory, StoryRepository } from "../../../../src/domain/story/repository.js";
 import { StoryService } from "../../../../src/domain/story/service.js";
 import type { NewStory, Story } from "../../../../src/domain/story/schema.js";
 import type { CreateStoryDto } from "../../../../src/domain/story/dto/request.js";
@@ -30,6 +30,8 @@ describe("StoryService", () => {
   let markAsViewedMock: Mock<(storyId: string, viewerId: string) => Promise<void>>;
   let markDeletedMock: Mock<(id: string) => Promise<boolean>>;
   let getFriendUserIdsMock: Mock<(userId: string) => Promise<string[]>>;
+  let findPurgeableMock: Mock<(limit: number) => Promise<PurgeableStory[]>>;
+  let deleteByIdsMock: Mock<(ids: string[]) => Promise<number>>;
 
   let getBestEffortMock: Mock<(key: string) => Promise<unknown>>;
   let setBestEffortMock: Mock<(key: string, value: unknown, ttlSeconds?: number) => Promise<void>>;
@@ -120,6 +122,8 @@ describe("StoryService", () => {
     getFriendUserIdsMock = vi
       .fn<(userId: string) => Promise<string[]>>()
       .mockResolvedValue(["friend-1", "friend-2"]);
+    findPurgeableMock = vi.fn<(limit: number) => Promise<PurgeableStory[]>>().mockResolvedValue([]);
+    deleteByIdsMock = vi.fn<(ids: string[]) => Promise<number>>().mockResolvedValue(0);
 
     getBestEffortMock = vi.fn<(key: string) => Promise<unknown>>().mockResolvedValue(null);
     setBestEffortMock = vi
@@ -150,6 +154,8 @@ describe("StoryService", () => {
       markAsViewed: markAsViewedMock,
       markDeleted: markDeletedMock,
       getFriendUserIds: getFriendUserIdsMock,
+      findPurgeable: findPurgeableMock,
+      deleteByIds: deleteByIdsMock,
     };
 
     const mockCache = {
