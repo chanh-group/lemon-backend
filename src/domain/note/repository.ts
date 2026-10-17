@@ -1,5 +1,5 @@
 import type { Note } from "./schema.js";
-import type { StoryUserSummary } from "../story/dto/response.js";
+import type { UserSummary } from "../user/dto/response.js";
 
 export const NOTE_REPOSITORY = Symbol("NOTE_REPOSITORY");
 
@@ -10,7 +10,7 @@ export interface NoteRepository {
   ): Promise<Note>;
   findActiveByUserId(userId: string): Promise<Note | null>;
   findActiveByUserIds(userIds: string[]): Promise<Note[]>;
-  findUsersByIds(userIds: string[]): Promise<Map<string, StoryUserSummary>>;
+  findUsersByIds(userIds: string[]): Promise<Map<string, UserSummary>>;
   getFriendUserIds(userId: string): Promise<string[]>;
   deleteByUserId(userId: string): Promise<boolean>;
 }

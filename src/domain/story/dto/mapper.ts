@@ -1,5 +1,6 @@
 import type { Story } from "../schema.js";
-import type { StoryItemResponse, StoryUserSummary, UserStoryFeedResponse } from "./response.js";
+import type { UserSummary } from "../../user/dto/response.js";
+import type { StoryItemResponse, UserStoryFeedResponse } from "./response.js";
 
 export function toStoryItemResponse(story: Story, hasViewed?: boolean): StoryItemResponse {
   return {
@@ -37,7 +38,7 @@ export function reviveUserStoryFeed(feed: UserStoryFeedResponse[]): UserStoryFee
 }
 
 export function groupStoriesByUser(
-  usersMap: Map<string, StoryUserSummary>,
+  usersMap: Map<string, UserSummary>,
   stories: Story[],
   viewedStoryIds: Set<string>,
 ): UserStoryFeedResponse[] {

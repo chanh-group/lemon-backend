@@ -4,7 +4,7 @@ import type { CacheStoreExt } from "../../../../src/utils/cache/store.js";
 import type { NoteRepository } from "../../../../src/domain/note/repository.js";
 import { NoteService } from "../../../../src/domain/note/service.js";
 import type { Note } from "../../../../src/domain/note/schema.js";
-import type { StoryUserSummary } from "../../../../src/domain/story/dto/response.js";
+import type { UserSummary } from "../../../../src/domain/user/dto/response.js";
 import type { UserNoteFeedResponse } from "../../../../src/domain/note/dto/response.js";
 
 describe("NoteService", () => {
@@ -18,7 +18,7 @@ describe("NoteService", () => {
   >;
   let findActiveByUserIdMock: Mock<(userId: string) => Promise<Note | null>>;
   let findActiveByUserIdsMock: Mock<(userIds: string[]) => Promise<Note[]>>;
-  let findUsersByIdsMock: Mock<(userIds: string[]) => Promise<Map<string, StoryUserSummary>>>;
+  let findUsersByIdsMock: Mock<(userIds: string[]) => Promise<Map<string, UserSummary>>>;
   let getFriendUserIdsMock: Mock<(userId: string) => Promise<string[]>>;
   let deleteByUserIdMock: Mock<(userId: string) => Promise<boolean>>;
 
@@ -60,7 +60,7 @@ describe("NoteService", () => {
       .fn<(userIds: string[]) => Promise<Note[]>>()
       .mockResolvedValue([mockNote]);
     findUsersByIdsMock = vi
-      .fn<(userIds: string[]) => Promise<Map<string, StoryUserSummary>>>()
+      .fn<(userIds: string[]) => Promise<Map<string, UserSummary>>>()
       .mockResolvedValue(
         new Map([
           [

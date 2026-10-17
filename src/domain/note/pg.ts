@@ -6,7 +6,7 @@ import { friendships } from "../friend/schema.js";
 import { users } from "../user/schema.js";
 import { notes, type Note } from "./schema.js";
 import type { NoteRepository } from "./repository.js";
-import type { StoryUserSummary } from "../story/dto/response.js";
+import type { UserSummary } from "../user/dto/response.js";
 
 @Injectable()
 export class NotePgRepository implements NoteRepository {
@@ -57,7 +57,7 @@ export class NotePgRepository implements NoteRepository {
       .where(and(inArray(notes.userId, userIds), gt(notes.expiresAt, new Date())));
   }
 
-  async findUsersByIds(userIds: string[]): Promise<Map<string, StoryUserSummary>> {
+  async findUsersByIds(userIds: string[]): Promise<Map<string, UserSummary>> {
     if (userIds.length === 0) return new Map();
 
     const rows = await this.db

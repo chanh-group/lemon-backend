@@ -1,4 +1,4 @@
-import type { StoryUserSummary } from "../../story/dto/response.js";
+import type { UserSummary } from "../../user/dto/response.js";
 
 export interface NoteResponse {
   id: string;
@@ -10,6 +10,6 @@ export interface NoteResponse {
 }
 
 export interface UserNoteFeedResponse {
-  user: StoryUserSummary;
+  user: UserSummary;
   note: NoteResponse;
 }

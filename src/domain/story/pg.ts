@@ -4,7 +4,8 @@ import { and, asc, desc, eq, gt, inArray, or } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { friendships } from "../friend/schema.js";
 import { users } from "../user/schema.js";
-import type { StoryUserSummary, StoryViewerResponse } from "./dto/response.js";
+import type { StoryViewerResponse } from "./dto/response.js";
+import type { UserSummary } from "../user/dto/response.js";
 import type { StoryRepository } from "./repository.js";
 import { type NewStory, type Story, stories, storyViews } from "./schema.js";
 
@@ -41,7 +42,7 @@ export class StoryPgRepository implements StoryRepository {
       .orderBy(asc(stories.createdAt));
   }
 
-  async findUsersByIds(userIds: string[]): Promise<Map<string, StoryUserSummary>> {
+  async findUsersByIds(userIds: string[]): Promise<Map<string, UserSummary>> {
     if (userIds.length === 0) return new Map();
     const rows = await this.db
       .select({
@@ -53,7 +54,7 @@ export class StoryPgRepository implements StoryRepository {
       .from(users)
       .where(inArray(users.id, userIds));
 
-    const map = new Map<string, StoryUserSummary>();
+    const map = new Map<string, UserSummary>();
     for (const r of rows) {
       map.set(r.id, r);
     }

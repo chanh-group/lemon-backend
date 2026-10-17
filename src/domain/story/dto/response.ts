@@ -1,9 +1,4 @@
-export interface StoryUserSummary {
-  id: string;
-  username: string;
-  fullName: string;
-  avatarUrl: string | null;
-}
+import type { UserSummary } from "../../user/dto/response.js";
 
 export interface StoryItemResponse {
   id: string;
@@ -23,11 +18,11 @@ export interface StoryItemResponse {
 }
 
 export interface UserStoryFeedResponse {
-  user: StoryUserSummary;
+  user: UserSummary;
   stories: StoryItemResponse[];
 }
 
 export interface StoryViewerResponse {
-  user: StoryUserSummary;
+  user: UserSummary;
   viewedAt: Date;
 }

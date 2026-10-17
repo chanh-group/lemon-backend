@@ -4,7 +4,7 @@ import {
   toStoryItemResponse,
 } from "../../../../src/domain/story/dto/mapper.js";
 import type { Story } from "../../../../src/domain/story/schema.js";
-import type { StoryUserSummary } from "../../../../src/domain/story/dto/response.js";
+import type { UserSummary } from "../../../../src/domain/user/dto/response.js";
 
 function makeStory(overrides: Partial<Story> & { id: string; userId: string }): Story {
   return {
@@ -53,7 +53,7 @@ describe("toStoryItemResponse", () => {
 });
 
 describe("groupStoriesByUser", () => {
-  const users = new Map<string, StoryUserSummary>([
+  const users = new Map<string, UserSummary>([
     ["u1", { id: "u1", username: "one", fullName: "User One", avatarUrl: null }],
   ]);
 
