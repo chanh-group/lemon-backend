@@ -1,3 +1,25 @@
 {
-  "WELCOME": "Welcome to the application"
+  "WELCOME": "Welcome to the application",
+  "UNAUTHORIZED": "You need to sign in to continue",
+  "FORBIDDEN": "You do not have permission to perform this action",
+  "BAD_REQUEST": "Invalid request",
+  "NOT_FOUND": "Resource not found",
+  "CONFLICT": "Data already exists or conflicts",
+  "VALIDATION_ERROR": "Invalid data",
+  "TOO_MANY_REQUESTS": "Too many requests, please try again later",
+  "INTERNAL_SERVER_ERROR": "Something went wrong, please try again later",
+  "SERVICE_UNAVAILABLE": "Service temporarily unavailable, please try again later",
+  "STORY_NOT_FOUND": "Story does not exist or has expired",
+  "STORY_VIEW_FORBIDDEN": "You can only view stories from friends",
+  "STORY_VIEWERS_FORBIDDEN": "Only the story owner can view the viewers list",
+  "STORY_DELETE_FORBIDDEN": "You can only delete your own stories",
+  "INVALID_MEDIA_TYPE": "Media story requires an objectKey",
+  "INVALID_OBJECT_KEY": "objectKey must be scoped to your stories folder",
+  "TEXT_STORY_REQUIRES_CONTENT": "A text story requires a caption or background",
+  "FILE_TOO_LARGE": "File exceeds the allowed limit ({maxMb}MB) — choose a file under {maxMb}MB",
+  "FILE_TYPE_NOT_ALLOWED": "File type is not supported",
+  "OBJECT_NOT_UPLOADED": "File has not been uploaded to storage",
+  "PRESIGN_FAILED": "Could not issue an upload URL, please retry later",
+  "NOTE_NOT_FOUND": "Note does not exist or has expired",
+  "NOTE_EMPTY_CONTENT": "Note content cannot be empty"
 }
