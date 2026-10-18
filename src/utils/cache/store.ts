@@ -50,6 +50,10 @@ export interface CacheStore {
    * wrong code (that would lock users out during infra flaps).
    */
   checkOtpCode(key: string, candidate: string, maxAttempts: number): Promise<OtpCheckOutcome>;
+  /** Atomic lock acquire (`SET NX EX`). Rejects with `CacheError` on infra failure. */
+  tryAcquireLock(key: string, token: string, expirationSecs: number): Promise<boolean>;
+  /** Owner-safe release (compare-and-del). Stale token = silent no-op. Rejects with `CacheError` on infra failure. */
+  releaseLock(key: string, token: string): Promise<void>;
 }
 
 export abstract class CacheStoreExt implements CacheStore {
@@ -67,6 +71,8 @@ export abstract class CacheStoreExt implements CacheStore {
     candidate: string,
     maxAttempts: number,
   ): Promise<OtpCheckOutcome>;
+  abstract tryAcquireLock(key: string, token: string, expirationSecs: number): Promise<boolean>;
+  abstract releaseLock(key: string, token: string): Promise<void>;
 
   /** Read + JSON-deserialize. Corrupt entries are deleted and treated as miss. */
   async get<T>(key: string): Promise<T | null> {

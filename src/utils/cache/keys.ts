@@ -3,9 +3,12 @@
 // Ported from Rust `dsa/src/utils/cache/keys.rs`.
 import {
   FORGOT_OTP_KEY_PREFIX,
+  NOTE_FEED_KEY_PREFIX,
   OTP_KEY_PREFIX,
+  PURGE_LOCK_KEY,
   REFRESH_TOKEN_KEY_PREFIX,
   SESSION_KEY_PREFIX,
+  STORY_FEED_KEY_PREFIX,
   USER_CACHE_KEY_PREFIX,
 } from "./constants.js";
 
@@ -27,4 +30,16 @@ export function signupOtpKey(email: string): string {
 
 export function resetOtpKey(email: string): string {
   return `${FORGOT_OTP_KEY_PREFIX}${email.toLowerCase()}`;
+}
+
+export function storyFeedKey(userId: string): string {
+  return `${STORY_FEED_KEY_PREFIX}${userId}`;
+}
+
+export function noteFeedKey(userId: string): string {
+  return `${NOTE_FEED_KEY_PREFIX}${userId}`;
+}
+
+export function purgeLockKey(): string {
+  return PURGE_LOCK_KEY;
 }

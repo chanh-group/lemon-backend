@@ -28,6 +28,26 @@ bun run db:migrate
 bun run start:dev
 ```
 
+> **Lưu ý migration `0001` (unique `notes.user_id`):** nếu DB đã có dữ liệu `notes` từ trước
+> (có thể tồn tại nhiều note/1 user do race đã fix), kiểm tra trước:
+> `SELECT user_id, count(*) FROM notes GROUP BY user_id HAVING count(*) > 1;`
+> Nếu có kết quả, chạy dedupe (giữ note mới nhất mỗi user) **trước khi** `db:migrate`:
+>
+> ```sql
+> DELETE FROM notes n USING notes o
+> WHERE n.user_id = o.user_id
+>   AND (n.created_at < o.created_at OR (n.created_at = o.created_at AND n.id < o.id));
+> ```
+>
+> **Lưu ý migration `0002` (CHECK constraints cho `stories`/`notes`):** các rule mới
+> (caption ≤ 500 ký tự, `width`/`height`/`duration_ms` ≥ 0, background ≤ 200 ký tự)
+> chưa được code cũ enforce, nên row cũ có thể vi phạm. Kiểm tra trước:
+> `SELECT id FROM stories WHERE char_length(caption) > 500 OR width < 0 OR height < 0 OR duration_ms < 0;`
+> và `SELECT id FROM notes WHERE char_length(background) > 200;`
+> Nếu có kết quả, dọn các row vi phạm (sửa hoặc xóa) **trước khi** `db:migrate`.
+>
+> Không sửa file SQL sinh tự động trong `drizzle/`.
+
 App mặc định nghe ở `http://localhost:3000` (đổi qua `PORT`).
 
 | Lệnh                                               | Để làm gì                              |
@@ -57,6 +77,26 @@ Xem đầy đủ ở `.env.example`. Các biến quan trọng:
 | `FRONTEND_URL`                | URL FE, dùng cho CORS                                    |
 
 Đọc env trong code luôn qua helper `get_env()` (`src/helpers/index.ts`) — thiếu biến bắt buộc là crash ngay lúc boot, không fail âm thầm.
+
+## Storage (S3)
+
+Media (story/note) upload trực tiếp lên S3-compatible storage bằng presigned URL. Cấu hình qua env (để trống ở dev cũng boot được — presign/verify sẽ fail closed 503):
+
+| Biến                   | Ví dụ / Ghi chú                                                                |
+| ---------------------- | ------------------------------------------------------------------------------ |
+| `S3_BUCKET`            | `lemon-stories` (dev mặc định `lemon-stories`; production bắt buộc)            |
+| `S3_REGION`            | `us-east-1`; với Cloudflare R2 dùng `auto`                                     |
+| `S3_ENDPOINT`          | Bỏ trống nếu dùng AWS S3 gốc; R2: `https://<account>.r2.cloudflarestorage.com` |
+| `S3_FORCE_PATH_STYLE`  | `true` khi dùng MinIO, `false` với R2/AWS S3                                   |
+| `S3_ACCESS_KEY_ID`     | Bắt buộc ở production                                                          |
+| `S3_SECRET_ACCESS_KEY` | Bắt buộc ở production                                                          |
+| `S3_PRESIGN_TTL_SECS`  | `300` (5 phút)                                                                 |
+
+- **Cloudflare R2**: `S3_REGION=auto` + `S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com` (giữ `S3_FORCE_PATH_STYLE=false`).
+- **MinIO (local)**: `S3_ENDPOINT=http://localhost:9000` + `S3_FORCE_PATH_STYLE=true`.
+- Production (nhận biết khi `APP_ENV` **hoặc** `NODE_ENV` = `production`) thiếu `S3_BUCKET`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` → **crash ngay lúc boot** (fail fast). Dev/test thiếu config → `UnavailableStorageService`, mọi thao tác fail closed (503).
+
+> **Known limitation (D9):** object đã upload lên prefix `stories/` nhưng verify thất bại (sai MIME/kích thước, chưa gắn story) hiện **không được dọn** trong batch này. Khuyến nghị đặt S3 lifecycle rule tự xoá object prefix `stories/` chưa gắn story sau N ngày (Batch C/D sẽ xử lý).
 
 ## Cấu trúc thư mục
 

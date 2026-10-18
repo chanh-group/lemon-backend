@@ -145,4 +145,15 @@ export class MemoryCacheService extends CacheStoreExt {
     this.overwriteKeepTtl(key, JSON.stringify({ code: otp.code, attempts }));
     return OtpCheckOutcome.Mismatch;
   }
+
+  async tryAcquireLock(key: string, token: string, expirationSecs: number): Promise<boolean> {
+    if (this.readLive(key) !== null) return false;
+    this.store.set(key, { value: token, expiresAt: Date.now() + expirationSecs * 1000 });
+    return true;
+  }
+
+  async releaseLock(key: string, token: string): Promise<void> {
+    if (this.readLive(key) !== token) return;
+    this.store.delete(key);
+  }
 }

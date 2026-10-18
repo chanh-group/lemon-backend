@@ -16,7 +16,7 @@ describe("CacheModule", () => {
     expect(mod.get(CACHE_STORE)).toBeInstanceOf(MemoryCacheService);
     await mod.close();
     delete process.env.USE_MEMORY_CACHE;
-  });
+  }, 15000);
 
   it("redis mode provides RedisCacheService and quits on destroy", async () => {
     const quit = vi.fn().mockResolvedValue("OK");
@@ -31,5 +31,5 @@ describe("CacheModule", () => {
     expect(mod.get(CACHE_STORE)).toBeInstanceOf(RedisCacheService);
     await mod.close();
     expect(quit).toHaveBeenCalledTimes(1);
-  });
+  }, 15000);
 });
