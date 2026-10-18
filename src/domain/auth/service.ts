@@ -1,16 +1,5 @@
 import * as crypto from "node:crypto";
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  Inject,
-  Injectable,
-  Logger,
-  NotFoundException,
-  ServiceUnavailableException,
-  UnauthorizedException,
-  UnprocessableEntityException,
-} from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import * as argon2 from "argon2";
 import * as jose from "jose";
 import { v7 as uuidv7 } from "uuid";
@@ -30,6 +19,8 @@ import {
 import { CacheError } from "../../utils/cache/error.js";
 import { CACHE_STORE, type CacheStore } from "../../utils/cache/store.js";
 import { OtpCheckOutcome, RotationOutcome } from "../../utils/cache/types.js";
+import { BusinessError } from "../../utils/errors/business.js";
+import { SystemError } from "../../utils/errors/system.js";
 import { MailService } from "../../utils/mail/service.js";
 import { toUserResponse } from "../user/dto/mapper.js";
 import type { UserResponseDto } from "../user/dto/response.js";
@@ -88,10 +79,7 @@ export class AuthService {
 
     const existingUser = await this.userRepo.findByEmail(data.email);
     if (existingUser) {
-      throw new ConflictException({
-        code: "USER_ALREADY_EXISTS",
-        message: "Email đã được đăng ký",
-      });
+      throw new BusinessError("USER_ALREADY_EXISTS");
     }
 
     const code = this.generateOtp();
@@ -104,10 +92,7 @@ export class AuthService {
         action: "auth.request_otp_cache_error",
         err: String(err),
       });
-      throw new ServiceUnavailableException({
-        code: "SERVICE_UNAVAILABLE",
-        message: "Dịch vụ tạm thời gián đoạn, vui lòng thử lại sau",
-      });
+      throw new SystemError("unavailable", "cache SET failed", { cause: err });
     }
 
     await this.mailService.sendOtp({
@@ -135,22 +120,16 @@ export class AuthService {
         return true;
       }
 
-      throw new BadRequestException({
-        code: "INVALID_OTP",
-        message: "Mã OTP không đúng hoặc đã hết hạn",
-      });
+      throw new BusinessError("INVALID_OTP");
     } catch (err: unknown) {
-      if (err instanceof BadRequestException) {
+      if (err instanceof BusinessError) {
         throw err;
       }
       this.logger.error("Redis error while checking OTP", {
         action: "auth.verify_otp_error",
         err: String(err),
       });
-      throw new ServiceUnavailableException({
-        code: "SERVICE_UNAVAILABLE",
-        message: "Dịch vụ tạm thời gián đoạn, vui lòng thử lại sau",
-      });
+      throw new SystemError("unavailable", "cache CHECK_OTP failed", { cause: err });
     }
   }
 
@@ -162,25 +141,19 @@ export class AuthService {
       const outcome = await this.cacheStore.checkOtpCode(otpKey, data.otp, MAX_OTP_ATTEMPTS);
 
       if (outcome !== OtpCheckOutcome.Match) {
-        throw new BadRequestException({
-          code: "INVALID_OTP",
-          message: "Mã OTP không đúng hoặc đã hết hạn",
-        });
+        throw new BusinessError("INVALID_OTP");
       }
 
       await this.cacheStore.delete(otpKey);
     } catch (err: unknown) {
-      if (err instanceof BadRequestException) {
+      if (err instanceof BusinessError) {
         throw err;
       }
       this.logger.error("Redis error during signup OTP verification", {
         action: "auth.signup_otp_error",
         err: String(err),
       });
-      throw new ServiceUnavailableException({
-        code: "SERVICE_UNAVAILABLE",
-        message: "Dịch vụ tạm thời gián đoạn, vui lòng thử lại sau",
-      });
+      throw new SystemError("unavailable", "cache CHECK_OTP failed", { cause: err });
     }
 
     const [existingEmail, existingUsername] = await Promise.all([
@@ -189,17 +162,11 @@ export class AuthService {
     ]);
 
     if (existingEmail) {
-      throw new ConflictException({
-        code: "USER_ALREADY_EXISTS",
-        message: "Email đã được đăng ký",
-      });
+      throw new BusinessError("USER_ALREADY_EXISTS");
     }
 
     if (existingUsername) {
-      throw new ConflictException({
-        code: "USERNAME_TAKEN",
-        message: "Username đã tồn tại",
-      });
+      throw new BusinessError("USERNAME_TAKEN");
     }
 
     const passwordHash = await this.hashPassword(data.password);
@@ -227,16 +194,10 @@ export class AuthService {
           "constraint" in err && typeof err.constraint === "string" ? err.constraint : "";
 
         if (detail.includes("email") || constraint.includes("email")) {
-          throw new ConflictException({
-            code: "USER_ALREADY_EXISTS",
-            message: "Email đã được đăng ký",
-          });
+          throw new BusinessError("USER_ALREADY_EXISTS");
         }
         if (detail.includes("username") || constraint.includes("username")) {
-          throw new ConflictException({
-            code: "USERNAME_TAKEN",
-            message: "Username đã tồn tại",
-          });
+          throw new BusinessError("USERNAME_TAKEN");
         }
       }
       throw err;
@@ -248,32 +209,20 @@ export class AuthService {
 
     const user = await this.userRepo.findByIdentifier(data.identifier);
     if (!user || !user.passwordHash) {
-      throw new BadRequestException({
-        code: "INVALID_CREDENTIALS",
-        message: "Thông tin đăng nhập không đúng",
-      });
+      throw new BusinessError("INVALID_CREDENTIALS");
     }
 
     const isMatch = await this.verifyPassword(user.passwordHash, data.password);
     if (!isMatch) {
-      throw new BadRequestException({
-        code: "INVALID_CREDENTIALS",
-        message: "Thông tin đăng nhập không đúng",
-      });
+      throw new BusinessError("INVALID_CREDENTIALS");
     }
 
     if (!user.isActive) {
-      throw new ForbiddenException({
-        code: "FORBIDDEN",
-        message: "Tài khoản đã bị khóa",
-      });
+      throw new BusinessError("FORBIDDEN");
     }
 
     if (!user.emailVerifiedAt) {
-      throw new ForbiddenException({
-        code: "EMAIL_NOT_VERIFIED",
-        message: "Tài khoản chưa được xác thực email",
-      });
+      throw new BusinessError("EMAIL_NOT_VERIFIED");
     }
 
     const jti = uuidv7();
@@ -294,10 +243,7 @@ export class AuthService {
         action: "auth.login_session_error",
         err: String(err),
       });
-      throw new ServiceUnavailableException({
-        code: "SERVICE_UNAVAILABLE",
-        message: "Dịch vụ tạm thời gián đoạn, vui lòng thử lại sau",
-      });
+      throw new SystemError("unavailable", "cache CREATE_SESSION failed", { cause: err });
     }
 
     this.logger.log("User successfully logged in", {
@@ -313,10 +259,7 @@ export class AuthService {
 
   async refreshToken(rawRefreshToken: string): Promise<TokenPair> {
     if (!rawRefreshToken) {
-      throw new UnauthorizedException({
-        code: "INVALID_SESSION",
-        message: "Thiếu Refresh Token",
-      });
+      throw new BusinessError("INVALID_SESSION");
     }
 
     let payload: RefreshTokenPayload;
@@ -329,17 +272,11 @@ export class AuthService {
       });
       payload = verified.payload;
     } catch {
-      throw new UnauthorizedException({
-        code: "INVALID_SESSION",
-        message: "Refresh Token không hợp lệ hoặc đã hết hạn",
-      });
+      throw new BusinessError("INVALID_SESSION");
     }
 
     if (payload.type !== "refresh" || !payload.jti || !payload.sub) {
-      throw new UnauthorizedException({
-        code: "INVALID_SESSION",
-        message: "Token không phải là Refresh Token hợp lệ",
-      });
+      throw new BusinessError("INVALID_SESSION");
     }
 
     const userId = payload.sub;
@@ -367,10 +304,7 @@ export class AuthService {
           oldJti,
         });
         await this.revokeFamily(userId);
-        throw new UnauthorizedException({
-          code: "INVALID_SESSION",
-          message: "Phiên làm việc đã bị thu hồi do phát hiện truy cập bất thường",
-        });
+        throw new BusinessError("INVALID_SESSION");
       }
 
       this.logger.log("Refresh token rotated successfully", {
@@ -383,17 +317,14 @@ export class AuthService {
         refreshToken: newRefreshToken,
       };
     } catch (err: unknown) {
-      if (err instanceof UnauthorizedException) {
+      if (err instanceof BusinessError) {
         throw err;
       }
       this.logger.error("Redis error during refresh token rotation", {
         action: "auth.rotate_error",
         err: String(err),
       });
-      throw new ServiceUnavailableException({
-        code: "SERVICE_UNAVAILABLE",
-        message: "Dịch vụ tạm thời gián đoạn, vui lòng thử lại sau",
-      });
+      throw new SystemError("unavailable", "cache ROTATE failed", { cause: err });
     }
   }
 
@@ -432,10 +363,7 @@ export class AuthService {
           action: "auth.logout_cache_error",
           err: String(err),
         });
-        throw new ServiceUnavailableException({
-          code: "SERVICE_UNAVAILABLE",
-          message: "Dịch vụ tạm thời gián đoạn, vui lòng thử lại sau",
-        });
+        throw new SystemError("unavailable", "cache REVOKE failed", { cause: err });
       }
     }
   }
@@ -461,10 +389,7 @@ export class AuthService {
         action: "auth.forgot_otp_cache_error",
         err: String(err),
       });
-      throw new ServiceUnavailableException({
-        code: "SERVICE_UNAVAILABLE",
-        message: "Dịch vụ tạm thời gián đoạn, vui lòng thử lại sau",
-      });
+      throw new SystemError("unavailable", "cache SET failed", { cause: err });
     }
 
     await this.mailService.sendOtp({
@@ -488,33 +413,24 @@ export class AuthService {
       const outcome = await this.cacheStore.checkOtpCode(key, data.otp, MAX_OTP_ATTEMPTS);
 
       if (outcome !== OtpCheckOutcome.Match) {
-        throw new BadRequestException({
-          code: "INVALID_OTP",
-          message: "Mã OTP không đúng hoặc đã hết hạn",
-        });
+        throw new BusinessError("INVALID_OTP");
       }
 
       await this.cacheStore.delete(key);
     } catch (err: unknown) {
-      if (err instanceof BadRequestException) {
+      if (err instanceof BusinessError) {
         throw err;
       }
       this.logger.error("Redis error checking forgot password OTP", {
         action: "auth.forgot_reset_otp_error",
         err: String(err),
       });
-      throw new ServiceUnavailableException({
-        code: "SERVICE_UNAVAILABLE",
-        message: "Dịch vụ tạm thời gián đoạn, vui lòng thử lại sau",
-      });
+      throw new SystemError("unavailable", "cache CHECK_OTP failed", { cause: err });
     }
 
     const user = await this.userRepo.findByEmail(data.email);
     if (!user) {
-      throw new NotFoundException({
-        code: "USER_NOT_FOUND",
-        message: "Không tìm thấy người dùng",
-      });
+      throw new BusinessError("USER_NOT_FOUND");
     }
 
     const newHash = await this.hashPassword(data.newPassword);
@@ -532,25 +448,16 @@ export class AuthService {
 
     const user = await this.userRepo.findById(userId);
     if (!user) {
-      throw new NotFoundException({
-        code: "USER_NOT_FOUND",
-        message: "Không tìm thấy người dùng",
-      });
+      throw new BusinessError("USER_NOT_FOUND");
     }
 
     if (!user.passwordHash) {
-      throw new BadRequestException({
-        code: "INVALID_OLD_PASSWORD",
-        message: "Tài khoản đăng nhập bằng bên thứ ba chưa có mật khẩu",
-      });
+      throw new BusinessError("INVALID_OLD_PASSWORD");
     }
 
     const isMatch = await this.verifyPassword(user.passwordHash, data.oldPassword);
     if (!isMatch) {
-      throw new BadRequestException({
-        code: "INVALID_OLD_PASSWORD",
-        message: "Mật khẩu cũ không chính xác",
-      });
+      throw new BusinessError("INVALID_OLD_PASSWORD");
     }
 
     const newHash = await this.hashPassword(data.newPassword);
@@ -591,10 +498,7 @@ export class AuthService {
         userId,
         err: String(err),
       });
-      throw new ServiceUnavailableException({
-        code: "SERVICE_UNAVAILABLE",
-        message: "Dịch vụ tạm thời gián đoạn, vui lòng thử lại sau",
-      });
+      throw new SystemError("unavailable", "cache DELETE_MANY failed", { cause: err });
     }
   }
 
@@ -644,12 +548,11 @@ export class AuthService {
       return schema.parse(input);
     } catch (err: unknown) {
       if (err instanceof ZodError) {
-        const firstIssue = err.issues[0];
-        const message = firstIssue?.message ?? "Dữ liệu không hợp lệ";
-        throw new UnprocessableEntityException({
-          code: "VALIDATION_ERROR",
-          message,
-        });
+        const message = err.issues[0]?.message;
+        if (message) {
+          throw BusinessError.validation(message);
+        }
+        throw new BusinessError("VALIDATION_ERROR");
       }
       throw err;
     }

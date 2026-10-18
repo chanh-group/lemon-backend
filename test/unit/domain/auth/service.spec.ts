@@ -1,16 +1,12 @@
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  NotFoundException,
-  UnauthorizedException,
-} from "@nestjs/common";
 import * as argon2 from "argon2";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthService } from "../../../../src/domain/auth/service.js";
 import type { User } from "../../../../src/domain/user/schema.js";
 import { OTP_KEY_PREFIX } from "../../../../src/utils/cache/constants.js";
+import { CacheError } from "../../../../src/utils/cache/error.js";
 import { MemoryCacheService } from "../../../../src/utils/cache/memory.js";
+import { BusinessError } from "../../../../src/utils/errors/business.js";
+import { SystemError } from "../../../../src/utils/errors/system.js";
 
 type MockUserRepo = {
   findById: ReturnType<typeof vi.fn>;
@@ -30,6 +26,27 @@ type MockMailService = {
   getQueueSize: ReturnType<typeof vi.fn>;
   onModuleDestroy: ReturnType<typeof vi.fn>;
 };
+
+async function expectBusinessError(
+  promise: Promise<unknown>,
+  code: BusinessError["code"],
+): Promise<void> {
+  const error: unknown = await promise.then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  expect(error).toBeInstanceOf(BusinessError);
+  expect((error as BusinessError).code).toBe(code);
+}
+
+async function expectSystemUnavailable(promise: Promise<unknown>): Promise<void> {
+  const error: unknown = await promise.then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  expect(error).toBeInstanceOf(SystemError);
+  expect((error as SystemError).kind).toBe("unavailable");
+}
 
 describe("AuthService", () => {
   const originalEnv = process.env;
@@ -98,11 +115,12 @@ describe("AuthService", () => {
   });
 
   describe("requestOtp", () => {
-    it("throws ConflictException when email already exists", async () => {
+    it("throws BusinessError USER_ALREADY_EXISTS when email already exists", async () => {
       mockUserRepo.findByEmail.mockResolvedValueOnce(mockUser);
 
-      await expect(authService.requestOtp({ email: "lemon@example.com" })).rejects.toThrow(
-        ConflictException,
+      await expectBusinessError(
+        authService.requestOtp({ email: "lemon@example.com" }),
+        "USER_ALREADY_EXISTS",
       );
     });
 
@@ -123,6 +141,13 @@ describe("AuthService", () => {
         }),
       );
     });
+
+    it("fails closed with SystemError unavailable when the OTP cache write fails", async () => {
+      mockUserRepo.findByEmail.mockResolvedValueOnce(null);
+      vi.spyOn(cacheStore, "setRaw").mockRejectedValueOnce(new CacheError("SET"));
+
+      await expectSystemUnavailable(authService.requestOtp({ email: "newuser@example.com" }));
+    });
   });
 
   describe("verifyOtp", () => {
@@ -142,32 +167,33 @@ describe("AuthService", () => {
       expect(result).toBe(true);
     });
 
-    it("throws BadRequestException when OTP code is incorrect", async () => {
+    it("throws BusinessError INVALID_OTP when OTP code is incorrect", async () => {
       await cacheStore.setRaw(
         `${OTP_KEY_PREFIX}verify@example.com`,
         JSON.stringify({ code: "123456", attempts: 0 }),
         120,
       );
 
-      await expect(
+      await expectBusinessError(
         authService.verifyOtp({
           email: "verify@example.com",
           otp: "000000",
           purpose: "signup",
         }),
-      ).rejects.toThrow(BadRequestException);
+        "INVALID_OTP",
+      );
     });
   });
 
   describe("signup", () => {
-    it("throws BadRequestException when OTP is incorrect", async () => {
+    it("throws BusinessError INVALID_OTP when OTP is incorrect", async () => {
       await cacheStore.setRaw(
         `${OTP_KEY_PREFIX}signup@example.com`,
         JSON.stringify({ code: "123456", attempts: 0 }),
         120,
       );
 
-      await expect(
+      await expectBusinessError(
         authService.signup({
           email: "signup@example.com",
           fullName: "Test User",
@@ -175,7 +201,8 @@ describe("AuthService", () => {
           password: "MatKhau#123",
           otp: "654321",
         }),
-      ).rejects.toThrow(BadRequestException);
+        "INVALID_OTP",
+      );
     });
 
     it("creates user, hashes password with argon2id and consumes OTP on success", async () => {
@@ -216,42 +243,46 @@ describe("AuthService", () => {
   });
 
   describe("login", () => {
-    it("throws BadRequestException when user is not found or has no password", async () => {
+    it("throws BusinessError INVALID_CREDENTIALS when user is not found or has no password", async () => {
       mockUserRepo.findByIdentifier.mockResolvedValueOnce(null);
 
-      await expect(authService.login({ identifier: "unknown", password: "pwd" })).rejects.toThrow(
-        BadRequestException,
+      await expectBusinessError(
+        authService.login({ identifier: "unknown", password: "pwd" }),
+        "INVALID_CREDENTIALS",
       );
     });
 
-    it("throws BadRequestException when password does not match", async () => {
+    it("throws BusinessError INVALID_CREDENTIALS when password does not match", async () => {
       mockUserRepo.findByIdentifier.mockResolvedValueOnce(mockUser);
 
-      await expect(
+      await expectBusinessError(
         authService.login({ identifier: "lemon_user", password: "WrongPassword#123" }),
-      ).rejects.toThrow(BadRequestException);
+        "INVALID_CREDENTIALS",
+      );
     });
 
-    it("throws ForbiddenException when account is inactive", async () => {
+    it("throws BusinessError FORBIDDEN when account is inactive", async () => {
       mockUserRepo.findByIdentifier.mockResolvedValueOnce({
         ...mockUser,
         isActive: false,
       });
 
-      await expect(
+      await expectBusinessError(
         authService.login({ identifier: "lemon_user", password: "MatKhau#123" }),
-      ).rejects.toThrow(ForbiddenException);
+        "FORBIDDEN",
+      );
     });
 
-    it("throws ForbiddenException when email is not verified", async () => {
+    it("throws BusinessError EMAIL_NOT_VERIFIED when email is not verified", async () => {
       mockUserRepo.findByIdentifier.mockResolvedValueOnce({
         ...mockUser,
         emailVerifiedAt: null,
       });
 
-      await expect(
+      await expectBusinessError(
         authService.login({ identifier: "lemon_user", password: "MatKhau#123" }),
-      ).rejects.toThrow(ForbiddenException);
+        "EMAIL_NOT_VERIFIED",
+      );
     });
 
     it("successfully creates tokens and user response on valid credentials", async () => {
@@ -266,12 +297,24 @@ describe("AuthService", () => {
       expect(result.tokens.refreshToken).toBeDefined();
       expect(result.user.email).toBe(mockUser.email);
     });
+
+    it("fails closed with SystemError unavailable when the refresh session cannot be stored", async () => {
+      mockUserRepo.findByIdentifier.mockResolvedValueOnce(mockUser);
+      vi.spyOn(cacheStore, "createRefreshSession").mockRejectedValueOnce(
+        new CacheError("CREATE_REFRESH_SESSION"),
+      );
+
+      await expectSystemUnavailable(
+        authService.login({ identifier: "lemon_user", password: "MatKhau#123" }),
+      );
+    });
   });
 
   describe("refreshToken", () => {
-    it("throws UnauthorizedException on invalid token", async () => {
-      await expect(authService.refreshToken("invalid.refresh.token")).rejects.toThrow(
-        UnauthorizedException,
+    it("throws BusinessError INVALID_SESSION on invalid token", async () => {
+      await expectBusinessError(
+        authService.refreshToken("invalid.refresh.token"),
+        "INVALID_SESSION",
       );
     });
 
@@ -301,10 +344,8 @@ describe("AuthService", () => {
       // First rotation succeeds
       await authService.refreshToken(oldRefreshToken);
 
-      // Replaying the old token must fail with UnauthorizedException
-      await expect(authService.refreshToken(oldRefreshToken)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      // Replaying the old token must fail with BusinessError INVALID_SESSION
+      await expectBusinessError(authService.refreshToken(oldRefreshToken), "INVALID_SESSION");
     });
   });
 
@@ -324,8 +365,9 @@ describe("AuthService", () => {
       await authService.logout(loginResult.tokens.refreshToken);
 
       // Trying to refresh after logout should fail
-      await expect(authService.refreshToken(loginResult.tokens.refreshToken)).rejects.toThrow(
-        UnauthorizedException,
+      await expectBusinessError(
+        authService.refreshToken(loginResult.tokens.refreshToken),
+        "INVALID_SESSION",
       );
     });
   });
@@ -375,26 +417,28 @@ describe("AuthService", () => {
   });
 
   describe("changePassword", () => {
-    it("throws NotFoundException when user does not exist", async () => {
+    it("throws BusinessError USER_NOT_FOUND when user does not exist", async () => {
       mockUserRepo.findById.mockResolvedValueOnce(null);
 
-      await expect(
+      await expectBusinessError(
         authService.changePassword("non-existent", {
           oldPassword: "old",
           newPassword: "new_password",
         }),
-      ).rejects.toThrow(NotFoundException);
+        "USER_NOT_FOUND",
+      );
     });
 
-    it("throws BadRequestException when old password does not match", async () => {
+    it("throws BusinessError INVALID_OLD_PASSWORD when old password does not match", async () => {
       mockUserRepo.findById.mockResolvedValueOnce(mockUser);
 
-      await expect(
+      await expectBusinessError(
         authService.changePassword(mockUser.id, {
           oldPassword: "WrongOldPassword",
           newPassword: "new_password",
         }),
-      ).rejects.toThrow(BadRequestException);
+        "INVALID_OLD_PASSWORD",
+      );
     });
 
     it("updates password and revokes all sessions when old password matches", async () => {

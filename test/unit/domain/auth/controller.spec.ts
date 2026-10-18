@@ -1,9 +1,21 @@
-import { NotFoundException, UnauthorizedException } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthController } from "../../../../src/domain/auth/controller.js";
 import type { AuthService } from "../../../../src/domain/auth/service.js";
 import type { UserService } from "../../../../src/domain/user/service.js";
+import { BusinessError } from "../../../../src/utils/errors/business.js";
+
+async function expectBusinessError(
+  promise: Promise<unknown>,
+  code: BusinessError["code"],
+): Promise<void> {
+  const error: unknown = await promise.then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  expect(error).toBeInstanceOf(BusinessError);
+  expect((error as BusinessError).code).toBe(code);
+}
 
 describe("AuthController", () => {
   let controller: AuthController;
@@ -149,11 +161,12 @@ describe("AuthController", () => {
   });
 
   describe("refresh", () => {
-    it("throws UnauthorizedException if no refresh token in cookie or header", async () => {
+    it("throws BusinessError UNAUTHORIZED if no refresh token in cookie or header", async () => {
       const mockReq = { cookies: {}, headers: {} } as unknown as Request;
 
-      await expect(controller.refresh(mockReq, mockRes as unknown as Response)).rejects.toThrow(
-        UnauthorizedException,
+      await expectBusinessError(
+        controller.refresh(mockReq, mockRes as unknown as Response),
+        "UNAUTHORIZED",
       );
     });
 
@@ -299,9 +312,9 @@ describe("AuthController", () => {
       expect((res as unknown as { passwordHash?: string }).passwordHash).toBeUndefined();
     });
 
-    it("throws NotFoundException if user not found", async () => {
+    it("throws BusinessError USER_NOT_FOUND if user not found", async () => {
       userService.findById.mockResolvedValueOnce(null);
-      await expect(controller.getMe({ id: "usr-non-existent" })).rejects.toThrow(NotFoundException);
+      await expectBusinessError(controller.getMe({ id: "usr-non-existent" }), "USER_NOT_FOUND");
     });
   });
 });

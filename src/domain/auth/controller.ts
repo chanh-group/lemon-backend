@@ -5,15 +5,14 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
-  NotFoundException,
   Post,
   Req,
   Res,
-  UnauthorizedException,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { get_env } from "../../helpers/index.js";
 import { CurrentUser, Public, type AuthUser } from "../../utils/decorators.js";
+import { BusinessError } from "../../utils/errors/business.js";
 import { toUserResponse } from "../user/dto/mapper.js";
 import type { UserResponseDto } from "../user/dto/response.js";
 import { UserService } from "../user/service.js";
@@ -135,10 +134,7 @@ export class AuthController {
   ): Promise<AuthTokenResponseDto> {
     const rawRefreshToken = extractRefreshToken(req);
     if (!rawRefreshToken) {
-      throw new UnauthorizedException({
-        code: "UNAUTHORIZED",
-        message: "Thiếu Refresh Token",
-      });
+      throw new BusinessError("UNAUTHORIZED");
     }
 
     const newTokens = await this.authService.refreshToken(rawRefreshToken);
@@ -196,10 +192,7 @@ export class AuthController {
   async getMe(@CurrentUser() user: AuthUser): Promise<UserResponseDto> {
     const entity = await this.userService.findById(user.id);
     if (!entity) {
-      throw new NotFoundException({
-        code: "USER_NOT_FOUND",
-        message: "Không tìm thấy người dùng",
-      });
+      throw new BusinessError("USER_NOT_FOUND");
     }
     return toUserResponse(entity);
   }

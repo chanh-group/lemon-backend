@@ -1,15 +1,10 @@
-import {
-  type CanActivate,
-  type ExecutionContext,
-  Injectable,
-  Logger,
-  UnauthorizedException,
-} from "@nestjs/common";
+import { type CanActivate, type ExecutionContext, Injectable, Logger } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import type { Request } from "express";
 import * as jose from "jose";
 import { get_env } from "../../../helpers/index.js";
 import { IS_PUBLIC_KEY, type AuthUser } from "../../../utils/decorators.js";
+import { BusinessError } from "../../../utils/errors/business.js";
 import {
   DEFAULT_JWT_AUDIENCE,
   DEFAULT_JWT_ISSUER,
@@ -51,18 +46,12 @@ export class AuthGuard implements CanActivate {
     const authHeader = request.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      throw new UnauthorizedException({
-        code: "UNAUTHORIZED",
-        message: "Thiếu hoặc sai định dạng Access Token",
-      });
+      throw new BusinessError("UNAUTHORIZED");
     }
 
     const token = authHeader.substring(7).trim();
     if (!token) {
-      throw new UnauthorizedException({
-        code: "UNAUTHORIZED",
-        message: "Access Token không được để trống",
-      });
+      throw new BusinessError("UNAUTHORIZED");
     }
 
     try {
@@ -74,26 +63,20 @@ export class AuthGuard implements CanActivate {
       });
 
       if (payload.type !== "access" || !payload.sub) {
-        throw new UnauthorizedException({
-          code: "UNAUTHORIZED",
-          message: "Token không phải là Access Token hợp lệ",
-        });
+        throw new BusinessError("UNAUTHORIZED");
       }
 
       request.user = { id: payload.sub };
       return true;
     } catch (err: unknown) {
-      if (err instanceof UnauthorizedException) {
+      if (err instanceof BusinessError) {
         throw err;
       }
       this.logger.warn("Access token verification failed", {
         action: "auth.verify_failed",
         err: String(err),
       });
-      throw new UnauthorizedException({
-        code: "UNAUTHORIZED",
-        message: "Access Token không hợp lệ hoặc đã hết hạn",
-      });
+      throw new BusinessError("UNAUTHORIZED");
     }
   }
 }

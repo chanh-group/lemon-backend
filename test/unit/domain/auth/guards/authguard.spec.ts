@@ -1,9 +1,18 @@
 import type { ExecutionContext } from "@nestjs/common";
-import { UnauthorizedException } from "@nestjs/common";
 import type { Reflector } from "@nestjs/core";
 import * as jose from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthGuard } from "../../../../../src/domain/auth/guards/authguard.js";
+import { BusinessError } from "../../../../../src/utils/errors/business.js";
+
+async function expectUnauthorized(promise: Promise<unknown>): Promise<void> {
+  const error: unknown = await promise.then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  expect(error).toBeInstanceOf(BusinessError);
+  expect((error as BusinessError).code).toBe("UNAUTHORIZED");
+}
 
 describe("AuthGuard", () => {
   const originalEnv = process.env;
@@ -45,22 +54,22 @@ describe("AuthGuard", () => {
     expect(result).toBe(true);
   });
 
-  it("throws UnauthorizedException when authorization header is missing", async () => {
+  it("throws BusinessError UNAUTHORIZED when authorization header is missing", async () => {
     const { context } = createMockContext({});
-    await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
+    await expectUnauthorized(guard.canActivate(context));
   });
 
-  it("throws UnauthorizedException when authorization header is not Bearer format", async () => {
+  it("throws BusinessError UNAUTHORIZED when authorization header is not Bearer format", async () => {
     const { context } = createMockContext({ authorization: "Basic 123456" });
-    await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
+    await expectUnauthorized(guard.canActivate(context));
   });
 
-  it("throws UnauthorizedException when token is invalid or corrupted", async () => {
+  it("throws BusinessError UNAUTHORIZED when token is invalid or corrupted", async () => {
     const { context } = createMockContext({ authorization: "Bearer invalid.jwt.token" });
-    await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
+    await expectUnauthorized(guard.canActivate(context));
   });
 
-  it("throws UnauthorizedException when token type is refresh instead of access", async () => {
+  it("throws BusinessError UNAUTHORIZED when token type is refresh instead of access", async () => {
     const secretKey = new TextEncoder().encode(mockSecret);
     const token = await new jose.SignJWT({ type: "refresh", jti: "uuid-123" })
       .setProtectedHeader({ alg: "HS256" })
@@ -72,7 +81,7 @@ describe("AuthGuard", () => {
       .sign(secretKey);
 
     const { context } = createMockContext({ authorization: `Bearer ${token}` });
-    await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);
+    await expectUnauthorized(guard.canActivate(context));
   });
 
   it("allows request and sets request.user when token is valid access token", async () => {
