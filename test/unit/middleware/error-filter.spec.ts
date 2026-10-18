@@ -4,7 +4,7 @@ import { ErrorFilter } from "../../../src/middleware/error-filter.js";
 import { CacheError } from "../../../src/utils/cache/error.js";
 import { BUSINESS_STATUS, BusinessError } from "../../../src/utils/errors/business.js";
 import { SystemError } from "../../../src/utils/errors/system.js";
-import { t } from "../../../src/utils/i18n/index.js";
+import { hasTranslation, t } from "../../../src/utils/i18n/index.js";
 import type { Logger } from "../../../src/utils/logger.js";
 
 function createHost(acceptLanguage?: string) {
@@ -149,8 +149,12 @@ describe("ErrorFilter", () => {
 describe("ErrorFilter catalogue invariant", () => {
   it("resolves every BUSINESS_STATUS code via the catalogue in both locales", () => {
     for (const code of Object.keys(BUSINESS_STATUS)) {
-      expect(t(code, "vi")).not.toBe(code);
-      expect(t(code, "en")).not.toBe(code);
+      const known = hasTranslation(code);
+      expect(known).toBe(true);
+      if (known) {
+        expect(t(code, "vi")).not.toBe(code);
+        expect(t(code, "en")).not.toBe(code);
+      }
     }
   });
 });
