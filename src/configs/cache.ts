@@ -67,3 +67,5 @@ export class CacheModule implements OnModuleDestroy {
     }
   }
 }
+
+export { REDIS_CLIENT } from "../utils/cache/store.js";

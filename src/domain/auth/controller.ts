@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Inject,
   Get,
   Headers,
   HttpCode,
@@ -12,9 +13,24 @@ import {
 import type { Request, Response } from "express";
 import { CurrentUser, Public, type AuthUser } from "../../utils/decorators.js";
 import { BusinessError } from "../../utils/errors/business.js";
+import { extractClientIp } from "../../middleware/ratelimit.js";
+import type { RateLimiter } from "../../middleware/ratelimit.js";
+import { MemoryRateLimiter } from "../../middleware/ratelimit.js";
 import { toUserResponse } from "../user/dto/mapper.js";
 import { UserService } from "../user/service.js";
-import { REFRESH_COOKIE_NAME } from "./constants.js";
+import {
+  RATE_LIMIT_CHANGE_PASSWORD_IP_MAX,
+  RATE_LIMIT_CHANGE_PASSWORD_USER_MAX,
+  RATE_LIMIT_EMAIL_WINDOW_SECS,
+  RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX,
+  RATE_LIMIT_REQUEST_OTP_EMAIL_MAX,
+  RATE_LIMIT_REQUEST_OTP_IP_MAX,
+  RATE_LIMIT_SIGNIN_IP_MAX,
+  RATE_LIMIT_VERIFY_OTP_IP_MAX,
+  RATE_LIMIT_WINDOW_SECS,
+  RATE_LIMITER,
+  REFRESH_COOKIE_NAME,
+} from "./constants.js";
 import {
   clearRefreshCookieOptions,
   refreshCookieOptions,
@@ -75,6 +91,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly userService: UserService,
+    @Inject(RATE_LIMITER) private readonly rateLimiter: RateLimiter = new MemoryRateLimiter(),
   ) {
     this.cookieConfig = resolveCookieConfig();
   }
@@ -85,7 +102,15 @@ export class AuthController {
   async requestOtp(
     @Body({ schema: requestOtpSchema }) body: RequestOtpDto,
     @Headers("x-request-id") requestId?: string,
+    @Req() req?: Request,
   ) {
+    const ip = extractClientIp(req);
+    if (!(await this.rateLimiter.checkIpLimit("request-otp", ip, RATE_LIMIT_REQUEST_OTP_IP_MAX, RATE_LIMIT_WINDOW_SECS))) {
+      throw new BusinessError("TOO_MANY_REQUESTS");
+    }
+    if (!(await this.rateLimiter.checkEmailLimit("request-otp", body.email, RATE_LIMIT_REQUEST_OTP_EMAIL_MAX, RATE_LIMIT_EMAIL_WINDOW_SECS))) {
+      throw new BusinessError("TOO_MANY_REQUESTS");
+    }
     await this.authService.requestOtp(body, requestId);
     return {
       success: true,
@@ -96,7 +121,14 @@ export class AuthController {
   @Public()
   @Post("verify-otp")
   @HttpCode(HttpStatus.OK)
-  async verifyOtp(@Body({ schema: verifyOtpSchema }) body: VerifyOtpDto) {
+  async verifyOtp(
+    @Body({ schema: verifyOtpSchema }) body: VerifyOtpDto,
+    @Req() req?: Request,
+  ) {
+    const ip = extractClientIp(req);
+    if (!(await this.rateLimiter.checkIpLimit("verify-otp", ip, RATE_LIMIT_VERIFY_OTP_IP_MAX, RATE_LIMIT_WINDOW_SECS))) {
+      throw new BusinessError("TOO_MANY_REQUESTS");
+    }
     const valid = await this.authService.verifyOtp(body);
     return {
       success: true,
@@ -123,7 +155,12 @@ export class AuthController {
   async login(
     @Body({ schema: loginSchema }) body: LoginDto,
     @Res({ passthrough: true }) res: Response,
+    @Req() req?: Request,
   ) {
+    const ip = extractClientIp(req);
+    if (!(await this.rateLimiter.checkIpLimit("signin", ip, RATE_LIMIT_SIGNIN_IP_MAX, RATE_LIMIT_WINDOW_SECS))) {
+      throw new BusinessError("TOO_MANY_REQUESTS");
+    }
     const result = await this.authService.login(body);
     setRefreshCookie(res, result.tokens.refreshToken, this.cookieConfig);
     return {
@@ -172,7 +209,15 @@ export class AuthController {
   async forgotPasswordOtp(
     @Body({ schema: forgotPasswordOtpSchema }) body: ForgotPasswordOtpDto,
     @Headers("x-request-id") requestId?: string,
+    @Req() req?: Request,
   ) {
+    const ip = extractClientIp(req);
+    if (!(await this.rateLimiter.checkIpLimit("forgot-password-otp", ip, RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX, RATE_LIMIT_WINDOW_SECS))) {
+      throw new BusinessError("TOO_MANY_REQUESTS");
+    }
+    if (!(await this.rateLimiter.checkEmailLimit("forgot-password-otp", body.email, RATE_LIMIT_REQUEST_OTP_EMAIL_MAX, RATE_LIMIT_EMAIL_WINDOW_SECS))) {
+      throw new BusinessError("TOO_MANY_REQUESTS");
+    }
     await this.authService.forgotPasswordOtp(body, requestId);
     return {
       success: true,
@@ -199,7 +244,12 @@ export class AuthController {
     @CurrentUser() user: AuthUser,
     @Body({ schema: changePasswordSchema }) body: ChangePasswordDto,
     @Res({ passthrough: true }) res: Response,
+    @Req() req?: Request,
   ) {
+    const ip = extractClientIp(req);
+    if (!(await this.rateLimiter.checkMixedLimit("change-password", user.id, ip, RATE_LIMIT_CHANGE_PASSWORD_USER_MAX, RATE_LIMIT_CHANGE_PASSWORD_IP_MAX, RATE_LIMIT_WINDOW_SECS))) {
+      throw new BusinessError("TOO_MANY_REQUESTS");
+    }
     await this.authService.changePassword(user.id, body);
     clearRefreshCookie(res, this.cookieConfig);
     return {

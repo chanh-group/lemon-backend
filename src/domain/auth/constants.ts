@@ -13,3 +13,15 @@ export const REFRESH_COOKIE_PATH = "/auth";
 
 export const OTP_PURPOSE_SIGNUP = "signup" as const;
 export const OTP_PURPOSE_RESET = "reset" as const;
+
+export const RATE_LIMIT_WINDOW_SECS = 60;
+export const RATE_LIMIT_EMAIL_WINDOW_SECS = 3600;
+export const RATE_LIMIT_REQUEST_OTP_IP_MAX = 3;
+export const RATE_LIMIT_REQUEST_OTP_EMAIL_MAX = 3;
+export const RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX = 3;
+export const RATE_LIMIT_VERIFY_OTP_IP_MAX = 10;
+export const RATE_LIMIT_SIGNIN_IP_MAX = 5;
+export const RATE_LIMIT_CHANGE_PASSWORD_USER_MAX = 3;
+export const RATE_LIMIT_CHANGE_PASSWORD_IP_MAX = 10;
+
+export { RATE_LIMITER } from "../../middleware/ratelimit.js";
