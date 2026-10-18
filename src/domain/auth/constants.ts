@@ -11,9 +11,6 @@ export const JWT_CONFIG: unique symbol = Symbol("JWT_CONFIG");
 export const REFRESH_COOKIE_NAME = "refreshCookie";
 export const REFRESH_COOKIE_PATH = "/auth";
 
-export const OTP_PURPOSE_SIGNUP = "signup" as const;
-export const OTP_PURPOSE_RESET = "reset" as const;
-
 export const RATE_LIMIT_WINDOW_SECS = 60;
 export const RATE_LIMIT_EMAIL_WINDOW_SECS = 3600;
 export const RATE_LIMIT_REQUEST_OTP_IP_MAX = 3;
