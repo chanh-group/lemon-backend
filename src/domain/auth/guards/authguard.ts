@@ -12,8 +12,6 @@ import { BusinessError } from "../../../utils/errors/business.js";
 import { JWT_CONFIG } from "../constants.js";
 import type { JwtConfig } from "../jwt.js";
 
-export { CurrentUser, Public, type AuthUser } from "../../../utils/decorators.js";
-
 @Injectable()
 export class AuthGuard implements CanActivate {
   private readonly logger = new Logger(AuthGuard.name);

@@ -5,6 +5,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import type { Request } from "express";
+import type { AuthUser } from "../domain/shared.js";
 
 export const IS_PUBLIC_KEY = "isPublic";
 
@@ -14,9 +15,7 @@ export const IS_PUBLIC_KEY = "isPublic";
  */
 export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
 
-export interface AuthUser {
-  id: string;
-}
+export type { AuthUser };
 
 /**
  * Parameter decorator to extract the authenticated user

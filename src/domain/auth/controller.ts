@@ -13,7 +13,6 @@ import type { Request, Response } from "express";
 import { CurrentUser, Public, type AuthUser } from "../../utils/decorators.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { toUserResponse } from "../user/dto/mapper.js";
-import type { UserResponseDto } from "../user/dto/response.js";
 import { UserService } from "../user/service.js";
 import { REFRESH_COOKIE_NAME } from "./constants.js";
 import {
@@ -22,27 +21,25 @@ import {
   resolveCookieConfig,
   type CookieConfig,
 } from "./cookies.js";
+import { toAuthTokenResponse, toLoginResponse } from "./dto/mapper.js";
 import {
-  toAuthTokenResponse,
-  toLoginResponse,
-  toMessageResponse,
-  toVerifyOtpResponse,
-} from "./dto/mapper.js";
-import type {
-  ChangePasswordInput,
-  ForgotPasswordOtpInput,
-  ForgotPasswordResetInput,
-  LoginInput,
-  RequestOtpInput,
-  SignupInput,
-  VerifyOtpInput,
+  changePasswordSchema,
+  forgotPasswordOtpSchema,
+  forgotPasswordResetSchema,
+  loginSchema,
+  requestOtpSchema,
+  signupSchema,
+  verifyOtpSchema,
 } from "./dto/request.js";
 import type {
-  AuthTokenResponseDto,
-  LoginResponseDto,
-  MessageResponseDto,
-  VerifyOtpResponseDto,
-} from "./dto/response.js";
+  ChangePasswordDto,
+  ForgotPasswordOtpDto,
+  ForgotPasswordResetDto,
+  LoginDto,
+  RequestOtpDto,
+  SignupDto,
+  VerifyOtpDto,
+} from "./dto/request.js";
 import { AuthService } from "./service.js";
 
 function extractRefreshToken(req: Request): string | undefined {
@@ -86,47 +83,60 @@ export class AuthController {
   @Post("request-otp")
   @HttpCode(HttpStatus.OK)
   async requestOtp(
-    @Body() body: RequestOtpInput,
+    @Body({ schema: requestOtpSchema }) body: RequestOtpDto,
     @Headers("x-request-id") requestId?: string,
-  ): Promise<MessageResponseDto> {
+  ) {
     await this.authService.requestOtp(body, requestId);
-    return toMessageResponse("Mã OTP xác thực đã được gửi đến email của bạn");
+    return {
+      success: true,
+      message: "OTP sent successfully",
+    };
   }
 
   @Public()
   @Post("verify-otp")
   @HttpCode(HttpStatus.OK)
-  async verifyOtp(@Body() body: VerifyOtpInput): Promise<VerifyOtpResponseDto> {
+  async verifyOtp(@Body({ schema: verifyOtpSchema }) body: VerifyOtpDto) {
     const valid = await this.authService.verifyOtp(body);
-    return toVerifyOtpResponse(valid);
+    return {
+      success: true,
+      message: "OTP verified successfully",
+      data: { valid },
+    };
   }
 
   @Public()
   @Post("signup")
   @HttpCode(HttpStatus.CREATED)
-  async signup(@Body() body: SignupInput): Promise<UserResponseDto> {
-    return this.authService.signup(body);
+  async signup(@Body({ schema: signupSchema }) body: SignupDto) {
+    const data = await this.authService.signup(body);
+    return {
+      success: true,
+      message: "Signed up successfully",
+      data,
+    };
   }
 
   @Public()
   @Post("login")
   @HttpCode(HttpStatus.OK)
   async login(
-    @Body() body: LoginInput,
+    @Body({ schema: loginSchema }) body: LoginDto,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<LoginResponseDto> {
+  ) {
     const result = await this.authService.login(body);
     setRefreshCookie(res, result.tokens.refreshToken, this.cookieConfig);
-    return toLoginResponse(result.tokens.accessToken, result.user);
+    return {
+      success: true,
+      message: "Signed in successfully",
+      data: toLoginResponse(result.tokens.accessToken, result.user),
+    };
   }
 
   @Public()
   @Post("refresh")
   @HttpCode(HttpStatus.OK)
-  async refresh(
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<AuthTokenResponseDto> {
+  async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const rawRefreshToken = extractRefreshToken(req);
     if (!rawRefreshToken) {
       throw new BusinessError("UNAUTHORIZED");
@@ -134,61 +144,80 @@ export class AuthController {
 
     const newTokens = await this.authService.refreshToken(rawRefreshToken);
     setRefreshCookie(res, newTokens.refreshToken, this.cookieConfig);
-    return toAuthTokenResponse(newTokens.accessToken);
+    return {
+      success: true,
+      message: "OK",
+      data: toAuthTokenResponse(newTokens.accessToken),
+    };
   }
 
   @Public()
   @Post("logout")
   @HttpCode(HttpStatus.OK)
-  async logout(
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<MessageResponseDto> {
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const rawRefreshToken = extractRefreshToken(req);
     if (rawRefreshToken) {
       await this.authService.logout(rawRefreshToken);
     }
     clearRefreshCookie(res, this.cookieConfig);
-    return toMessageResponse("Đăng xuất thành công");
+    return {
+      success: true,
+      message: "Signed out successfully",
+    };
   }
 
   @Public()
   @Post("forgot-password/otp")
   @HttpCode(HttpStatus.OK)
   async forgotPasswordOtp(
-    @Body() body: ForgotPasswordOtpInput,
+    @Body({ schema: forgotPasswordOtpSchema }) body: ForgotPasswordOtpDto,
     @Headers("x-request-id") requestId?: string,
-  ): Promise<MessageResponseDto> {
+  ) {
     await this.authService.forgotPasswordOtp(body, requestId);
-    return toMessageResponse("Nếu email tồn tại trong hệ thống, mã OTP khôi phục đã được gửi");
+    return {
+      success: true,
+      message: "If the email exists, a reset OTP has been sent",
+    };
   }
 
   @Public()
   @Post("forgot-password/reset")
   @HttpCode(HttpStatus.OK)
-  async forgotPasswordReset(@Body() body: ForgotPasswordResetInput): Promise<MessageResponseDto> {
+  async forgotPasswordReset(
+    @Body({ schema: forgotPasswordResetSchema }) body: ForgotPasswordResetDto,
+  ) {
     await this.authService.forgotPasswordReset(body);
-    return toMessageResponse("Đặt lại mật khẩu thành công. Vui lòng đăng nhập với mật khẩu mới");
+    return {
+      success: true,
+      message: "Password reset successfully",
+    };
   }
 
   @Post("change-password")
   @HttpCode(HttpStatus.OK)
   async changePassword(
     @CurrentUser() user: AuthUser,
-    @Body() body: ChangePasswordInput,
+    @Body({ schema: changePasswordSchema }) body: ChangePasswordDto,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<MessageResponseDto> {
+  ) {
     await this.authService.changePassword(user.id, body);
     clearRefreshCookie(res, this.cookieConfig);
-    return toMessageResponse("Đổi mật khẩu thành công. Vui lòng đăng nhập lại");
+    return {
+      success: true,
+      message: "Password changed successfully. Please sign in again",
+    };
   }
 
   @Get("me")
-  async getMe(@CurrentUser() user: AuthUser): Promise<UserResponseDto> {
+  async getMe(@CurrentUser() user: AuthUser) {
     const entity = await this.userService.findById(user.id);
     if (!entity) {
       throw new BusinessError("USER_NOT_FOUND");
     }
-    return toUserResponse(entity);
+    return {
+      success: true,
+      message: "OK",
+      data: toUserResponse(entity),
+    };
   }
 }

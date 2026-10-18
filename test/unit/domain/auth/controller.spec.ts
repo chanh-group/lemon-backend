@@ -86,7 +86,7 @@ describe("AuthController", () => {
       const res = await controller.requestOtp({ email: "lemon@example.com" }, "req-1");
 
       expect(authService.requestOtp).toHaveBeenCalledWith({ email: "lemon@example.com" }, "req-1");
-      expect(res.message).toContain("Mã OTP xác thực đã được gửi");
+      expect(res).toEqual({ success: true, message: "OTP sent successfully" });
     });
   });
 
@@ -104,7 +104,11 @@ describe("AuthController", () => {
         otp: "123456",
         purpose: "signup",
       });
-      expect(res).toEqual({ valid: true });
+      expect(res).toEqual({
+        success: true,
+        message: "OTP verified successfully",
+        data: { valid: true },
+      });
     });
   });
 
@@ -121,7 +125,11 @@ describe("AuthController", () => {
 
       const res = await controller.signup(payload);
       expect(authService.signup).toHaveBeenCalledWith(payload);
-      expect(res).toEqual(mockUserResponse);
+      expect(res).toEqual({
+        success: true,
+        message: "Signed up successfully",
+        data: mockUserResponse,
+      });
     });
   });
 
@@ -154,8 +162,12 @@ describe("AuthController", () => {
         }),
       );
       expect(res).toEqual({
-        accessToken: "access-token-123",
-        user: mockUserResponse,
+        success: true,
+        message: "Signed in successfully",
+        data: {
+          accessToken: "access-token-123",
+          user: mockUserResponse,
+        },
       });
     });
   });
@@ -193,7 +205,11 @@ describe("AuthController", () => {
           path: "/auth",
         }),
       );
-      expect(res).toEqual({ accessToken: "new-access-token" });
+      expect(res).toEqual({
+        success: true,
+        message: "OK",
+        data: { accessToken: "new-access-token" },
+      });
     });
 
     it("falls back to x-refresh-token header if cookie is missing", async () => {
@@ -210,7 +226,11 @@ describe("AuthController", () => {
       const res = await controller.refresh(mockReq, mockRes as unknown as Response);
 
       expect(authService.refreshToken).toHaveBeenCalledWith("header-refresh-token");
-      expect(res).toEqual({ accessToken: "new-access-token-header" });
+      expect(res).toEqual({
+        success: true,
+        message: "OK",
+        data: { accessToken: "new-access-token-header" },
+      });
     });
   });
 
@@ -231,7 +251,7 @@ describe("AuthController", () => {
           path: "/auth",
         }),
       );
-      expect(res.message).toBe("Đăng xuất thành công");
+      expect(res).toEqual({ success: true, message: "Signed out successfully" });
     });
   });
 
@@ -245,7 +265,10 @@ describe("AuthController", () => {
         { email: "lemon@example.com" },
         "req-forgot-1",
       );
-      expect(res.message).toContain("mã OTP khôi phục đã được gửi");
+      expect(res).toEqual({
+        success: true,
+        message: "If the email exists, a reset OTP has been sent",
+      });
     });
 
     it("forgotPasswordReset calls authService and returns message", async () => {
@@ -259,7 +282,7 @@ describe("AuthController", () => {
         otp: "654321",
         newPassword: "NewPassword#123",
       });
-      expect(res.message).toContain("Đặt lại mật khẩu thành công");
+      expect(res).toEqual({ success: true, message: "Password reset successfully" });
     });
   });
 
@@ -282,7 +305,10 @@ describe("AuthController", () => {
           path: "/auth",
         }),
       );
-      expect(res.message).toContain("Đổi mật khẩu thành công");
+      expect(res).toEqual({
+        success: true,
+        message: "Password changed successfully. Please sign in again",
+      });
     });
   });
 
@@ -325,9 +351,9 @@ describe("AuthController", () => {
 
       const res = await controller.getMe({ id: "usr-123" });
       expect(userService.findById).toHaveBeenCalledWith("usr-123");
-      expect(res.id).toBe("usr-123");
-      expect(res.email).toBe("lemon@example.com");
-      expect((res as unknown as { passwordHash?: string }).passwordHash).toBeUndefined();
+      expect(res.data.id).toBe("usr-123");
+      expect(res.data.email).toBe("lemon@example.com");
+      expect((res.data as unknown as { passwordHash?: string }).passwordHash).toBeUndefined();
     });
 
     it("throws BusinessError USER_NOT_FOUND if user not found", async () => {

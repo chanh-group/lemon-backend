@@ -2,7 +2,6 @@ import * as crypto from "node:crypto";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import * as argon2 from "argon2";
 import { v7 as uuidv7 } from "uuid";
-import { ZodError } from "zod";
 import {
   FORGOT_OTP_KEY_PREFIX,
   MAX_OTP_ATTEMPTS,
@@ -24,20 +23,13 @@ import { toUserResponse } from "../user/dto/mapper.js";
 import type { UserResponseDto } from "../user/dto/response.js";
 import { USER_REPOSITORY, type UserRepository } from "../user/repository.js";
 import {
-  ChangePasswordInput,
-  changePasswordSchema,
-  ForgotPasswordOtpInput,
-  forgotPasswordOtpSchema,
-  ForgotPasswordResetInput,
-  forgotPasswordResetSchema,
-  LoginInput,
-  loginSchema,
-  RequestOtpInput,
-  requestOtpSchema,
-  SignupInput,
-  signupSchema,
-  VerifyOtpInput,
-  verifyOtpSchema,
+  ChangePasswordDto,
+  ForgotPasswordOtpDto,
+  ForgotPasswordResetDto,
+  LoginDto,
+  RequestOtpDto,
+  SignupDto,
+  VerifyOtpDto,
 } from "./dto/request.js";
 import { JWT_CONFIG } from "./constants.js";
 import type { JwtConfig } from "./jwt.js";
@@ -57,16 +49,14 @@ export class AuthService {
     private readonly jwt: JwtConfig,
   ) {}
 
-  async requestOtp(input: RequestOtpInput, requestId?: string): Promise<void> {
-    const data = this.validate(requestOtpSchema, input);
-
-    const existingUser = await this.userRepo.findByEmail(data.email);
+  async requestOtp(input: RequestOtpDto, requestId?: string): Promise<void> {
+    const existingUser = await this.userRepo.findByEmail(input.email);
     if (existingUser) {
       throw new BusinessError("USER_ALREADY_EXISTS");
     }
 
     const code = this.generateOtp();
-    const key = `${OTP_KEY_PREFIX}${data.email}`;
+    const key = `${OTP_KEY_PREFIX}${input.email}`;
 
     try {
       await this.cacheStore.setRaw(key, JSON.stringify({ code, attempts: 0 }), OTP_EXPIRATION);
@@ -79,7 +69,7 @@ export class AuthService {
     }
 
     await this.mailService.sendOtp({
-      to: data.email,
+      to: input.email,
       code,
       purpose: "signup",
       requestId,
@@ -87,17 +77,16 @@ export class AuthService {
 
     this.logger.log("Registration OTP requested", {
       action: "auth.request_otp",
-      email: data.email,
+      email: input.email,
     });
   }
 
-  async verifyOtp(input: VerifyOtpInput): Promise<boolean> {
-    const data = this.validate(verifyOtpSchema, input);
-    const prefix = data.purpose === "signup" ? OTP_KEY_PREFIX : FORGOT_OTP_KEY_PREFIX;
-    const key = `${prefix}${data.email}`;
+  async verifyOtp(input: VerifyOtpDto): Promise<boolean> {
+    const prefix = input.purpose === "signup" ? OTP_KEY_PREFIX : FORGOT_OTP_KEY_PREFIX;
+    const key = `${prefix}${input.email}`;
 
     try {
-      const outcome = await this.cacheStore.checkOtpCode(key, data.otp, MAX_OTP_ATTEMPTS);
+      const outcome = await this.cacheStore.checkOtpCode(key, input.otp, MAX_OTP_ATTEMPTS);
 
       if (outcome === OtpCheckOutcome.Match) {
         return true;
@@ -116,12 +105,11 @@ export class AuthService {
     }
   }
 
-  async signup(input: SignupInput): Promise<UserResponseDto> {
-    const data = this.validate(signupSchema, input);
-    const otpKey = `${OTP_KEY_PREFIX}${data.email}`;
+  async signup(input: SignupDto): Promise<UserResponseDto> {
+    const otpKey = `${OTP_KEY_PREFIX}${input.email}`;
 
     try {
-      const outcome = await this.cacheStore.checkOtpCode(otpKey, data.otp, MAX_OTP_ATTEMPTS);
+      const outcome = await this.cacheStore.checkOtpCode(otpKey, input.otp, MAX_OTP_ATTEMPTS);
 
       if (outcome !== OtpCheckOutcome.Match) {
         throw new BusinessError("INVALID_OTP");
@@ -140,8 +128,8 @@ export class AuthService {
     }
 
     const [existingEmail, existingUsername] = await Promise.all([
-      this.userRepo.findByEmail(data.email),
-      this.userRepo.findByUsername(data.username),
+      this.userRepo.findByEmail(input.email),
+      this.userRepo.findByUsername(input.username),
     ]);
 
     if (existingEmail) {
@@ -152,13 +140,13 @@ export class AuthService {
       throw new BusinessError("USERNAME_TAKEN");
     }
 
-    const passwordHash = await this.hashPassword(data.password);
+    const passwordHash = await this.hashPassword(input.password);
 
     try {
       const createdUser = await this.userRepo.create({
-        email: data.email,
-        username: data.username,
-        fullName: data.fullName,
+        email: input.email,
+        username: input.username,
+        fullName: input.fullName,
         passwordHash,
         emailVerifiedAt: new Date(),
         isActive: true,
@@ -187,15 +175,13 @@ export class AuthService {
     }
   }
 
-  async login(input: LoginInput): Promise<{ tokens: TokenPair; user: UserResponseDto }> {
-    const data = this.validate(loginSchema, input);
-
-    const user = await this.userRepo.findByIdentifier(data.identifier);
+  async login(input: LoginDto): Promise<{ tokens: TokenPair; user: UserResponseDto }> {
+    const user = await this.userRepo.findByIdentifier(input.identifier);
     if (!user || !user.passwordHash) {
       throw new BusinessError("INVALID_CREDENTIALS");
     }
 
-    const isMatch = await this.verifyPassword(user.passwordHash, data.password);
+    const isMatch = await this.verifyPassword(user.passwordHash, input.password);
     if (!isMatch) {
       throw new BusinessError("INVALID_CREDENTIALS");
     }
@@ -328,10 +314,8 @@ export class AuthService {
     }
   }
 
-  async forgotPasswordOtp(input: ForgotPasswordOtpInput, requestId?: string): Promise<void> {
-    const data = this.validate(forgotPasswordOtpSchema, input);
-
-    const user = await this.userRepo.findByEmail(data.email);
+  async forgotPasswordOtp(input: ForgotPasswordOtpDto, requestId?: string): Promise<void> {
+    const user = await this.userRepo.findByEmail(input.email);
     if (!user) {
       this.logger.log("Forgot password OTP requested for non-existent email (anti-enumeration)", {
         action: "auth.forgot_otp_skipped",
@@ -340,7 +324,7 @@ export class AuthService {
     }
 
     const code = this.generateOtp();
-    const key = `${FORGOT_OTP_KEY_PREFIX}${data.email}`;
+    const key = `${FORGOT_OTP_KEY_PREFIX}${input.email}`;
 
     try {
       await this.cacheStore.setRaw(key, JSON.stringify({ code, attempts: 0 }), OTP_EXPIRATION);
@@ -353,7 +337,7 @@ export class AuthService {
     }
 
     await this.mailService.sendOtp({
-      to: data.email,
+      to: input.email,
       code,
       purpose: "reset",
       requestId,
@@ -361,16 +345,15 @@ export class AuthService {
 
     this.logger.log("Forgot password OTP sent", {
       action: "auth.forgot_otp_sent",
-      email: data.email,
+      email: input.email,
     });
   }
 
-  async forgotPasswordReset(input: ForgotPasswordResetInput): Promise<void> {
-    const data = this.validate(forgotPasswordResetSchema, input);
-    const key = `${FORGOT_OTP_KEY_PREFIX}${data.email}`;
+  async forgotPasswordReset(input: ForgotPasswordResetDto): Promise<void> {
+    const key = `${FORGOT_OTP_KEY_PREFIX}${input.email}`;
 
     try {
-      const outcome = await this.cacheStore.checkOtpCode(key, data.otp, MAX_OTP_ATTEMPTS);
+      const outcome = await this.cacheStore.checkOtpCode(key, input.otp, MAX_OTP_ATTEMPTS);
 
       if (outcome !== OtpCheckOutcome.Match) {
         throw new BusinessError("INVALID_OTP");
@@ -388,12 +371,12 @@ export class AuthService {
       throw new SystemError("unavailable", "cache CHECK_OTP failed", { cause: err });
     }
 
-    const user = await this.userRepo.findByEmail(data.email);
+    const user = await this.userRepo.findByEmail(input.email);
     if (!user) {
       throw new BusinessError("USER_NOT_FOUND");
     }
 
-    const newHash = await this.hashPassword(data.newPassword);
+    const newHash = await this.hashPassword(input.newPassword);
     await this.userRepo.updatePasswordHash(user.id, newHash);
     await this.revokeFamily(user.id);
 
@@ -403,9 +386,7 @@ export class AuthService {
     });
   }
 
-  async changePassword(userId: string, input: ChangePasswordInput): Promise<void> {
-    const data = this.validate(changePasswordSchema, input);
-
+  async changePassword(userId: string, input: ChangePasswordDto): Promise<void> {
     const user = await this.userRepo.findById(userId);
     if (!user) {
       throw new BusinessError("USER_NOT_FOUND");
@@ -415,12 +396,12 @@ export class AuthService {
       throw new BusinessError("INVALID_OLD_PASSWORD");
     }
 
-    const isMatch = await this.verifyPassword(user.passwordHash, data.oldPassword);
+    const isMatch = await this.verifyPassword(user.passwordHash, input.oldPassword);
     if (!isMatch) {
       throw new BusinessError("INVALID_OLD_PASSWORD");
     }
 
-    const newHash = await this.hashPassword(data.newPassword);
+    const newHash = await this.hashPassword(input.newPassword);
     await this.userRepo.updatePasswordHash(userId, newHash);
     await this.revokeFamily(userId);
 
@@ -479,20 +460,5 @@ export class AuthService {
 
   private generateOtp(): string {
     return crypto.randomInt(100000, 1000000).toString();
-  }
-
-  private validate<T>(schema: { parse: (val: unknown) => T }, input: unknown): T {
-    try {
-      return schema.parse(input);
-    } catch (err: unknown) {
-      if (err instanceof ZodError) {
-        const message = err.issues[0]?.message;
-        if (message) {
-          throw BusinessError.validation(message);
-        }
-        throw new BusinessError("VALIDATION_ERROR");
-      }
-      throw err;
-    }
   }
 }

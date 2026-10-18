@@ -1,9 +1,5 @@
 import type { JWTPayload } from "jose";
 
-export interface AuthUser {
-  id: string;
-}
-
 export interface AccessTokenPayload extends JWTPayload {
   sub: string;
   type: "access";
