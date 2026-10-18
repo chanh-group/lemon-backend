@@ -3,6 +3,7 @@ import type { Reflector } from "@nestjs/core";
 import * as jose from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthGuard } from "../../../../../src/domain/auth/guards/authguard.js";
+import { JwtConfig } from "../../../../../src/domain/auth/jwt.js";
 import { BusinessError } from "../../../../../src/utils/errors/business.js";
 
 async function expectUnauthorized(promise: Promise<unknown>): Promise<void> {
@@ -23,7 +24,7 @@ describe("AuthGuard", () => {
   beforeEach(() => {
     process.env = { ...originalEnv, JWT_SECRET: mockSecret };
     reflector = { getAllAndOverride: vi.fn().mockReturnValue(false) };
-    guard = new AuthGuard(reflector as unknown as Reflector);
+    guard = new AuthGuard(reflector as unknown as Reflector, JwtConfig.from_env());
   });
 
   afterEach(() => {

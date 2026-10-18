@@ -1,6 +1,7 @@
 import * as argon2 from "argon2";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthService } from "../../../../src/domain/auth/service.js";
+import { JwtConfig } from "../../../../src/domain/auth/jwt.js";
 import type { User } from "../../../../src/domain/user/schema.js";
 import { OTP_KEY_PREFIX } from "../../../../src/utils/cache/constants.js";
 import { CacheError } from "../../../../src/utils/cache/error.js";
@@ -106,7 +107,12 @@ describe("AuthService", () => {
     const hash = await argon2.hash("MatKhau#123", { type: argon2.argon2id });
     mockUser.passwordHash = hash;
 
-    authService = new AuthService(mockUserRepo as never, cacheStore, mockMailService as never);
+    authService = new AuthService(
+      mockUserRepo as never,
+      cacheStore,
+      mockMailService as never,
+      JwtConfig.from_env(),
+    );
   });
 
   afterEach(() => {

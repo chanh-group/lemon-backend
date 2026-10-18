@@ -1,10 +1,8 @@
 import * as crypto from "node:crypto";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import * as argon2 from "argon2";
-import * as jose from "jose";
 import { v7 as uuidv7 } from "uuid";
 import { ZodError } from "zod";
-import { get_env } from "../../helpers/index.js";
 import {
   FORGOT_OTP_KEY_PREFIX,
   MAX_OTP_ATTEMPTS,
@@ -26,14 +24,6 @@ import { toUserResponse } from "../user/dto/mapper.js";
 import type { UserResponseDto } from "../user/dto/response.js";
 import { USER_REPOSITORY, type UserRepository } from "../user/repository.js";
 import {
-  ACCESS_TOKEN_EXPIRATION_SECS,
-  DEFAULT_JWT_AUDIENCE,
-  DEFAULT_JWT_ISSUER,
-  JWT_ALGORITHM,
-  JWT_LEEWAY_SECS,
-  REFRESH_TOKEN_EXPIRATION_SECS,
-} from "./constants.js";
-import {
   ChangePasswordInput,
   changePasswordSchema,
   ForgotPasswordOtpInput,
@@ -49,14 +39,13 @@ import {
   VerifyOtpInput,
   verifyOtpSchema,
 } from "./dto/request.js";
-import type { RefreshTokenPayload, TokenPair } from "./types.js";
+import { JWT_CONFIG } from "./constants.js";
+import type { JwtConfig } from "./jwt.js";
+import type { TokenPair } from "./types.js";
 
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
-  private readonly secretKey: Uint8Array;
-  private readonly issuer: string;
-  private readonly audience: string;
 
   constructor(
     @Inject(USER_REPOSITORY)
@@ -64,15 +53,9 @@ export class AuthService {
     @Inject(CACHE_STORE)
     private readonly cacheStore: CacheStore,
     private readonly mailService: MailService,
-  ) {
-    const secret = get_env("JWT_SECRET");
-    if (secret.length < 32) {
-      throw new Error("JWT_SECRET must be at least 32 characters long");
-    }
-    this.secretKey = new TextEncoder().encode(secret);
-    this.issuer = get_env("JWT_ISSUER", DEFAULT_JWT_ISSUER);
-    this.audience = get_env("JWT_AUDIENCE", DEFAULT_JWT_AUDIENCE);
-  }
+    @Inject(JWT_CONFIG)
+    private readonly jwt: JwtConfig,
+  ) {}
 
   async requestOtp(input: RequestOtpInput, requestId?: string): Promise<void> {
     const data = this.validate(requestOtpSchema, input);
@@ -226,8 +209,8 @@ export class AuthService {
     }
 
     const jti = uuidv7();
-    const accessToken = await this.signAccessToken(user.id);
-    const refreshToken = await this.signRefreshToken(user.id, jti);
+    const accessToken = await this.jwt.signAccessToken(user.id);
+    const refreshToken = await this.jwt.signRefreshToken(user.id, jti);
 
     try {
       await this.cacheStore.createRefreshSession({
@@ -262,29 +245,14 @@ export class AuthService {
       throw new BusinessError("INVALID_SESSION");
     }
 
-    let payload: RefreshTokenPayload;
-    try {
-      const verified = await jose.jwtVerify<RefreshTokenPayload>(rawRefreshToken, this.secretKey, {
-        algorithms: [JWT_ALGORITHM],
-        issuer: this.issuer,
-        audience: this.audience,
-        clockTolerance: JWT_LEEWAY_SECS,
-      });
-      payload = verified.payload;
-    } catch {
-      throw new BusinessError("INVALID_SESSION");
-    }
-
-    if (payload.type !== "refresh" || !payload.jti || !payload.sub) {
-      throw new BusinessError("INVALID_SESSION");
-    }
+    const payload = await this.jwt.verifyRefreshToken(rawRefreshToken);
 
     const userId = payload.sub;
     const oldJti = payload.jti;
     const newJti = uuidv7();
 
-    const newAccessToken = await this.signAccessToken(userId);
-    const newRefreshToken = await this.signRefreshToken(userId, newJti);
+    const newAccessToken = await this.jwt.signAccessToken(userId);
+    const newRefreshToken = await this.jwt.signRefreshToken(userId, newJti);
 
     try {
       const outcome = await this.cacheStore.rotateRefreshToken({
@@ -334,29 +302,21 @@ export class AuthService {
     }
 
     try {
-      const verified = await jose.jwtVerify<RefreshTokenPayload>(rawRefreshToken, this.secretKey, {
-        algorithms: [JWT_ALGORITHM],
-        issuer: this.issuer,
-        audience: this.audience,
-        clockTolerance: JWT_LEEWAY_SECS,
+      const payload = await this.jwt.verifyRefreshToken(rawRefreshToken);
+
+      await this.cacheStore.revokeRefreshSession({
+        key: `${REFRESH_TOKEN_KEY_PREFIX}${payload.jti}`,
+        sessionKey: `${SESSION_KEY_PREFIX}${payload.sub}`,
+        jti: payload.jti,
+        ttlSecs: REFRESH_TOKEN_EXPIRATION,
       });
 
-      const payload = verified.payload;
-      if (payload.type === "refresh" && payload.jti && payload.sub) {
-        await this.cacheStore.revokeRefreshSession({
-          key: `${REFRESH_TOKEN_KEY_PREFIX}${payload.jti}`,
-          sessionKey: `${SESSION_KEY_PREFIX}${payload.sub}`,
-          jti: payload.jti,
-          ttlSecs: REFRESH_TOKEN_EXPIRATION,
-        });
+      await this.cacheStore.delete(`${USER_CACHE_KEY_PREFIX}${payload.sub}`);
 
-        await this.cacheStore.delete(`${USER_CACHE_KEY_PREFIX}${payload.sub}`);
-
-        this.logger.log("Session revoked on logout", {
-          action: "auth.logged_out",
-          userId: payload.sub,
-        });
-      }
+      this.logger.log("Session revoked on logout", {
+        action: "auth.logged_out",
+        userId: payload.sub,
+      });
     } catch (err: unknown) {
       if (err instanceof CacheError) {
         this.logger.error("Redis failure during session revocation", {
@@ -500,28 +460,6 @@ export class AuthService {
       });
       throw new SystemError("unavailable", "cache DELETE_MANY failed", { cause: err });
     }
-  }
-
-  async signAccessToken(userId: string): Promise<string> {
-    return new jose.SignJWT({ type: "access" })
-      .setProtectedHeader({ alg: JWT_ALGORITHM })
-      .setSubject(userId)
-      .setIssuer(this.issuer)
-      .setAudience(this.audience)
-      .setIssuedAt()
-      .setExpirationTime(`${ACCESS_TOKEN_EXPIRATION_SECS}s`)
-      .sign(this.secretKey);
-  }
-
-  async signRefreshToken(userId: string, jti: string): Promise<string> {
-    return new jose.SignJWT({ type: "refresh", jti })
-      .setProtectedHeader({ alg: JWT_ALGORITHM })
-      .setSubject(userId)
-      .setIssuer(this.issuer)
-      .setAudience(this.audience)
-      .setIssuedAt()
-      .setExpirationTime(`${REFRESH_TOKEN_EXPIRATION_SECS}s`)
-      .sign(this.secretKey);
   }
 
   async hashPassword(password: string): Promise<string> {
