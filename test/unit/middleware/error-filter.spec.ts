@@ -61,10 +61,10 @@ describe("ErrorFilter", () => {
     );
   });
 
-  it("renders rawMessage verbatim (validation details are not localized)", () => {
+  it("renders rawMessage verbatim (legacy validation details are not localized)", () => {
     const { host, status, json } = createHost("en");
 
-    filter.catch(BusinessError.validation("content: too_small"), host);
+    filter.catch(new BusinessError("VALIDATION_ERROR", undefined, "content: too_small"), host);
 
     expect(status).toHaveBeenCalledWith(422);
     expect(json).toHaveBeenCalledWith({
@@ -72,6 +72,78 @@ describe("ErrorFilter", () => {
       code: "VALIDATION_ERROR",
       message: "content: too_small",
     });
+  });
+
+  it("renders structured validation issues localized (vi default)", () => {
+    const { host, status, json } = createHost();
+
+    filter.catch(BusinessError.validation([{ path: "email", message: "VALIDATION_EMAIL" }]), host);
+
+    expect(status).toHaveBeenCalledWith(422);
+    expect(json).toHaveBeenCalledWith({
+      success: false,
+      code: "VALIDATION_ERROR",
+      message: "email: Email không hợp lệ",
+    });
+  });
+
+  it("honours Accept-Language for structured validation issues", () => {
+    const { host, json } = createHost("en-US,en;q=0.9");
+
+    filter.catch(BusinessError.validation([{ path: "email", message: "VALIDATION_EMAIL" }]), host);
+
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "email: Invalid email address" }),
+    );
+  });
+
+  it("joins multiple issues in order and interpolates params", () => {
+    const { host, json } = createHost();
+
+    filter.catch(
+      BusinessError.validation([
+        { path: "email", message: "VALIDATION_EMAIL" },
+        { path: "password", message: "VALIDATION_MIN", params: { min: "8" } },
+      ]),
+      host,
+    );
+
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "email: Email không hợp lệ; password: Giá trị tối thiểu là 8",
+      }),
+    );
+  });
+
+  it("falls back to VALIDATION_INVALID for key-shaped messages missing from the catalogue", () => {
+    const { host, json } = createHost();
+
+    filter.catch(
+      BusinessError.validation([{ path: "email", message: "VALIDATION_KHONG_CO" }]),
+      host,
+    );
+
+    const payload = json.mock.calls[0][0] as { message: string };
+    expect(payload.message).toBe("email: Dữ liệu không hợp lệ");
+    expect(payload.message).not.toContain("VALIDATION_KHONG_CO");
+  });
+
+  it("passes plain-text issue messages through verbatim", () => {
+    const { host, json } = createHost();
+
+    filter.catch(BusinessError.validation([{ path: "content", message: "raw detail" }]), host);
+
+    expect(json).toHaveBeenCalledWith(expect.objectContaining({ message: "content: raw detail" }));
+  });
+
+  it("renders issues without a path without the ': ' prefix", () => {
+    const { host, json } = createHost();
+
+    filter.catch(BusinessError.validation([{ path: "", message: "VALIDATION_REQUIRED" }]), host);
+
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Trường này là bắt buộc" }),
+    );
   });
 
   it("interpolates params in the localized message", () => {
