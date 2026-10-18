@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import nodemailer from "nodemailer";
 import { MailService } from "../../../../src/utils/mail/service.js";
+import { Logger } from "@nestjs/common";
 
 describe("MailService", () => {
   const originalEnv = process.env;
@@ -19,6 +20,7 @@ describe("MailService", () => {
     delete process.env.SMTP_USERNAME;
     delete process.env.SMTP_PASSWORD;
 
+    const log = vi.spyOn(Logger.prototype, "log");
     const service = new MailService();
     expect(service.getQueueSize()).toBe(0);
 
@@ -29,6 +31,8 @@ describe("MailService", () => {
     });
 
     await service.onModuleDestroy();
+
+    expect(log.mock.calls.flat().join(" ")).not.toContain("123456");
   });
 
   it("initializes nodemailer transporter when SMTP credentials exist", async () => {

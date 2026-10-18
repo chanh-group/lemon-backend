@@ -122,7 +122,7 @@ export class MailService implements OnModuleDestroy {
       this.logger.log("Email delivered (log-only mode)", {
         action: "mail.send_dev",
         to: job.to,
-        subject: job.subject,
+        subject: job.subject.replace(/:\s*\d{6}\s*$/, ""),
         requestId: job.requestId,
       });
       return;
