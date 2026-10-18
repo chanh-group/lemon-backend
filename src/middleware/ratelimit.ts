@@ -59,11 +59,21 @@ export class RedisRateLimiter implements RateLimiter {
     }
   }
 
-  async checkIpLimit(action: string, ip: string, max: number, windowSecs: number): Promise<boolean> {
+  async checkIpLimit(
+    action: string,
+    ip: string,
+    max: number,
+    windowSecs: number,
+  ): Promise<boolean> {
     return this.checkRateLimit(`ratelimit:${action}:ip:${ip}`, max, windowSecs);
   }
 
-  async checkEmailLimit(action: string, email: string, max: number, windowSecs: number): Promise<boolean> {
+  async checkEmailLimit(
+    action: string,
+    email: string,
+    max: number,
+    windowSecs: number,
+  ): Promise<boolean> {
     return this.checkRateLimit(`ratelimit:${action}:email:${email.toLowerCase()}`, max, windowSecs);
   }
 
@@ -80,7 +90,13 @@ export class RedisRateLimiter implements RateLimiter {
     const durationSecs = Math.max(1, windowSecs);
     const redis = this.redis as { eval: (...args: unknown[]) => Promise<unknown> };
     try {
-      const counts = (await redis.eval(INCR_EXPIRE_TWO_SCRIPT, 2, userKey, ipKey, durationSecs)) as unknown[];
+      const counts = (await redis.eval(
+        INCR_EXPIRE_TWO_SCRIPT,
+        2,
+        userKey,
+        ipKey,
+        durationSecs,
+      )) as unknown[];
       if (Array.isArray(counts) && counts.length === 2) {
         return Number(counts[0]) <= userMax && Number(counts[1]) <= ipMax;
       }
@@ -106,11 +122,21 @@ export class MemoryRateLimiter implements RateLimiter {
     return bucket.count;
   }
 
-  async checkIpLimit(action: string, ip: string, max: number, windowSecs: number): Promise<boolean> {
+  async checkIpLimit(
+    action: string,
+    ip: string,
+    max: number,
+    windowSecs: number,
+  ): Promise<boolean> {
     return this.increment(`ratelimit:${action}:ip:${ip}`, windowSecs) <= max;
   }
 
-  async checkEmailLimit(action: string, email: string, max: number, windowSecs: number): Promise<boolean> {
+  async checkEmailLimit(
+    action: string,
+    email: string,
+    max: number,
+    windowSecs: number,
+  ): Promise<boolean> {
     return this.increment(`ratelimit:${action}:email:${email.toLowerCase()}`, windowSecs) <= max;
   }
 

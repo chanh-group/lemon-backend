@@ -18,17 +18,13 @@ const disabled = (): MailConfig => ({
 
 describe("mail config", () => {
   it("rejects half credentials (username only)", () => {
-    expect(() =>
-      validate({ ...disabled(), username: "lemon@gmail.com" }),
-    ).toThrow(
+    expect(() => validate({ ...disabled(), username: "lemon@gmail.com" })).toThrow(
       "set both SMTP_USERNAME and SMTP_PASSWORD, or neither to disable mail",
     );
   });
 
   it("rejects half credentials (password only)", () => {
-    expect(() =>
-      validate({ ...disabled(), password: "secret" }),
-    ).toThrow(
+    expect(() => validate({ ...disabled(), password: "secret" })).toThrow(
       "set both SMTP_USERNAME and SMTP_PASSWORD, or neither to disable mail",
     );
   });

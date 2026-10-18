@@ -105,10 +105,24 @@ export class AuthController {
     @Req() req?: Request,
   ) {
     const ip = extractClientIp(req);
-    if (!(await this.rateLimiter.checkIpLimit("request-otp", ip, RATE_LIMIT_REQUEST_OTP_IP_MAX, RATE_LIMIT_WINDOW_SECS))) {
+    if (
+      !(await this.rateLimiter.checkIpLimit(
+        "request-otp",
+        ip,
+        RATE_LIMIT_REQUEST_OTP_IP_MAX,
+        RATE_LIMIT_WINDOW_SECS,
+      ))
+    ) {
       throw new BusinessError("TOO_MANY_REQUESTS");
     }
-    if (!(await this.rateLimiter.checkEmailLimit("request-otp", body.email, RATE_LIMIT_REQUEST_OTP_EMAIL_MAX, RATE_LIMIT_EMAIL_WINDOW_SECS))) {
+    if (
+      !(await this.rateLimiter.checkEmailLimit(
+        "request-otp",
+        body.email,
+        RATE_LIMIT_REQUEST_OTP_EMAIL_MAX,
+        RATE_LIMIT_EMAIL_WINDOW_SECS,
+      ))
+    ) {
       throw new BusinessError("TOO_MANY_REQUESTS");
     }
     await this.authService.requestOtp(body, requestId);
@@ -121,12 +135,16 @@ export class AuthController {
   @Public()
   @Post("verify-otp")
   @HttpCode(HttpStatus.OK)
-  async verifyOtp(
-    @Body({ schema: verifyOtpSchema }) body: VerifyOtpDto,
-    @Req() req?: Request,
-  ) {
+  async verifyOtp(@Body({ schema: verifyOtpSchema }) body: VerifyOtpDto, @Req() req?: Request) {
     const ip = extractClientIp(req);
-    if (!(await this.rateLimiter.checkIpLimit("verify-otp", ip, RATE_LIMIT_VERIFY_OTP_IP_MAX, RATE_LIMIT_WINDOW_SECS))) {
+    if (
+      !(await this.rateLimiter.checkIpLimit(
+        "verify-otp",
+        ip,
+        RATE_LIMIT_VERIFY_OTP_IP_MAX,
+        RATE_LIMIT_WINDOW_SECS,
+      ))
+    ) {
       throw new BusinessError("TOO_MANY_REQUESTS");
     }
     const valid = await this.authService.verifyOtp(body);
@@ -158,7 +176,14 @@ export class AuthController {
     @Req() req?: Request,
   ) {
     const ip = extractClientIp(req);
-    if (!(await this.rateLimiter.checkIpLimit("signin", ip, RATE_LIMIT_SIGNIN_IP_MAX, RATE_LIMIT_WINDOW_SECS))) {
+    if (
+      !(await this.rateLimiter.checkIpLimit(
+        "signin",
+        ip,
+        RATE_LIMIT_SIGNIN_IP_MAX,
+        RATE_LIMIT_WINDOW_SECS,
+      ))
+    ) {
       throw new BusinessError("TOO_MANY_REQUESTS");
     }
     const result = await this.authService.login(body);
@@ -212,10 +237,24 @@ export class AuthController {
     @Req() req?: Request,
   ) {
     const ip = extractClientIp(req);
-    if (!(await this.rateLimiter.checkIpLimit("forgot-password-otp", ip, RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX, RATE_LIMIT_WINDOW_SECS))) {
+    if (
+      !(await this.rateLimiter.checkIpLimit(
+        "forgot-password-otp",
+        ip,
+        RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX,
+        RATE_LIMIT_WINDOW_SECS,
+      ))
+    ) {
       throw new BusinessError("TOO_MANY_REQUESTS");
     }
-    if (!(await this.rateLimiter.checkEmailLimit("forgot-password-otp", body.email, RATE_LIMIT_REQUEST_OTP_EMAIL_MAX, RATE_LIMIT_EMAIL_WINDOW_SECS))) {
+    if (
+      !(await this.rateLimiter.checkEmailLimit(
+        "forgot-password-otp",
+        body.email,
+        RATE_LIMIT_REQUEST_OTP_EMAIL_MAX,
+        RATE_LIMIT_EMAIL_WINDOW_SECS,
+      ))
+    ) {
       throw new BusinessError("TOO_MANY_REQUESTS");
     }
     await this.authService.forgotPasswordOtp(body, requestId);
@@ -247,7 +286,16 @@ export class AuthController {
     @Req() req?: Request,
   ) {
     const ip = extractClientIp(req);
-    if (!(await this.rateLimiter.checkMixedLimit("change-password", user.id, ip, RATE_LIMIT_CHANGE_PASSWORD_USER_MAX, RATE_LIMIT_CHANGE_PASSWORD_IP_MAX, RATE_LIMIT_WINDOW_SECS))) {
+    if (
+      !(await this.rateLimiter.checkMixedLimit(
+        "change-password",
+        user.id,
+        ip,
+        RATE_LIMIT_CHANGE_PASSWORD_USER_MAX,
+        RATE_LIMIT_CHANGE_PASSWORD_IP_MAX,
+        RATE_LIMIT_WINDOW_SECS,
+      ))
+    ) {
       throw new BusinessError("TOO_MANY_REQUESTS");
     }
     await this.authService.changePassword(user.id, body);
