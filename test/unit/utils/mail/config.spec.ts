@@ -92,12 +92,25 @@ describe("mail config", () => {
       from: "LemonChat <lemon@gmail.com>",
     });
     expect(options.secure).toBe(true);
+    expect(options.requireTLS).toBe(false);
     expect(options.auth).toEqual({
       user: "lemon@gmail.com",
       pass: "secret",
     });
     expect(options.connectionTimeout).toBe(10_000);
     expect(options.plaintextRelay).toBe(false);
+  });
+
+  it("requires STARTTLS for authenticated standard SMTP ports", () => {
+    const options = buildTransportOptions({
+      ...disabled(),
+      port: 587,
+      username: "lemon@gmail.com",
+      password: "secret",
+      from: "LemonChat <lemon@gmail.com>",
+    });
+    expect(options.secure).toBe(false);
+    expect(options.requireTLS).toBe(true);
   });
 
   it("marks non-standard ports as plaintext relay without auth", () => {
@@ -107,6 +120,7 @@ describe("mail config", () => {
       port: 1025,
     });
     expect(options.secure).toBe(false);
+    expect(options.requireTLS).toBe(false);
     expect(options.plaintextRelay).toBe(true);
     expect(options.auth).toBeUndefined();
   });

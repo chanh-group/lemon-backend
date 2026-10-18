@@ -75,6 +75,7 @@ export interface SmtpTransportOptions {
   host: string;
   port: number;
   secure: boolean;
+  requireTLS: boolean;
   auth?: { user: string; pass: string };
   connectionTimeout: number;
   plaintextRelay: boolean;
@@ -91,6 +92,7 @@ export function buildTransportOptions(config: MailConfig): SmtpTransportOptions 
     host: config.host,
     port: config.port,
     secure: security === "implicit-tls",
+    requireTLS: security === "starttls" && config.username !== "",
     auth:
       config.username !== ""
         ? { user: config.username, pass: config.password }

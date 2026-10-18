@@ -52,6 +52,7 @@ export class MailService implements OnModuleDestroy {
       host: options.host,
       port: options.port,
       secure: options.secure,
+      requireTLS: options.requireTLS,
       auth: options.auth,
       connectionTimeout: options.connectionTimeout,
     });
