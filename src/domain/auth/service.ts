@@ -15,6 +15,7 @@ import { CACHE_STORE, type CacheStore } from "../../utils/cache/store.js";
 import { RotationOutcome } from "../../utils/cache/types.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { SystemError } from "../../utils/errors/system.js";
+import { mapUniqueViolation } from "../../utils/errors/pg.js";
 import { MailService } from "../../utils/mail/service.js";
 import { toUserResponse } from "../user/dto/mapper.js";
 import type { UserResponseDto } from "../user/dto/response.js";
@@ -160,17 +161,12 @@ export class AuthService {
       if (err instanceof BusinessError || err instanceof SystemError) {
         throw err;
       }
-      if (err && typeof err === "object" && "code" in err && err.code === "23505") {
-        const detail = "detail" in err && typeof err.detail === "string" ? err.detail : "";
-        const constraint =
-          "constraint" in err && typeof err.constraint === "string" ? err.constraint : "";
-
-        if (detail.includes("email") || constraint.includes("email")) {
-          throw new BusinessError("USER_ALREADY_EXISTS");
-        }
-        if (detail.includes("username") || constraint.includes("username")) {
-          throw new BusinessError("USERNAME_TAKEN");
-        }
+      const mapped = mapUniqueViolation(err, [
+        ["email", input.email],
+        ["username", input.username],
+      ]);
+      if (mapped !== err) {
+        throw mapped;
       }
       throw err;
     }

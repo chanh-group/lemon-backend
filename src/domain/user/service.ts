@@ -1,5 +1,4 @@
 import {
-  ConflictException,
   Inject,
   Injectable,
   Logger,
@@ -18,6 +17,8 @@ import type { UserResponseDto } from "./dto/response.js";
 import { USER_REPOSITORY } from "./repository.js";
 import type { UserRepository } from "./repository.js";
 import type { User } from "./schema.js";
+import { BusinessError } from "../../utils/errors/business.js";
+import { mapUniqueViolation } from "../../utils/errors/pg.js";
 
 @Injectable()
 export class UserService {
@@ -49,18 +50,12 @@ export class UserService {
 
     const existingEmail = await this.userRepo.findByEmail(data.email);
     if (existingEmail) {
-      throw new ConflictException({
-        code: "USER_ALREADY_EXISTS",
-        message: "Email đã được đăng ký",
-      });
+      throw new BusinessError("USER_ALREADY_EXISTS");
     }
 
     const existingUsername = await this.userRepo.findByUsername(data.username);
     if (existingUsername) {
-      throw new ConflictException({
-        code: "USERNAME_TAKEN",
-        message: "Username đã tồn tại",
-      });
+      throw new BusinessError("USERNAME_TAKEN");
     }
 
     try {
@@ -68,23 +63,12 @@ export class UserService {
       this.logger.log("User created successfully", { userId: created.id, email: created.email });
       return created;
     } catch (err: unknown) {
-      if (err && typeof err === "object" && "code" in err && err.code === "23505") {
-        const detail = "detail" in err && typeof err.detail === "string" ? err.detail : "";
-        const constraint =
-          "constraint" in err && typeof err.constraint === "string" ? err.constraint : "";
-
-        if (detail.includes("email") || constraint.includes("email")) {
-          throw new ConflictException({
-            code: "USER_ALREADY_EXISTS",
-            message: "Email đã được đăng ký",
-          });
-        }
-        if (detail.includes("username") || constraint.includes("username")) {
-          throw new ConflictException({
-            code: "USERNAME_TAKEN",
-            message: "Username đã tồn tại",
-          });
-        }
+      const mapped = mapUniqueViolation(err, [
+        ["email", data.email],
+        ["username", data.username],
+      ]);
+      if (mapped !== err) {
+        throw mapped;
       }
       throw err;
     }

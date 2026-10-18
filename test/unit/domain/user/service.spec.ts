@@ -1,8 +1,9 @@
-import { ConflictException, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
+import { NotFoundException, UnprocessableEntityException } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { UserRepository } from "../../../../src/domain/user/repository.js";
 import type { User } from "../../../../src/domain/user/schema.js";
 import { UserService } from "../../../../src/domain/user/service.js";
+import { BusinessError } from "../../../../src/utils/errors/business.js";
 
 type MockRepo = {
   findById: ReturnType<typeof vi.fn>;
@@ -125,17 +126,17 @@ describe("UserService", () => {
       );
     });
 
-    it("throws ConflictException USER_ALREADY_EXISTS when email already exists", async () => {
+    it("throws USER_ALREADY_EXISTS when email already exists", async () => {
       mockRepo.findByEmail.mockResolvedValueOnce(mockUser);
 
-      await expect(service.create(validDto)).rejects.toThrow(ConflictException);
+      await expect(service.create(validDto)).rejects.toMatchObject({ code: "USER_ALREADY_EXISTS" });
     });
 
-    it("throws ConflictException USERNAME_TAKEN when username already exists", async () => {
+    it("throws USERNAME_TAKEN when username already exists", async () => {
       mockRepo.findByEmail.mockResolvedValueOnce(null);
       mockRepo.findByUsername.mockResolvedValueOnce(mockUser);
 
-      await expect(service.create(validDto)).rejects.toThrow(ConflictException);
+      await expect(service.create(validDto)).rejects.toMatchObject({ code: "USERNAME_TAKEN" });
     });
 
     it("throws UnprocessableEntityException when payload fails zod validation", async () => {
@@ -148,7 +149,7 @@ describe("UserService", () => {
       ).rejects.toThrow(UnprocessableEntityException);
     });
 
-    it("catches 23505 duplicate email error and throws USER_ALREADY_EXISTS", async () => {
+    it("maps 23505 duplicate email errors to CONFLICT", async () => {
       mockRepo.findByEmail.mockResolvedValueOnce(null);
       mockRepo.findByUsername.mockResolvedValueOnce(null);
       mockRepo.create.mockRejectedValueOnce({
@@ -156,10 +157,10 @@ describe("UserService", () => {
         constraint: "users_email_uq",
       });
 
-      await expect(service.create(validDto)).rejects.toThrow(ConflictException);
+      await expect(service.create(validDto)).rejects.toBeInstanceOf(BusinessError);
     });
 
-    it("catches 23505 duplicate username error and throws USERNAME_TAKEN", async () => {
+    it("maps 23505 duplicate username errors to CONFLICT", async () => {
       mockRepo.findByEmail.mockResolvedValueOnce(null);
       mockRepo.findByUsername.mockResolvedValueOnce(null);
       mockRepo.create.mockRejectedValueOnce({
@@ -167,7 +168,10 @@ describe("UserService", () => {
         constraint: "users_username_uq",
       });
 
-      await expect(service.create(validDto)).rejects.toThrow(ConflictException);
+      await expect(service.create(validDto)).rejects.toMatchObject({
+        code: "CONFLICT",
+        rawMessage: "username already exists: lemon_user",
+      });
     });
   });
 

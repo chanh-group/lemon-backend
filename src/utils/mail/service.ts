@@ -1,13 +1,19 @@
 import { Injectable, Logger, type OnModuleDestroy } from "@nestjs/common";
 import nodemailer, { type Transporter } from "nodemailer";
 import PQueue from "p-queue";
-import { get_env } from "../../helpers/index.js";
 import {
   MAIL_QUEUE_CONCURRENCY,
   MAIL_QUEUE_MAX_SIZE,
   MAIL_RETRY_BACKOFFS_MS,
   MAIL_RETRY_COUNT,
 } from "./constants.js";
+import {
+  buildTransportOptions,
+  from_env,
+  isEnabled,
+  validate,
+  type MailConfig,
+} from "./config.js";
 import { renderOtpEmail } from "./templates.js";
 import type { MailJob, SendOtpMailOptions } from "./types.js";
 
@@ -15,31 +21,45 @@ import type { MailJob, SendOtpMailOptions } from "./types.js";
 export class MailService implements OnModuleDestroy {
   private readonly logger = new Logger(MailService.name);
   private readonly queue: PQueue;
-  private readonly transporter: Transporter | null = null;
+  private readonly transporter: Transporter | null;
   private readonly fromAddress: string;
 
-  constructor() {
+  constructor(config: MailConfig = from_env()) {
     this.queue = new PQueue({ concurrency: MAIL_QUEUE_CONCURRENCY });
 
-    const host = get_env("SMTP_HOST", "");
-    const port = Number(get_env("SMTP_PORT", "465"));
-    const user = get_env("SMTP_USERNAME", "");
-    const pass = get_env("SMTP_PASSWORD", "");
-    this.fromAddress = get_env("SMTP_FROM", "LemonChat <onboarding@resend.dev>");
+    validate(config);
+    this.fromAddress = config.from;
 
-    if (host && user && pass) {
-      this.transporter = nodemailer.createTransport({
-        host,
-        port,
-        secure: port === 465,
-        auth: { user, pass },
-      });
-      this.logger.log("SMTP transporter initialized", { action: "mail.init", host, port });
-    } else {
-      this.logger.warn("SMTP not configured. Emails will be logged to console (log-only mode)", {
-        action: "mail.log_only_mode",
-      });
+    if (!isEnabled(config)) {
+      this.transporter = null;
+      this.logger.warn(
+        "SMTP not configured. Emails will be logged to console (log-only mode)",
+        {
+          action: "mail.log_only_mode",
+        },
+      );
+      return;
     }
+
+    const options = buildTransportOptions(config);
+    if (options.plaintextRelay) {
+      this.logger.warn(
+        `Non-standard SMTP port ${config.port}; using plaintext (dev relay only)`,
+        { action: "mail.plaintext_relay", host: config.host, port: config.port },
+      );
+    }
+    this.transporter = nodemailer.createTransport({
+      host: options.host,
+      port: options.port,
+      secure: options.secure,
+      auth: options.auth,
+      connectionTimeout: options.connectionTimeout,
+    });
+    this.logger.log("SMTP transporter initialized", {
+      action: "mail.init",
+      host: options.host,
+      port: options.port,
+    });
   }
 
   async sendOtp(options: SendOtpMailOptions): Promise<void> {
@@ -99,9 +119,10 @@ export class MailService implements OnModuleDestroy {
 
   private async deliverWithRetry(job: MailJob): Promise<void> {
     if (!this.transporter) {
-      this.logger.log(`[OTP DEV] To: ${job.to} | Subject: ${job.subject}\n${job.text}`, {
+      this.logger.log("Email delivered (log-only mode)", {
         action: "mail.send_dev",
         to: job.to,
+        subject: job.subject,
         requestId: job.requestId,
       });
       return;

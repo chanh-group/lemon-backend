@@ -75,6 +75,7 @@ describe("MailService", () => {
     process.env.SMTP_PORT = "465";
     process.env.SMTP_USERNAME = "lemon@gmail.com";
     process.env.SMTP_PASSWORD = "secretpassword";
+    process.env.SMTP_FROM = "LemonChat <lemon@gmail.com>";
 
     const mockSendMail = vi
       .fn()
