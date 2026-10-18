@@ -286,6 +286,24 @@ describe("AuthController", () => {
     });
   });
 
+  describe("boot validation", () => {
+    it("fails fast when COOKIE_SAMESITE=none without COOKIE_SECURE=true", () => {
+      vi.stubEnv("COOKIE_SAMESITE", "none");
+      vi.stubEnv("COOKIE_SECURE", "false");
+      try {
+        expect(
+          () =>
+            new AuthController(
+              authService as unknown as AuthService,
+              userService as unknown as UserService,
+            ),
+        ).toThrowError("COOKIE_SAMESITE=none requires COOKIE_SECURE=true");
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+  });
+
   describe("getMe", () => {
     it("returns mapped user profile if found", async () => {
       userService.findById.mockResolvedValueOnce({

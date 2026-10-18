@@ -10,17 +10,18 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { get_env } from "../../helpers/index.js";
 import { CurrentUser, Public, type AuthUser } from "../../utils/decorators.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { toUserResponse } from "../user/dto/mapper.js";
 import type { UserResponseDto } from "../user/dto/response.js";
 import { UserService } from "../user/service.js";
+import { REFRESH_COOKIE_NAME } from "./constants.js";
 import {
-  REFRESH_COOKIE_NAME,
-  REFRESH_COOKIE_PATH,
-  REFRESH_TOKEN_EXPIRATION_SECS,
-} from "./constants.js";
+  clearRefreshCookieOptions,
+  refreshCookieOptions,
+  resolveCookieConfig,
+  type CookieConfig,
+} from "./cookies.js";
 import {
   toAuthTokenResponse,
   toLoginResponse,
@@ -61,31 +62,25 @@ function extractRefreshToken(req: Request): string | undefined {
   return undefined;
 }
 
-function setRefreshCookie(res: Response, refreshToken: string): void {
-  const isProduction = get_env("NODE_ENV", "development") === "production";
-  res.cookie(REFRESH_COOKIE_NAME, refreshToken, {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: "strict",
-    path: REFRESH_COOKIE_PATH,
-    maxAge: REFRESH_TOKEN_EXPIRATION_SECS * 1000,
-  });
+function setRefreshCookie(res: Response, refreshToken: string, cfg: CookieConfig): void {
+  res.cookie(REFRESH_COOKIE_NAME, refreshToken, refreshCookieOptions(cfg));
 }
 
-function clearRefreshCookie(res: Response): void {
-  res.clearCookie(REFRESH_COOKIE_NAME, {
-    httpOnly: true,
-    sameSite: "strict",
-    path: REFRESH_COOKIE_PATH,
-  });
+function clearRefreshCookie(res: Response, cfg: CookieConfig): void {
+  res.clearCookie(REFRESH_COOKIE_NAME, clearRefreshCookieOptions(cfg));
 }
 
 @Controller("auth")
 export class AuthController {
+  // Resolved during construction → invalid cookie env fails the boot.
+  private readonly cookieConfig: CookieConfig;
+
   constructor(
     private readonly authService: AuthService,
     private readonly userService: UserService,
-  ) {}
+  ) {
+    this.cookieConfig = resolveCookieConfig();
+  }
 
   @Public()
   @Post("request-otp")
@@ -121,7 +116,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<LoginResponseDto> {
     const result = await this.authService.login(body);
-    setRefreshCookie(res, result.tokens.refreshToken);
+    setRefreshCookie(res, result.tokens.refreshToken, this.cookieConfig);
     return toLoginResponse(result.tokens.accessToken, result.user);
   }
 
@@ -138,7 +133,7 @@ export class AuthController {
     }
 
     const newTokens = await this.authService.refreshToken(rawRefreshToken);
-    setRefreshCookie(res, newTokens.refreshToken);
+    setRefreshCookie(res, newTokens.refreshToken, this.cookieConfig);
     return toAuthTokenResponse(newTokens.accessToken);
   }
 
@@ -153,7 +148,7 @@ export class AuthController {
     if (rawRefreshToken) {
       await this.authService.logout(rawRefreshToken);
     }
-    clearRefreshCookie(res);
+    clearRefreshCookie(res, this.cookieConfig);
     return toMessageResponse("Đăng xuất thành công");
   }
 
@@ -184,7 +179,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<MessageResponseDto> {
     await this.authService.changePassword(user.id, body);
-    clearRefreshCookie(res);
+    clearRefreshCookie(res, this.cookieConfig);
     return toMessageResponse("Đổi mật khẩu thành công. Vui lòng đăng nhập lại");
   }
 
