@@ -1,4 +1,4 @@
-import { Injectable, Logger, type OnModuleDestroy } from "@nestjs/common";
+import { Inject, Injectable, Logger, type OnModuleDestroy } from "@nestjs/common";
 import nodemailer, { type Transporter } from "nodemailer";
 import PQueue from "p-queue";
 import {
@@ -11,6 +11,7 @@ import {
   buildTransportOptions,
   from_env,
   isEnabled,
+  MAIL_CONFIG,
   validate,
   type MailConfig,
 } from "./config.js";
@@ -24,7 +25,7 @@ export class MailService implements OnModuleDestroy {
   private readonly transporter: Transporter | null;
   private readonly fromAddress: string;
 
-  constructor(config: MailConfig = from_env()) {
+  constructor(@Inject(MAIL_CONFIG) config: MailConfig = from_env()) {
     this.queue = new PQueue({ concurrency: MAIL_QUEUE_CONCURRENCY });
 
     validate(config);
