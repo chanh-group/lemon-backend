@@ -351,6 +351,7 @@ describe("AuthController", () => {
 
       const res = await controller.getMe({ id: "usr-123" });
       expect(userService.findById).toHaveBeenCalledWith("usr-123");
+      expect(res.message).toBe("OK");
       expect(res.data.id).toBe("usr-123");
       expect(res.data.email).toBe("lemon@example.com");
       expect((res.data as unknown as { passwordHash?: string }).passwordHash).toBeUndefined();

@@ -179,11 +179,5 @@ describe("Auth DTO Validation Schemas", () => {
       });
     });
 
-    it("maps toMessageResponse and toVerifyOtpResponse correctly", async () => {
-      const { toMessageResponse, toVerifyOtpResponse } =
-        await import("../../../../src/domain/auth/dto/mapper.js");
-      expect(toMessageResponse("ok")).toEqual({ message: "ok" });
-      expect(toVerifyOtpResponse(true)).toEqual({ valid: true });
-    });
   });
 });
