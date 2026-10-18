@@ -3,19 +3,16 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import * as argon2 from "argon2";
 import { v7 as uuidv7 } from "uuid";
 import {
-  FORGOT_OTP_KEY_PREFIX,
-  MAX_OTP_ATTEMPTS,
   MAX_SESSIONS_PER_USER,
-  OTP_EXPIRATION,
-  OTP_KEY_PREFIX,
   REFRESH_TOKEN_EXPIRATION,
   REFRESH_TOKEN_KEY_PREFIX,
   SESSION_KEY_PREFIX,
   USER_CACHE_KEY_PREFIX,
 } from "../../utils/cache/constants.js";
+import * as otp from "../../utils/otp.js";
 import { CacheError } from "../../utils/cache/error.js";
 import { CACHE_STORE, type CacheStore } from "../../utils/cache/store.js";
-import { OtpCheckOutcome, RotationOutcome } from "../../utils/cache/types.js";
+import { RotationOutcome } from "../../utils/cache/types.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { SystemError } from "../../utils/errors/system.js";
 import { MailService } from "../../utils/mail/service.js";
@@ -56,10 +53,10 @@ export class AuthService {
     }
 
     const code = this.generateOtp();
-    const key = `${OTP_KEY_PREFIX}${input.email}`;
+    const key = otp.signupKey(input.email);
 
     try {
-      await this.cacheStore.setRaw(key, JSON.stringify({ code, attempts: 0 }), OTP_EXPIRATION);
+      await otp.store(this.cacheStore, key, code);
     } catch (err: unknown) {
       this.logger.error("Failed to store OTP in Redis", {
         action: "auth.request_otp_cache_error",
@@ -82,17 +79,11 @@ export class AuthService {
   }
 
   async verifyOtp(input: VerifyOtpDto): Promise<boolean> {
-    const prefix = input.purpose === "signup" ? OTP_KEY_PREFIX : FORGOT_OTP_KEY_PREFIX;
-    const key = `${prefix}${input.email}`;
+    const key = input.purpose === "signup" ? otp.signupKey(input.email) : otp.resetKey(input.email);
 
     try {
-      const outcome = await this.cacheStore.checkOtpCode(key, input.otp, MAX_OTP_ATTEMPTS);
-
-      if (outcome === OtpCheckOutcome.Match) {
-        return true;
-      }
-
-      throw new BusinessError("INVALID_OTP");
+      await otp.check(this.cacheStore, key, input.otp);
+      return true;
     } catch (err: unknown) {
       if (err instanceof BusinessError) {
         throw err;
@@ -106,16 +97,10 @@ export class AuthService {
   }
 
   async signup(input: SignupDto): Promise<UserResponseDto> {
-    const otpKey = `${OTP_KEY_PREFIX}${input.email}`;
+    const otpKey = otp.signupKey(input.email);
 
     try {
-      const outcome = await this.cacheStore.checkOtpCode(otpKey, input.otp, MAX_OTP_ATTEMPTS);
-
-      if (outcome !== OtpCheckOutcome.Match) {
-        throw new BusinessError("INVALID_OTP");
-      }
-
-      await this.cacheStore.delete(otpKey);
+      await otp.check(this.cacheStore, otpKey, input.otp);
     } catch (err: unknown) {
       if (err instanceof BusinessError) {
         throw err;
@@ -157,8 +142,24 @@ export class AuthService {
         userId: createdUser.id,
       });
 
+      try {
+        await otp.consume(this.cacheStore, otpKey);
+      } catch (consumeErr: unknown) {
+        if (consumeErr instanceof BusinessError) {
+          throw consumeErr;
+        }
+        this.logger.error("Redis error consuming signup OTP", {
+          action: "auth.signup_consume_error",
+          err: String(consumeErr),
+        });
+        throw new SystemError("unavailable", "cache DELETE failed", { cause: consumeErr });
+      }
+
       return toUserResponse(createdUser);
     } catch (err: unknown) {
+      if (err instanceof BusinessError || err instanceof SystemError) {
+        throw err;
+      }
       if (err && typeof err === "object" && "code" in err && err.code === "23505") {
         const detail = "detail" in err && typeof err.detail === "string" ? err.detail : "";
         const constraint =
@@ -324,10 +325,10 @@ export class AuthService {
     }
 
     const code = this.generateOtp();
-    const key = `${FORGOT_OTP_KEY_PREFIX}${input.email}`;
+    const key = otp.resetKey(input.email);
 
     try {
-      await this.cacheStore.setRaw(key, JSON.stringify({ code, attempts: 0 }), OTP_EXPIRATION);
+      await otp.store(this.cacheStore, key, code);
     } catch (err: unknown) {
       this.logger.error("Failed to store forgot password OTP in Redis", {
         action: "auth.forgot_otp_cache_error",
@@ -350,16 +351,10 @@ export class AuthService {
   }
 
   async forgotPasswordReset(input: ForgotPasswordResetDto): Promise<void> {
-    const key = `${FORGOT_OTP_KEY_PREFIX}${input.email}`;
+    const key = otp.resetKey(input.email);
 
     try {
-      const outcome = await this.cacheStore.checkOtpCode(key, input.otp, MAX_OTP_ATTEMPTS);
-
-      if (outcome !== OtpCheckOutcome.Match) {
-        throw new BusinessError("INVALID_OTP");
-      }
-
-      await this.cacheStore.delete(key);
+      await otp.check(this.cacheStore, key, input.otp);
     } catch (err: unknown) {
       if (err instanceof BusinessError) {
         throw err;
@@ -378,7 +373,7 @@ export class AuthService {
 
     const newHash = await this.hashPassword(input.newPassword);
     await this.userRepo.updatePasswordHash(user.id, newHash);
-    await this.revokeFamily(user.id);
+    await this.revokeFamily(user.id, [key]);
 
     this.logger.log("Password reset successfully", {
       action: "auth.password_reset",
@@ -411,11 +406,15 @@ export class AuthService {
     });
   }
 
-  async revokeFamily(userId: string): Promise<void> {
+  async revokeFamily(userId: string, extraKeys: string[] = []): Promise<void> {
     try {
       const sessionKey = `${SESSION_KEY_PREFIX}${userId}`;
       const rawSessions = await this.cacheStore.getRaw(sessionKey);
-      const keysToDelete: string[] = [sessionKey, `${USER_CACHE_KEY_PREFIX}${userId}`];
+      const keysToDelete: string[] = [
+        sessionKey,
+        `${USER_CACHE_KEY_PREFIX}${userId}`,
+        ...extraKeys,
+      ];
 
       if (rawSessions) {
         try {
