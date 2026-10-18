@@ -20,7 +20,12 @@ describe("RedisRateLimiter", () => {
   it("checkIpLimit uses key ratelimit:{action}:ip:{ip}", async () => {
     redis.eval.mockResolvedValue(1);
     await expect(limiter.checkIpLimit("login", "1.2.3.4", 5, 60)).resolves.toBe(true);
-    expect(redis.eval).toHaveBeenCalledWith(expect.any(String), 1, "ratelimit:login:ip:1.2.3.4", 60);
+    expect(redis.eval).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      "ratelimit:login:ip:1.2.3.4",
+      60,
+    );
   });
 
   it("returns true when count <= max and false when count > max", async () => {
@@ -110,7 +115,10 @@ describe("MemoryRateLimiter", () => {
 
 describe("extractClientIp", () => {
   it("returns first trimmed element of x-forwarded-for", () => {
-    const req = { headers: { "x-forwarded-for": "1.2.3.4, 5.6.7.8" }, ip: "9.9.9.9" } as unknown as Request;
+    const req = {
+      headers: { "x-forwarded-for": "1.2.3.4, 5.6.7.8" },
+      ip: "9.9.9.9",
+    } as unknown as Request;
     expect(extractClientIp(req)).toBe("1.2.3.4");
   });
 

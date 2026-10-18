@@ -178,6 +178,5 @@ describe("Auth DTO Validation Schemas", () => {
         user,
       });
     });
-
   });
 });

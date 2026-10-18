@@ -1,8 +1,5 @@
 import type { UserResponseDto } from "../../user/dto/response.js";
-import type {
-  AuthTokenResponseDto,
-  LoginResponseDto,
-} from "./response.js";
+import type { AuthTokenResponseDto, LoginResponseDto } from "./response.js";
 
 export function toAuthTokenResponse(accessToken: string): AuthTokenResponseDto {
   return {

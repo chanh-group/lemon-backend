@@ -33,21 +33,19 @@ export class MailService implements OnModuleDestroy {
 
     if (!isEnabled(config)) {
       this.transporter = null;
-      this.logger.warn(
-        "SMTP not configured. Emails will be logged to console (log-only mode)",
-        {
-          action: "mail.log_only_mode",
-        },
-      );
+      this.logger.warn("SMTP not configured. Emails will be logged to console (log-only mode)", {
+        action: "mail.log_only_mode",
+      });
       return;
     }
 
     const options = buildTransportOptions(config);
     if (options.plaintextRelay) {
-      this.logger.warn(
-        `Non-standard SMTP port ${config.port}; using plaintext (dev relay only)`,
-        { action: "mail.plaintext_relay", host: config.host, port: config.port },
-      );
+      this.logger.warn(`Non-standard SMTP port ${config.port}; using plaintext (dev relay only)`, {
+        action: "mail.plaintext_relay",
+        host: config.host,
+        port: config.port,
+      });
     }
     this.transporter = nodemailer.createTransport({
       host: options.host,

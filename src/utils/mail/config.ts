@@ -24,9 +24,7 @@ export interface MailConfig {
  * Read SMTP config from env. `SMTP_HOST` defaults to Gmail, `SMTP_PORT` to
  * 587; credentials/from default to empty (log-only mode).
  */
-export function from_env(
-  env: (key: string, def?: string) => string = get_env,
-): MailConfig {
+export function from_env(env: (key: string, def?: string) => string = get_env): MailConfig {
   return {
     host: env("SMTP_HOST", DEFAULT_SMTP_HOST),
     port: Number(env("SMTP_PORT", String(DEFAULT_SMTP_PORT))),
@@ -41,9 +39,7 @@ export function from_env(
  * Mailpit) — mirrors Rust `EmailConfig::is_enabled`.
  */
 export function isEnabled(config: MailConfig): boolean {
-  return (
-    (config.username !== "" && config.password !== "") || config.from !== ""
-  );
+  return (config.username !== "" && config.password !== "") || config.from !== "";
 }
 
 /**
@@ -54,9 +50,7 @@ export function validate(config: MailConfig): void {
   const hasUser = config.username !== "";
   const hasPass = config.password !== "";
   if (hasUser !== hasPass) {
-    throw new Error(
-      "set both SMTP_USERNAME and SMTP_PASSWORD, or neither to disable mail",
-    );
+    throw new Error("set both SMTP_USERNAME and SMTP_PASSWORD, or neither to disable mail");
   }
   if (hasUser && config.from === "") {
     throw new Error("SMTP_FROM is required when SMTP credentials are set");
@@ -94,10 +88,7 @@ export function buildTransportOptions(config: MailConfig): SmtpTransportOptions 
     port: config.port,
     secure: security === "implicit-tls",
     requireTLS: security === "starttls" && config.username !== "",
-    auth:
-      config.username !== ""
-        ? { user: config.username, pass: config.password }
-        : undefined,
+    auth: config.username !== "" ? { user: config.username, pass: config.password } : undefined,
     connectionTimeout: EMAIL_SMTP_TIMEOUT_MS,
     plaintextRelay: security === "plaintext",
   };
