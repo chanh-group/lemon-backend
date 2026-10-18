@@ -1,9 +1,11 @@
 import { NestFactory } from "@nestjs/core";
+import cookieParser from "cookie-parser";
 import { AppModule } from "./app.js";
 import { RedisIoAdapter } from "./configs/socket-adapter.js";
 import { get_env } from "./helpers/index.js";
-import { GlobalErrorFilter } from "./utils/error-filter.js";
+import { ErrorFilter } from "./middleware/error-filter.js";
 import { createAppLogger } from "./utils/logger.js";
+import { standardSchemaPipe } from "./utils/validation.js";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -14,8 +16,10 @@ async function bootstrap() {
   // Global REST API prefix: /api
   app.setGlobalPrefix("api");
 
-  // Global Exception Filter enforcing RESPONSES.md envelope
-  app.useGlobalFilters(new GlobalErrorFilter());
+  // Middlewares & Pipes
+  app.use(cookieParser());
+  app.useGlobalPipes(standardSchemaPipe());
+  app.useGlobalFilters(new ErrorFilter());
 
   // CORS configuration
   const frontendUrl = get_env("FRONTEND_URL", "http://localhost:5173");

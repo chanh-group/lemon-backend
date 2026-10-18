@@ -28,6 +28,9 @@ describe("NestJS Dependency Injection & Drizzle Module Verification", () => {
     expect(typeof userRepo.findById).toBe("function");
     expect(typeof userRepo.findByEmail).toBe("function");
     expect(typeof userRepo.findByUsername).toBe("function");
+    expect(typeof userRepo.findByIdentifier).toBe("function");
+    expect(typeof userRepo.create).toBe("function");
+    expect(typeof userRepo.updatePasswordHash).toBe("function");
   });
 
   it("should successfully resolve ExamplePgRepository with injected DrizzleDb", () => {

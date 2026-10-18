@@ -107,9 +107,10 @@ Copy `.env.example` to `.env` first. `USE_MEMORY_CACHE=true` boots without Redis
 - Don't model state with multiple booleans — use an enum/union type.
   ```ts
   // ❌ WRONG
-  isExpired: boolean; isLocked: boolean;
+  isExpired: boolean;
+  isLocked: boolean;
   // ✅ CORRECT
-  OtpCheckOutcome.Match | Mismatch | Missing | Locked
+  OtpCheckOutcome.Match | Mismatch | Missing | Locked;
   ```
 - Never serialize business objects directly to the API — go through `dto/response.ts` + `mapper.ts`.
 - No logic in controllers; no SQL outside `pg.ts`.

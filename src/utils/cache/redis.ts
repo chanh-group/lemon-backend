@@ -18,6 +18,7 @@ export const ROTATE_REFRESH_COMMAND = "rotateRefresh";
 export const CREATE_SESSION_COMMAND = "createSession";
 export const REVOKE_SESSION_COMMAND = "revokeSession";
 export const CHECK_OTP_COMMAND = "checkOtp";
+export const RELEASE_LOCK_COMMAND = "releaseLock";
 
 /** Rotate refresh + update sessions JSON in 1 round trip. Returns 1 rotated, 0 stale. */
 export const ROTATE_REFRESH_LUA = `
@@ -122,8 +123,17 @@ export const CHECK_OTP_LUA = `
   return 0
 `;
 
+/** Compare-and-del: release only if we still own the lock (stale release = 0). */
+export const RELEASE_LOCK_LUA = `
+  if redis.call('get', KEYS[1]) == ARGV[1] then
+      return redis.call('del', KEYS[1])
+  else
+      return 0
+  end
+`;
+
 /**
- * Register the four cache Lua scripts on a client. Exported so the module and
+ * Register the five cache Lua scripts on a client. Exported so the module and
  * tests share the exact registration (names + scripts).
  */
 export function registerCacheCommands(client: Pick<Redis, "defineCommand">): void {
@@ -131,6 +141,7 @@ export function registerCacheCommands(client: Pick<Redis, "defineCommand">): voi
   client.defineCommand(CREATE_SESSION_COMMAND, { lua: CREATE_SESSION_LUA });
   client.defineCommand(REVOKE_SESSION_COMMAND, { lua: REVOKE_SESSION_LUA });
   client.defineCommand(CHECK_OTP_COMMAND, { lua: CHECK_OTP_LUA });
+  client.defineCommand(RELEASE_LOCK_COMMAND, { lua: RELEASE_LOCK_LUA });
 }
 
 export interface RedisWithCacheCommands extends Redis {
@@ -156,6 +167,7 @@ export interface RedisWithCacheCommands extends Redis {
   ): Promise<number>;
   revokeSession(numKeys: 2, key: string, sessionKey: string, jti: string): Promise<number>;
   checkOtp(numKeys: 1, key: string, candidate: string, maxAttempts: number): Promise<number>;
+  releaseLock(numKeys: 1, key: string, token: string): Promise<number>;
 }
 
 @Injectable()
@@ -267,6 +279,24 @@ export class RedisCacheService extends CacheStoreExt {
     } catch (err) {
       this.logger.warn(`Redis OTP check failed: ${String(err)}`);
       throw new CacheError("OTP check", err);
+    }
+  }
+
+  async tryAcquireLock(key: string, token: string, expirationSecs: number): Promise<boolean> {
+    try {
+      return (await this.redis.set(key, token, "EX", expirationSecs, "NX")) === "OK";
+    } catch (err) {
+      this.logger.warn(`Redis lock acquire failed: ${String(err)}`);
+      throw new CacheError("lock acquire", err);
+    }
+  }
+
+  async releaseLock(key: string, token: string): Promise<void> {
+    try {
+      await this.redis.releaseLock(1, key, token);
+    } catch (err) {
+      this.logger.warn(`Redis lock release failed: ${String(err)}`);
+      throw new CacheError("lock release", err);
     }
   }
 }

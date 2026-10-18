@@ -53,7 +53,7 @@ async function createRedisClient(): Promise<RedisWithCacheCommands> {
       inject: [REDIS_CLIENT],
     },
   ],
-  exports: [CACHE_STORE],
+  exports: [CACHE_STORE, REDIS_CLIENT],
 })
 export class CacheModule implements OnModuleDestroy {
   constructor(@Inject(REDIS_CLIENT) private readonly redis: RedisWithCacheCommands | null) {}
@@ -67,3 +67,5 @@ export class CacheModule implements OnModuleDestroy {
     }
   }
 }
+
+export { REDIS_CLIENT } from "../utils/cache/store.js";
