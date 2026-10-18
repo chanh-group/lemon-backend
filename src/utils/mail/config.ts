@@ -7,6 +7,7 @@
 // dev relay with a boot warning.
 import { get_env } from "../../helpers/index.js";
 
+export const MAIL_CONFIG: unique symbol = Symbol("MAIL_CONFIG");
 export const DEFAULT_SMTP_HOST = "smtp.gmail.com";
 export const DEFAULT_SMTP_PORT = 587;
 export const EMAIL_SMTP_TIMEOUT_MS = 10_000;
