@@ -13,6 +13,26 @@ describe("BusinessError", () => {
     }
   });
 
+  it("maps auth codes to the exact Rust-aligned statuses", () => {
+    const expected: Array<[BusinessError["code"], number]> = [
+      ["INVALID_CREDENTIALS", 401],
+      ["INVALID_SESSION", 401],
+      ["EMAIL_NOT_VERIFIED", 403],
+      ["INVALID_OTP", 400],
+      ["INVALID_OLD_PASSWORD", 400],
+      ["USER_ALREADY_EXISTS", 400],
+      ["USERNAME_TAKEN", 400],
+      ["USER_NOT_FOUND", 404],
+      ["UNAUTHORIZED", 401],
+      ["FORBIDDEN", 403],
+      ["TOO_MANY_REQUESTS", 429],
+    ];
+
+    for (const [code, status] of expected) {
+      expect(errorStatus(new BusinessError(code))).toBe(status);
+    }
+  });
+
   it("only uses client statuses or 503 for business codes", () => {
     for (const status of Object.values(BUSINESS_STATUS)) {
       expect([400, 401, 403, 404, 409, 422, 429, 503]).toContain(status);
