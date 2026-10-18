@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import type { Request } from "express";
 import type { AuthUser } from "../domain/shared.js";
+import { getLanguageFromHeader } from "./i18n/index.js";
 
 export const IS_PUBLIC_KEY = "isPublic";
 
@@ -33,3 +34,10 @@ export const CurrentUser = createParamDecorator(
     return request.user;
   },
 );
+
+export const langParamFactory = (_data: unknown, ctx: ExecutionContext): string => {
+  const request = ctx.switchToHttp().getRequest<Request>();
+  return getLanguageFromHeader(request.headers["accept-language"]);
+};
+
+export const Lang = createParamDecorator(langParamFactory);
