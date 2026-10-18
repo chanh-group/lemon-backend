@@ -1,4 +1,3 @@
-
 export interface ConversationWithPartner {
   id: string;
   kind: "DIRECT" | "GROUP";
@@ -18,7 +17,10 @@ export interface ConversationWithPartner {
 }
 
 export interface ConversationRepository {
-  findDirectByParticipants(userAId: string, userBId: string): Promise<ConversationWithPartner | null>;
+  findDirectByParticipants(
+    userAId: string,
+    userBId: string,
+  ): Promise<ConversationWithPartner | null>;
   createDirectConversation(userAId: string, userBId: string): Promise<ConversationWithPartner>;
   findUserConversations(userId: string, limit?: number): Promise<ConversationWithPartner[]>;
   findById(conversationId: string, userId: string): Promise<ConversationWithPartner | null>;

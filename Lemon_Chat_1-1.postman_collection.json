@@ -1,8 +1,8 @@
 {
   "info": {
     "_postman_id": "lemon-chat-1-1-collection",
-    "name": "Lemon Chat — 1-1 Messaging (Role 3)",
-    "description": "Bộ Collection kiểm thử toàn bộ tính năng Chat 1-1 cho Lemon Chat (REST & Realtime). Import vào Postman hoặc Bruno để test với 1 click.",
+    "name": "Lemon Chat — 1-1 Messaging (Role 3, JWT Auth)",
+    "description": "Bộ Collection kiểm thử toàn bộ tính năng Chat 1-1 cho Lemon Chat (REST & Realtime) với JWT Bearer Tokens chuẩn. Import vào Postman hoặc Bruno để test với 1 click.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -12,18 +12,28 @@
       "type": "string"
     },
     {
+      "key": "accessTokenA",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "accessTokenB",
+      "value": "",
+      "type": "string"
+    },
+    {
       "key": "userA",
-      "value": "01a145a1-c0ae-71c9-be18-58ff1a542e82",
+      "value": "",
       "type": "string"
     },
     {
       "key": "userB",
-      "value": "01a145a1-c0ae-71c9-be18-5d1f20547e78",
+      "value": "",
       "type": "string"
     },
     {
       "key": "conversationId",
-      "value": "01a145a1-c34b-75dd-ba87-8a49ea3f1025",
+      "value": "",
       "type": "string"
     },
     {
@@ -33,6 +43,68 @@
     }
   ],
   "item": [
+    {
+      "name": "0.1 Đăng nhập User A (Lấy Access Token)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "if (res.data && res.data.accessToken) {",
+              "    pm.collectionVariables.set('accessTokenA', res.data.accessToken);",
+              "    pm.collectionVariables.set('userA', res.data.user.id);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"identifier\": \"user_a@lemon.io\",\n  \"password\": \"Password123!\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/auth/login",
+          "host": ["{{baseUrl}}"],
+          "path": ["auth", "login"]
+        }
+      }
+    },
+    {
+      "name": "0.2 Đăng nhập User B (Lấy Access Token)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "if (res.data && res.data.accessToken) {",
+              "    pm.collectionVariables.set('accessTokenB', res.data.accessToken);",
+              "    pm.collectionVariables.set('userB', res.data.user.id);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"identifier\": \"user_b@lemon.io\",\n  \"password\": \"Password123!\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/auth/login",
+          "host": ["{{baseUrl}}"],
+          "path": ["auth", "login"]
+        }
+      }
+    },
     {
       "name": "1. Mở phòng chat 1-1 (User A -> User B)",
       "event": [
@@ -53,7 +125,7 @@
         "method": "POST",
         "header": [
           { "key": "Content-Type", "value": "application/json" },
-          { "key": "x-user-id", "value": "{{userA}}" }
+          { "key": "Authorization", "value": "Bearer {{accessTokenA}}" }
         ],
         "body": {
           "mode": "raw",
@@ -86,11 +158,11 @@
         "method": "POST",
         "header": [
           { "key": "Content-Type", "value": "application/json" },
-          { "key": "x-user-id", "value": "{{userA}}" }
+          { "key": "Authorization", "value": "Bearer {{accessTokenA}}" }
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"body\": \"Chào bạn Beta, test gửi tin nhắn từ Postman!\",\n  \"kind\": \"TEXT\"\n}"
+          "raw": "{\n  \"body\": \"Chào bạn Beta, test gửi tin nhắn từ Postman qua JWT!\",\n  \"kind\": \"TEXT\"\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/conversations/{{conversationId}}/messages",
@@ -103,9 +175,7 @@
       "name": "3. User B xem hộp thư Inbox",
       "request": {
         "method": "GET",
-        "header": [
-          { "key": "x-user-id", "value": "{{userB}}" }
-        ],
+        "header": [{ "key": "Authorization", "value": "Bearer {{accessTokenB}}" }],
         "url": {
           "raw": "{{baseUrl}}/conversations",
           "host": ["{{baseUrl}}"],
@@ -117,16 +187,12 @@
       "name": "4. User B xem lịch sử tin nhắn trong phòng",
       "request": {
         "method": "GET",
-        "header": [
-          { "key": "x-user-id", "value": "{{userB}}" }
-        ],
+        "header": [{ "key": "Authorization", "value": "Bearer {{accessTokenB}}" }],
         "url": {
           "raw": "{{baseUrl}}/conversations/{{conversationId}}/messages?limit=20",
           "host": ["{{baseUrl}}"],
           "path": ["conversations", "{{conversationId}}", "messages"],
-          "query": [
-            { "key": "limit", "value": "20" }
-          ]
+          "query": [{ "key": "limit", "value": "20" }]
         }
       }
     },
@@ -136,7 +202,7 @@
         "method": "POST",
         "header": [
           { "key": "Content-Type", "value": "application/json" },
-          { "key": "x-user-id", "value": "{{userB}}" }
+          { "key": "Authorization", "value": "Bearer {{accessTokenB}}" }
         ],
         "body": {
           "mode": "raw",
@@ -155,11 +221,11 @@
         "method": "PATCH",
         "header": [
           { "key": "Content-Type", "value": "application/json" },
-          { "key": "x-user-id", "value": "{{userA}}" }
+          { "key": "Authorization", "value": "Bearer {{accessTokenA}}" }
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"body\": \"Nội dung tin nhắn đã được User A sửa lại!\"\n}"
+          "raw": "{\n  \"body\": \"Nội dung tin nhắn đã được User A sửa lại qua JWT!\"\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/messages/{{messageId}}",
@@ -172,9 +238,7 @@
       "name": "7. User A thu hồi tin nhắn",
       "request": {
         "method": "DELETE",
-        "header": [
-          { "key": "x-user-id", "value": "{{userA}}" }
-        ],
+        "header": [{ "key": "Authorization", "value": "Bearer {{accessTokenA}}" }],
         "url": {
           "raw": "{{baseUrl}}/messages/{{messageId}}",
           "host": ["{{baseUrl}}"],
@@ -186,9 +250,7 @@
       "name": "8. Kiểm tra chi tiết cuộc hội thoại",
       "request": {
         "method": "GET",
-        "header": [
-          { "key": "x-user-id", "value": "{{userA}}" }
-        ],
+        "header": [{ "key": "Authorization", "value": "Bearer {{accessTokenA}}" }],
         "url": {
           "raw": "{{baseUrl}}/conversations/{{conversationId}}",
           "host": ["{{baseUrl}}"],
@@ -198,4 +260,3 @@
     }
   ]
 }
-

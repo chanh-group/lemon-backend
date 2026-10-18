@@ -19,4 +19,3 @@ import { MessageService } from "./service.js";
   exports: [MESSAGE_REPOSITORY, MessageService],
 })
 export class MessageModule {}
-

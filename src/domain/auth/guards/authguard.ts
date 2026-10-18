@@ -33,18 +33,6 @@ export class AuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<Request & { user?: AuthUser }>();
 
-    // In development / testing: allow header x-user-id fallback
-    const devUserId = request.headers["x-user-id"] as string | undefined;
-    if (
-      process.env.NODE_ENV !== "production" &&
-      devUserId &&
-      typeof devUserId === "string" &&
-      devUserId.trim().length > 0
-    ) {
-      request.user = { id: devUserId.trim() };
-      return true;
-    }
-
     const authHeader = request.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {

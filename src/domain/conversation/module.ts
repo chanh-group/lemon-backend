@@ -19,4 +19,3 @@ import { ConversationService } from "./service.js";
   exports: [CONVERSATION_REPOSITORY, ConversationService],
 })
 export class ConversationModule {}
-

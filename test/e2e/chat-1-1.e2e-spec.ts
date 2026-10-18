@@ -5,19 +5,26 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../../src/app.js";
 import { DrizzleDb } from "../../src/configs/database.js";
 import { users } from "../../src/domain/user/schema.js";
-import { GlobalErrorFilter } from "../../src/utils/error-filter.js";
+import { ErrorFilter } from "../../src/middleware/error-filter.js";
+import { standardSchemaPipe } from "../../src/utils/validation.js";
+import cookieParser from "cookie-parser";
 import { v7 as uuidv7 } from "uuid";
 import { eq, inArray } from "drizzle-orm";
 import { conversations } from "../../src/domain/conversation/schema.js";
-
 import { getDrizzleToken } from "@nestjs/drizzle";
+import { JWT_CONFIG } from "../../src/domain/auth/constants.js";
+import type { JwtConfig } from "../../src/domain/auth/jwt.js";
 
-describe("Direct Chat 1-1 (E2E)", () => {
+describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
   let app: INestApplication;
   let db: DrizzleDb;
+  let jwtConfig: JwtConfig;
 
   const userA = uuidv7();
   const userB = uuidv7();
+  let tokenA: string;
+  let tokenB: string;
+
   let conversationId: string;
   let messageId: string;
 
@@ -28,24 +35,39 @@ describe("Direct Chat 1-1 (E2E)", () => {
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix("api");
-    app.useGlobalFilters(new GlobalErrorFilter());
+    app.use(cookieParser());
+    app.useGlobalPipes(standardSchemaPipe());
+    app.useGlobalFilters(new ErrorFilter());
     await app.init();
 
     db = moduleFixture.get<DrizzleDb>(getDrizzleToken());
+    jwtConfig = moduleFixture.get<JwtConfig>(JWT_CONFIG);
+
+    tokenA = await jwtConfig.signAccessToken(userA);
+    tokenB = await jwtConfig.signAccessToken(userB);
 
     const ts = Date.now();
     // Insert 2 mock users into Neon DB for foreign key compliance
     await db
       .insert(users)
       .values([
-        { id: userA, email: `test_a_${ts}@lemon.io`, username: `user_a_${ts}`, fullName: "User Alpha" },
-        { id: userB, email: `test_b_${ts}@lemon.io`, username: `user_b_${ts}`, fullName: "User Beta" },
+        {
+          id: userA,
+          email: `test_a_${ts}@lemon.io`,
+          username: `user_a_${ts}`,
+          fullName: "User Alpha",
+        },
+        {
+          id: userB,
+          email: `test_b_${ts}@lemon.io`,
+          username: `user_b_${ts}`,
+          fullName: "User Beta",
+        },
       ])
       .onConflictDoNothing();
   });
 
   afterAll(async () => {
-    // Cleanup created conversation and users
     if (conversationId) {
       await db.delete(conversations).where(eq(conversations.id, conversationId));
     }
@@ -53,10 +75,67 @@ describe("Direct Chat 1-1 (E2E)", () => {
     await app.close();
   });
 
-  it("POST /api/conversations/direct - should create or get a direct conversation", async () => {
+  // --- SECURITY TESTS (ZERO TRUST / NO x-user-id) ---
+
+  it("POST /api/conversations/direct - should reject request without Authorization header with 401 UNAUTHORIZED", async () => {
+    const res = await request(app.getHttpServer())
+      .post("/api/conversations/direct")
+      .send({ targetUserId: userB })
+      .expect(401);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.code).toBe("UNAUTHORIZED");
+  });
+
+  it("POST /api/conversations/direct - should reject spoofed x-user-id header without valid JWT with 401 UNAUTHORIZED", async () => {
     const res = await request(app.getHttpServer())
       .post("/api/conversations/direct")
       .set("x-user-id", userA)
+      .send({ targetUserId: userB })
+      .expect(401);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.code).toBe("UNAUTHORIZED");
+  });
+
+  it("POST /api/conversations/direct - should reject invalid JWT token with 401 UNAUTHORIZED", async () => {
+    const res = await request(app.getHttpServer())
+      .post("/api/conversations/direct")
+      .set("Authorization", "Bearer invalid-jwt-token")
+      .send({ targetUserId: userB })
+      .expect(401);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.code).toBe("UNAUTHORIZED");
+  });
+
+  it("POST /api/conversations/direct - should reject Refresh Token used as Bearer token with 401 UNAUTHORIZED", async () => {
+    const refreshToken = await jwtConfig.signRefreshToken(userA, uuidv7());
+    const res = await request(app.getHttpServer())
+      .post("/api/conversations/direct")
+      .set("Authorization", `Bearer ${refreshToken}`)
+      .send({ targetUserId: userB })
+      .expect(401);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.code).toBe("UNAUTHORIZED");
+  });
+
+  it("GET /api/conversations/:id - should reject non-UUID route param with 400 Bad Request", async () => {
+    const res = await request(app.getHttpServer())
+      .get("/api/conversations/invalid-not-uuid")
+      .set("Authorization", `Bearer ${tokenA}`)
+      .expect(400);
+
+    expect(res.body.success).toBe(false);
+  });
+
+  // --- CHAT 1-1 CORE FLOW WITH JWT BEARER TOKENS ---
+
+  it("POST /api/conversations/direct - should create or get a direct conversation with Bearer token", async () => {
+    const res = await request(app.getHttpServer())
+      .post("/api/conversations/direct")
+      .set("Authorization", `Bearer ${tokenA}`)
       .send({ targetUserId: userB })
       .expect(201);
 
@@ -71,7 +150,7 @@ describe("Direct Chat 1-1 (E2E)", () => {
   it("POST /api/conversations/direct - idempotent: calling again returns the same conversation", async () => {
     const res = await request(app.getHttpServer())
       .post("/api/conversations/direct")
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .send({ targetUserId: userB })
       .expect(201);
 
@@ -82,7 +161,7 @@ describe("Direct Chat 1-1 (E2E)", () => {
   it("GET /api/conversations - should list conversations in inbox", async () => {
     const res = await request(app.getHttpServer())
       .get("/api/conversations")
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .expect(200);
 
     expect(res.body.success).toBe(true);
@@ -91,20 +170,20 @@ describe("Direct Chat 1-1 (E2E)", () => {
     expect(found).toBeDefined();
   });
 
-  it("POST /api/conversations/:id/messages - should send a message", async () => {
-    const clientMsgId = `client-${Date.now()}`;
+  it("POST /api/conversations/:id/messages - should send a message with Bearer token", async () => {
+    const clientMsgId = uuidv7();
     const res = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .send({
-        body: "Xin chao tu User Alpha!",
+        body: "Xin chao tu User Alpha qua JWT!",
         clientMsgId,
         kind: "TEXT",
       })
       .expect(201);
 
     expect(res.body.success).toBe(true);
-    expect(res.body.data.body).toBe("Xin chao tu User Alpha!");
+    expect(res.body.data.body).toBe("Xin chao tu User Alpha qua JWT!");
     expect(res.body.data.senderId).toBe(userA);
 
     messageId = res.body.data.id;
@@ -112,9 +191,9 @@ describe("Direct Chat 1-1 (E2E)", () => {
     // Test idempotency with clientMsgId
     const retryRes = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .send({
-        body: "Xin chao tu User Alpha!",
+        body: "Xin chao tu User Alpha qua JWT!",
         clientMsgId,
         kind: "TEXT",
       })
@@ -123,56 +202,72 @@ describe("Direct Chat 1-1 (E2E)", () => {
     expect(retryRes.body.data.id).toBe(messageId);
   });
 
+  it("POST /api/conversations/:id/messages - should safely store and return HTML/XSS body without corruption", async () => {
+    const xssPayload = "<script>alert('xss')</script>";
+    const res = await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/messages`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({
+        body: xssPayload,
+        kind: "TEXT",
+      })
+      .expect(201);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.body).toBe(xssPayload);
+  });
+
   it("GET /api/conversations/:id/messages - should get message timeline", async () => {
     const res = await request(app.getHttpServer())
       .get(`/api/conversations/${conversationId}/messages`)
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .expect(200);
 
     expect(res.body.success).toBe(true);
     expect(res.body.data.items).toBeDefined();
     expect(res.body.data.items.length).toBeGreaterThan(0);
-    expect(res.body.data.items[0].id).toBe(messageId);
+    const ids = res.body.data.items.map((m: any) => m.id);
+    expect(ids).toContain(messageId);
   });
 
-  it("PATCH /api/messages/:id - should edit own message", async () => {
+  it("PATCH /api/messages/:id - should edit own message with Bearer token", async () => {
     const res = await request(app.getHttpServer())
       .patch(`/api/messages/${messageId}`)
-      .set("x-user-id", userA)
-      .send({ body: "Noi dung da duoc chinh sua!" })
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ body: "Noi dung da duoc chinh sua voi JWT!" })
       .expect(200);
 
     expect(res.body.success).toBe(true);
-    expect(res.body.data.body).toBe("Noi dung da duoc chinh sua!");
+    expect(res.body.data.body).toBe("Noi dung da duoc chinh sua voi JWT!");
     expect(res.body.data.editedAt).not.toBeNull();
   });
 
-  it("POST /api/conversations/:id/read - should mark conversation as read", async () => {
+  it("POST /api/conversations/:id/read - should mark conversation as read with Bearer token B", async () => {
     const res = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/read`)
-      .set("x-user-id", userB)
+      .set("Authorization", `Bearer ${tokenB}`)
       .send({ lastReadMessageId: messageId })
       .expect(200);
 
     expect(res.body.success).toBe(true);
   });
 
-  it("DELETE /api/messages/:id - should revoke message", async () => {
+  it("DELETE /api/messages/:id - should revoke message with Bearer token", async () => {
     const res = await request(app.getHttpServer())
       .delete(`/api/messages/${messageId}`)
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .expect(200);
 
     expect(res.body.success).toBe(true);
     expect(res.body.data.deletedAt).not.toBeNull();
   });
 
-  // --- EDGE CASES & SECURITY TESTS ---
+  // --- EDGE CASES & AUTHORIZATION TESTS ---
 
   it("POST /api/conversations/direct - should reject self-chat with 400 CANNOT_CHAT_WITH_SELF", async () => {
     const res = await request(app.getHttpServer())
       .post("/api/conversations/direct")
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .send({ targetUserId: userA })
       .expect(400);
 
@@ -184,7 +279,7 @@ describe("Direct Chat 1-1 (E2E)", () => {
     const nonExistent = uuidv7();
     const res = await request(app.getHttpServer())
       .post("/api/conversations/direct")
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .send({ targetUserId: nonExistent })
       .expect(404);
 
@@ -194,42 +289,44 @@ describe("Direct Chat 1-1 (E2E)", () => {
 
   it("GET /api/conversations/:id/messages - should reject unauthorized non-member with 403 NOT_PARTICIPANT", async () => {
     const outsider = uuidv7();
+    const tokenOutsider = await jwtConfig.signAccessToken(outsider);
+
     const res = await request(app.getHttpServer())
       .get(`/api/conversations/${conversationId}/messages`)
-      .set("x-user-id", outsider)
+      .set("Authorization", `Bearer ${tokenOutsider}`)
       .expect(403);
 
     expect(res.body.success).toBe(false);
     expect(res.body.code).toBe("NOT_PARTICIPANT");
   });
 
-  it("POST /api/conversations/:id/messages - should reject empty text message with 400 BAD_REQUEST", async () => {
+  it("POST /api/conversations/:id/messages - should reject empty text message with 422 VALIDATION_ERROR", async () => {
     const res = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .send({ body: "   " })
-      .expect(400);
+      .expect(422);
 
     expect(res.body.success).toBe(false);
-    expect(res.body.code).toBe("BAD_REQUEST");
+    expect(res.body.code).toBe("VALIDATION_ERROR");
   });
 
-  it("POST /api/conversations/:id/messages - should reject message longer than 4000 chars with 400 BAD_REQUEST", async () => {
+  it("POST /api/conversations/:id/messages - should reject message longer than 4000 chars with 422 VALIDATION_ERROR", async () => {
     const longBody = "a".repeat(4001);
     const res = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .send({ body: longBody })
-      .expect(400);
+      .expect(422);
 
     expect(res.body.success).toBe(false);
-    expect(res.body.code).toBe("BAD_REQUEST");
+    expect(res.body.code).toBe("VALIDATION_ERROR");
   });
 
   it("PATCH /api/messages/:id - should return 400 MESSAGE_REVOKED if message was already revoked", async () => {
     const res = await request(app.getHttpServer())
       .patch(`/api/messages/${messageId}`)
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .send({ body: "Thử sửa tin đã thu hồi" })
       .expect(400);
 
@@ -240,7 +337,7 @@ describe("Direct Chat 1-1 (E2E)", () => {
   it("DELETE /api/messages/:id - should return 400 MESSAGE_REVOKED if revoked again", async () => {
     const res = await request(app.getHttpServer())
       .delete(`/api/messages/${messageId}`)
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .expect(400);
 
     expect(res.body.success).toBe(false);
@@ -251,7 +348,7 @@ describe("Direct Chat 1-1 (E2E)", () => {
     // Send a fresh message from userA
     const sendRes = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .send({ body: "Tin nhắn của User A" })
       .expect(201);
 
@@ -260,7 +357,7 @@ describe("Direct Chat 1-1 (E2E)", () => {
     // User B tries to edit User A's message
     const res = await request(app.getHttpServer())
       .patch(`/api/messages/${freshMsgId}`)
-      .set("x-user-id", userB)
+      .set("Authorization", `Bearer ${tokenB}`)
       .send({ body: "User B muốn sửa tin này" })
       .expect(403);
 
@@ -268,39 +365,39 @@ describe("Direct Chat 1-1 (E2E)", () => {
     expect(res.body.code).toBe("FORBIDDEN");
   });
 
-  it("POST /api/conversations/direct - should reject empty targetUserId with 400 BAD_REQUEST", async () => {
+  it("POST /api/conversations/direct - should reject invalid targetUserId format with 422 VALIDATION_ERROR", async () => {
     const res = await request(app.getHttpServer())
       .post("/api/conversations/direct")
-      .set("x-user-id", userA)
-      .send({ targetUserId: "" })
-      .expect(400);
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ targetUserId: "not-a-valid-uuid" })
+      .expect(422);
 
     expect(res.body.success).toBe(false);
-    expect(res.body.code).toBe("BAD_REQUEST");
+    expect(res.body.code).toBe("VALIDATION_ERROR");
   });
 
-  it("POST /api/conversations/:id/read - should reject empty lastReadMessageId with 400 BAD_REQUEST", async () => {
+  it("POST /api/conversations/:id/read - should reject invalid lastReadMessageId format with 422 VALIDATION_ERROR", async () => {
     const res = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/read`)
-      .set("x-user-id", userB)
-      .send({ lastReadMessageId: "" })
-      .expect(400);
+      .set("Authorization", `Bearer ${tokenB}`)
+      .send({ lastReadMessageId: "invalid-uuid" })
+      .expect(422);
 
     expect(res.body.success).toBe(false);
-    expect(res.body.code).toBe("BAD_REQUEST");
+    expect(res.body.code).toBe("VALIDATION_ERROR");
   });
 
   it("POST /api/conversations/:id/messages - clientMsgId idempotency returns existing message", async () => {
-    const uniqueClientMsgId = `idem-${Date.now()}`;
+    const uniqueClientMsgId = uuidv7();
     const res1 = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .send({ body: "Tin nhắn idempotent", clientMsgId: uniqueClientMsgId })
       .expect(201);
 
     const res2 = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .send({ body: "Tin nhắn idempotent", clientMsgId: uniqueClientMsgId })
       .expect(201);
 
@@ -310,7 +407,7 @@ describe("Direct Chat 1-1 (E2E)", () => {
   it("DELETE /api/messages/:id - should update conversation lastMessagePreview to 'Tin nhắn đã bị thu hồi'", async () => {
     const sendRes = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .send({ body: "Tin nhắn sắp bị thu hồi" })
       .expect(201);
 
@@ -319,13 +416,13 @@ describe("Direct Chat 1-1 (E2E)", () => {
     // Revoke the message
     await request(app.getHttpServer())
       .delete(`/api/messages/${targetMsgId}`)
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .expect(200);
 
     // Verify conversation inbox preview
     const convRes = await request(app.getHttpServer())
       .get(`/api/conversations/${conversationId}`)
-      .set("x-user-id", userA)
+      .set("Authorization", `Bearer ${tokenA}`)
       .expect(200);
 
     expect(convRes.body.data.lastMessagePreview).toBe("Tin nhắn đã bị thu hồi");

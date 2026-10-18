@@ -1,56 +1,74 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from "@nestjs/common";
-import { CurrentUser } from "../../helpers/auth.js";
-import { created, ok, type SuccessResponse } from "../../utils/response.js";
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+} from "@nestjs/common";
+import { CurrentUser, type AuthUser } from "../../utils/decorators.js";
 import { ConversationService } from "./service.js";
-
-export interface CreateDirectDto {
-  targetUserId: string;
-}
-
-export interface MarkReadDto {
-  lastReadMessageId: string;
-}
+import {
+  createDirectSchema,
+  type CreateDirectDto,
+  markReadSchema,
+  type MarkReadDto,
+} from "./dto/request.js";
 
 @Controller("conversations")
 export class ConversationController {
   constructor(private readonly service: ConversationService) {}
 
   @Post("direct")
+  @HttpCode(HttpStatus.CREATED)
   async createDirect(
-    @CurrentUser() userId: string,
-    @Body() dto: CreateDirectDto,
-  ): Promise<SuccessResponse> {
-    const result = await this.service.getOrCreateDirect(userId, dto.targetUserId);
-    return created(result, "OK");
+    @CurrentUser() user: AuthUser,
+    @Body({ schema: createDirectSchema }) dto: CreateDirectDto,
+  ) {
+    const result = await this.service.getOrCreateDirect(user.id, dto.targetUserId);
+    return {
+      success: true,
+      message: "OK",
+      data: result,
+    };
   }
 
   @Get()
-  async listConversations(
-    @CurrentUser() userId: string,
-    @Query("limit") limit?: string,
-  ): Promise<SuccessResponse> {
+  async listConversations(@CurrentUser() user: AuthUser, @Query("limit") limit?: string) {
     const parsedLimit = limit ? parseInt(limit, 10) : 20;
-    const list = await this.service.listConversations(userId, parsedLimit);
-    return ok(list);
+    const list = await this.service.listConversations(user.id, parsedLimit);
+    return {
+      success: true,
+      message: "OK",
+      data: list,
+    };
   }
 
   @Get(":id")
-  async getConversation(
-    @CurrentUser() userId: string,
-    @Param("id") id: string,
-  ): Promise<SuccessResponse> {
-    const conv = await this.service.getById(id, userId);
-    return ok(conv);
+  async getConversation(@CurrentUser() user: AuthUser, @Param("id", ParseUUIDPipe) id: string) {
+    const conv = await this.service.getById(id, user.id);
+    return {
+      success: true,
+      message: "OK",
+      data: conv,
+    };
   }
 
   @Post(":id/read")
   @HttpCode(HttpStatus.OK)
   async markRead(
-    @CurrentUser() userId: string,
-    @Param("id") id: string,
-    @Body() dto: MarkReadDto,
-  ): Promise<SuccessResponse> {
-    await this.service.markAsRead(id, userId, dto.lastReadMessageId);
-    return ok(null, "OK");
+    @CurrentUser() user: AuthUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body({ schema: markReadSchema }) dto: MarkReadDto,
+  ) {
+    await this.service.markAsRead(id, user.id, dto.lastReadMessageId);
+    return {
+      success: true,
+      message: "OK",
+      data: null,
+    };
   }
 }

@@ -3,14 +3,22 @@ import { InjectDrizzle } from "@nestjs/drizzle";
 import { and, desc, eq, gt, isNull, lt } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { conversations } from "../conversation/schema.js";
-import type { CreatedMessageResult, MessageRepository, MessageTimelineResult } from "./repository.js";
+import type {
+  CreatedMessageResult,
+  MessageRepository,
+  MessageTimelineResult,
+} from "./repository.js";
 import { type Message, messages } from "./schema.js";
 
 @Injectable()
 export class MessagePgRepository implements MessageRepository {
   constructor(@InjectDrizzle() private readonly db: DrizzleDb) {}
 
-  async findByClientMsgId(conversationId: string, senderId: string, clientMsgId: string): Promise<Message | null> {
+  async findByClientMsgId(
+    conversationId: string,
+    senderId: string,
+    clientMsgId: string,
+  ): Promise<Message | null> {
     const [msg] = await this.db
       .select()
       .from(messages)
@@ -87,10 +95,7 @@ export class MessagePgRepository implements MessageRepository {
   ): Promise<MessageTimelineResult> {
     const queryLimit = Math.min(Math.max(limit, 1), 50);
 
-    const conditions = [
-      eq(messages.conversationId, conversationId),
-      isNull(messages.deletedAt),
-    ];
+    const conditions = [eq(messages.conversationId, conversationId), isNull(messages.deletedAt)];
 
     if (cursor) {
       conditions.push(lt(messages.id, cursor));
@@ -119,11 +124,7 @@ export class MessagePgRepository implements MessageRepository {
   }
 
   async findById(messageId: string): Promise<Message | null> {
-    const [msg] = await this.db
-      .select()
-      .from(messages)
-      .where(eq(messages.id, messageId))
-      .limit(1);
+    const [msg] = await this.db.select().from(messages).where(eq(messages.id, messageId)).limit(1);
     return msg ?? null;
   }
 
@@ -135,7 +136,13 @@ export class MessagePgRepository implements MessageRepository {
           body,
           editedAt: new Date(),
         })
-        .where(and(eq(messages.id, messageId), eq(messages.senderId, senderId), isNull(messages.deletedAt)))
+        .where(
+          and(
+            eq(messages.id, messageId),
+            eq(messages.senderId, senderId),
+            isNull(messages.deletedAt),
+          ),
+        )
         .returning();
 
       if (!updated) return null;
@@ -148,7 +155,12 @@ export class MessagePgRepository implements MessageRepository {
           lastMessagePreview: preview,
           updatedAt: new Date(),
         })
-        .where(and(eq(conversations.id, updated.conversationId), eq(conversations.lastMessageId, messageId)));
+        .where(
+          and(
+            eq(conversations.id, updated.conversationId),
+            eq(conversations.lastMessageId, messageId),
+          ),
+        );
 
       return updated;
     });
@@ -161,7 +173,13 @@ export class MessagePgRepository implements MessageRepository {
         .set({
           deletedAt: new Date(),
         })
-        .where(and(eq(messages.id, messageId), eq(messages.senderId, senderId), isNull(messages.deletedAt)))
+        .where(
+          and(
+            eq(messages.id, messageId),
+            eq(messages.senderId, senderId),
+            isNull(messages.deletedAt),
+          ),
+        )
         .returning();
 
       if (!deleted) return null;
@@ -173,10 +191,14 @@ export class MessagePgRepository implements MessageRepository {
           lastMessagePreview: "Tin nhắn đã bị thu hồi",
           updatedAt: new Date(),
         })
-        .where(and(eq(conversations.id, deleted.conversationId), eq(conversations.lastMessageId, messageId)));
+        .where(
+          and(
+            eq(conversations.id, deleted.conversationId),
+            eq(conversations.lastMessageId, messageId),
+          ),
+        );
 
       return deleted;
     });
   }
 }
-

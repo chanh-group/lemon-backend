@@ -1,4 +1,4 @@
-import { Logger } from "@nestjs/common";
+import { Inject, Logger, Optional } from "@nestjs/common";
 import {
   ConnectedSocket,
   MessageBody,
@@ -10,13 +10,14 @@ import {
 } from "@nestjs/websockets";
 import type { Server, Socket } from "socket.io";
 import { presenceOnlineKey, presenceUserKey, typingKey } from "../../utils/cache/keys.js";
-import { Inject, Optional } from "@nestjs/common";
 import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
 import { InjectDrizzle } from "@nestjs/drizzle";
 import { and, eq, isNull } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { conversationParticipants } from "../conversation/schema.js";
+import { JWT_CONFIG } from "../auth/constants.js";
+import type { JwtConfig } from "../auth/jwt.js";
 
 const logger = new Logger("ChatGateway");
 
@@ -41,13 +42,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   constructor(
     @InjectDrizzle() private readonly db: DrizzleDb,
+    @Inject(JWT_CONFIG) private readonly jwt: JwtConfig,
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
   ) {}
 
   async handleConnection(client: Socket): Promise<void> {
-    const userId = this.extractUserId(client);
+    const userId = await this.extractUserId(client);
     if (!userId) {
       logger.warn(`Unauthorized socket connection rejected: ${client.id}`);
+      client.emit("error", {
+        code: "UNAUTHORIZED",
+        message: "Chưa xác thực người dùng",
+      });
       client.disconnect(true);
       return;
     }
@@ -69,7 +75,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // Update Redis presence (TTL 90s)
     await this.setOnlinePresence(userId);
 
-    logger.log(`User connected: ${userId} (socket ${client.id}, active connections: ${currentConns})`);
+    logger.log(
+      `User connected: ${userId} (socket ${client.id}, active connections: ${currentConns})`,
+    );
   }
 
   async handleDisconnect(client: Socket): Promise<void> {
@@ -92,7 +100,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.userConnections.set(userId, currentConns);
     }
 
-    logger.log(`User disconnected: ${userId} (socket ${client.id}, remaining: ${Math.max(0, currentConns)})`);
+    logger.log(
+      `User disconnected: ${userId} (socket ${client.id}, remaining: ${Math.max(0, currentConns)})`,
+    );
   }
 
   @SubscribeMessage("conv:join")
@@ -118,7 +128,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       .limit(1);
 
     if (!membership) {
-      logger.warn(`Unauthorized conv:join attempt by user ${userId} for conversation ${data.conversationId}`);
+      logger.warn(
+        `Unauthorized conv:join attempt by user ${userId} for conversation ${data.conversationId}`,
+      );
       client.emit("error", {
         code: "NOT_PARTICIPANT",
         message: "Bạn không phải thành viên của cuộc trò chuyện này",
@@ -211,28 +223,43 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   // --- Helper methods ---
 
-  private extractUserId(client: Socket): string | null {
-    // 1. Production Mode: Verify JWT token if provided
-    const token = client.handshake.auth?.token || client.handshake.headers?.authorization?.replace("Bearer ", "");
-    if (token) {
-      // Sẵn sàng khi Role 2 cung cấp token
-      // TODO: verifyJwt(token)
+  private async extractUserId(client: Socket): Promise<string | null> {
+    const rawAuth = client.handshake.auth?.token as string | undefined;
+    const rawHeader = client.handshake.headers?.authorization as string | undefined;
+    const cookieHeader = client.handshake.headers?.cookie as string | undefined;
+
+    let token: string | undefined;
+
+    if (rawAuth && typeof rawAuth === "string") {
+      token = rawAuth.trim();
+    } else if (rawHeader && typeof rawHeader === "string" && rawHeader.startsWith("Bearer ")) {
+      token = rawHeader.substring(7).trim();
+    } else if (cookieHeader) {
+      const match = cookieHeader.match(/(?:^|;\s*)lemon_access_token=([^;]+)/);
+      if (match) {
+        token = decodeURIComponent(match[1]);
+      }
     }
 
-    // 2. Dev Mode: Allow direct userId from auth handshake or query
-    const directUserId = (client.handshake.auth?.userId || client.handshake.query?.userId) as string;
-    if (directUserId && typeof directUserId === "string") {
-      return directUserId.trim();
+    if (!token) {
+      return null;
     }
 
-    return null;
+    try {
+      const payload = await this.jwt.verifyAccessToken(token);
+      return payload.sub;
+    } catch (err) {
+      logger.warn(`Socket JWT verification failed: ${String(err)}`);
+      return null;
+    }
   }
 
   private async setOnlinePresence(userId: string): Promise<void> {
     if (!this.redis) return;
     try {
       const now = Date.now();
-      await this.redis.pipeline()
+      await this.redis
+        .pipeline()
         .set(presenceUserKey(userId), JSON.stringify({ state: "online", lastSeen: now }), "EX", 90)
         .zadd(presenceOnlineKey(), now, userId)
         .exec();
@@ -245,8 +272,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!this.redis) return;
     try {
       const now = Date.now();
-      await this.redis.pipeline()
-        .set(presenceUserKey(userId), JSON.stringify({ state: "offline", lastSeen: now }), "EX", 86400 * 7)
+      await this.redis
+        .pipeline()
+        .set(
+          presenceUserKey(userId),
+          JSON.stringify({ state: "offline", lastSeen: now }),
+          "EX",
+          86400 * 7,
+        )
         .zrem(presenceOnlineKey(), userId)
         .exec();
     } catch (err) {

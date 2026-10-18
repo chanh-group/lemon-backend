@@ -1,7 +1,11 @@
-import { HttpStatus, Inject, Injectable, Optional } from "@nestjs/common";
-import { AppHttpException } from "../../utils/response.js";
+import { Inject, Injectable, Optional } from "@nestjs/common";
+import { BusinessError } from "../../utils/errors/business.js";
 import { USER_REPOSITORY, type UserRepository } from "../user/repository.js";
-import { CONVERSATION_REPOSITORY, type ConversationRepository, type ConversationWithPartner } from "./repository.js";
+import {
+  CONVERSATION_REPOSITORY,
+  type ConversationRepository,
+  type ConversationWithPartner,
+} from "./repository.js";
 import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
 import { presenceUserKey, unreadCountKey } from "../../utils/cache/keys.js";
@@ -18,16 +22,16 @@ export class ConversationService {
 
   async getOrCreateDirect(userId: string, targetUserId: string): Promise<ConversationWithPartner> {
     if (!targetUserId || typeof targetUserId !== "string" || targetUserId.trim().length === 0) {
-      throw new AppHttpException(HttpStatus.BAD_REQUEST, "BAD_REQUEST", "targetUserId là bắt buộc");
+      throw new BusinessError("BAD_REQUEST");
     }
 
     if (userId === targetUserId) {
-      throw new AppHttpException(HttpStatus.BAD_REQUEST, "CANNOT_CHAT_WITH_SELF", "Không thể tự tạo hội thoại với chính mình");
+      throw new BusinessError("CANNOT_CHAT_WITH_SELF");
     }
 
     const targetUser = await this.userRepo.findById(targetUserId);
     if (!targetUser) {
-      throw new AppHttpException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "Người dùng không tồn tại");
+      throw new BusinessError("USER_NOT_FOUND");
     }
 
     const existing = await this.convRepo.findDirectByParticipants(userId, targetUserId);
@@ -88,12 +92,12 @@ export class ConversationService {
   async getById(conversationId: string, userId: string): Promise<ConversationWithPartner> {
     const exists = await this.convRepo.existsById(conversationId);
     if (!exists) {
-      throw new AppHttpException(HttpStatus.NOT_FOUND, "CONVERSATION_NOT_FOUND", "Không tìm thấy cuộc trò chuyện");
+      throw new BusinessError("CONVERSATION_NOT_FOUND");
     }
 
     const conv = await this.convRepo.findById(conversationId, userId);
     if (!conv) {
-      throw new AppHttpException(HttpStatus.FORBIDDEN, "NOT_PARTICIPANT", "Không phải thành viên cuộc trò chuyện");
+      throw new BusinessError("NOT_PARTICIPANT");
     }
 
     // Enrich with unreadCount and presence from Redis
@@ -130,9 +134,17 @@ export class ConversationService {
     return conv;
   }
 
-  async markAsRead(conversationId: string, userId: string, lastReadMessageId: string): Promise<void> {
-    if (!lastReadMessageId || typeof lastReadMessageId !== "string" || lastReadMessageId.trim().length === 0) {
-      throw new AppHttpException(HttpStatus.BAD_REQUEST, "BAD_REQUEST", "lastReadMessageId là bắt buộc");
+  async markAsRead(
+    conversationId: string,
+    userId: string,
+    lastReadMessageId: string,
+  ): Promise<void> {
+    if (
+      !lastReadMessageId ||
+      typeof lastReadMessageId !== "string" ||
+      lastReadMessageId.trim().length === 0
+    ) {
+      throw new BusinessError("BAD_REQUEST");
     }
 
     await this.getById(conversationId, userId);
@@ -156,4 +168,3 @@ export class ConversationService {
     });
   }
 }
-

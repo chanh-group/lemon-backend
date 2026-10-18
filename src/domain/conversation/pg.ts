@@ -15,7 +15,10 @@ export class ConversationPgRepository implements ConversationRepository {
     return `${low}:${high}`;
   }
 
-  async findDirectByParticipants(userAId: string, userBId: string): Promise<ConversationWithPartner | null> {
+  async findDirectByParticipants(
+    userAId: string,
+    userBId: string,
+  ): Promise<ConversationWithPartner | null> {
     const directKey = this.getDirectKey(userAId, userBId);
 
     const [conv] = await this.db
@@ -51,7 +54,10 @@ export class ConversationPgRepository implements ConversationRepository {
     };
   }
 
-  async createDirectConversation(userAId: string, userBId: string): Promise<ConversationWithPartner> {
+  async createDirectConversation(
+    userAId: string,
+    userBId: string,
+  ): Promise<ConversationWithPartner> {
     const directKey = this.getDirectKey(userAId, userBId);
 
     return await this.db.transaction(async (tx) => {
@@ -123,12 +129,16 @@ export class ConversationPgRepository implements ConversationRepository {
         lastReadMessageId: conversationParticipants.lastReadMessageId,
       })
       .from(conversationParticipants)
-      .where(and(eq(conversationParticipants.userId, userId), isNull(conversationParticipants.leftAt)));
+      .where(
+        and(eq(conversationParticipants.userId, userId), isNull(conversationParticipants.leftAt)),
+      );
 
     if (myParticipations.length === 0) return [];
 
     const convIds = myParticipations.map((p) => p.conversationId);
-    const lastReadMap = new Map(myParticipations.map((p) => [p.conversationId, p.lastReadMessageId]));
+    const lastReadMap = new Map(
+      myParticipations.map((p) => [p.conversationId, p.lastReadMessageId]),
+    );
 
     // 2. Fetch conversations details
     const convRows = await this.db
@@ -158,7 +168,12 @@ export class ConversationPgRepository implements ConversationRepository {
       })
       .from(conversationParticipants)
       .innerJoin(users, eq(conversationParticipants.userId, users.id))
-      .where(and(inArray(conversationParticipants.conversationId, convIds), ne(conversationParticipants.userId, userId)));
+      .where(
+        and(
+          inArray(conversationParticipants.conversationId, convIds),
+          ne(conversationParticipants.userId, userId),
+        ),
+      );
 
     const partnerMap = new Map(otherParticipants.map((p) => [p.conversationId, p.user]));
 
@@ -173,7 +188,12 @@ export class ConversationPgRepository implements ConversationRepository {
     const [membership] = await this.db
       .select()
       .from(conversationParticipants)
-      .where(and(eq(conversationParticipants.conversationId, conversationId), eq(conversationParticipants.userId, userId)))
+      .where(
+        and(
+          eq(conversationParticipants.conversationId, conversationId),
+          eq(conversationParticipants.userId, userId),
+        ),
+      )
       .limit(1);
 
     if (!membership) return null;
@@ -195,7 +215,12 @@ export class ConversationPgRepository implements ConversationRepository {
       })
       .from(conversationParticipants)
       .innerJoin(users, eq(conversationParticipants.userId, users.id))
-      .where(and(eq(conversationParticipants.conversationId, conversationId), ne(conversationParticipants.userId, userId)))
+      .where(
+        and(
+          eq(conversationParticipants.conversationId, conversationId),
+          ne(conversationParticipants.userId, userId),
+        ),
+      )
       .limit(1);
 
     return {
@@ -238,7 +263,12 @@ export class ConversationPgRepository implements ConversationRepository {
     const rows = await this.db
       .select({ userId: conversationParticipants.userId })
       .from(conversationParticipants)
-      .where(and(eq(conversationParticipants.conversationId, conversationId), isNull(conversationParticipants.leftAt)));
+      .where(
+        and(
+          eq(conversationParticipants.conversationId, conversationId),
+          isNull(conversationParticipants.leftAt),
+        ),
+      );
     return rows.map((r) => r.userId);
   }
 
@@ -249,6 +279,11 @@ export class ConversationPgRepository implements ConversationRepository {
         lastReadMessageId: messageId,
         lastReadAt: new Date(),
       })
-      .where(and(eq(conversationParticipants.conversationId, conversationId), eq(conversationParticipants.userId, userId)));
+      .where(
+        and(
+          eq(conversationParticipants.conversationId, conversationId),
+          eq(conversationParticipants.userId, userId),
+        ),
+      );
   }
 }

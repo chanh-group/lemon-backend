@@ -3,8 +3,6 @@ import type { BusinessCode, ErrorCode } from "./codes.js";
 import { BUSINESS_STATUS, BusinessError } from "./business.js";
 import { SYSTEM_STATUS, SystemError } from "./system.js";
 
-import { AppHttpException } from "../response.js";
-
 export type AppError = BusinessError | SystemError;
 
 export interface ErrorResponse {
@@ -42,12 +40,13 @@ export function toAppError(error: unknown): AppError {
   if (isAppError(error)) {
     return error;
   }
-  if (error instanceof AppHttpException) {
-    return new BusinessError(error.code as BusinessCode, undefined, error.message);
-  }
   const pgCode = (error as any)?.code || (error as any)?.cause?.code;
   if (pgCode === "22P02") {
-    return new BusinessError("BAD_REQUEST", undefined, "Định dạng ID không hợp lệ (yêu cầu định dạng UUID)");
+    return new BusinessError(
+      "BAD_REQUEST",
+      undefined,
+      "Định dạng ID không hợp lệ (yêu cầu định dạng UUID)",
+    );
   }
   if (error instanceof HttpException) {
     const status = error.getStatus();

@@ -52,7 +52,10 @@ export class RealtimeService {
   /**
    * Broadcast read receipt update
    */
-  emitReadUpdated(conversationId: string, payload: { userId: string; lastReadMessageId: string; readAt: Date }): void {
+  emitReadUpdated(
+    conversationId: string,
+    payload: { userId: string; lastReadMessageId: string; readAt: Date },
+  ): void {
     if (!this.gateway?.server) return;
     try {
       this.gateway.server.to(`conv:${conversationId}`).emit("read:updated", payload);
@@ -61,4 +64,3 @@ export class RealtimeService {
     }
   }
 }
-

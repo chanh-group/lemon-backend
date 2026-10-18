@@ -1,19 +1,22 @@
-import { HttpStatus, Inject, Injectable, Optional } from "@nestjs/common";
-import { AppHttpException } from "../../utils/response.js";
-import { CONVERSATION_REPOSITORY, type ConversationRepository } from "../conversation/repository.js";
+import { Inject, Injectable, Optional } from "@nestjs/common";
+import { BusinessError } from "../../utils/errors/business.js";
+import {
+  CONVERSATION_REPOSITORY,
+  type ConversationRepository,
+} from "../conversation/repository.js";
 import { RealtimeService } from "../realtime/realtime.service.js";
-import { MESSAGE_REPOSITORY, type MessageRepository, type MessageTimelineResult } from "./repository.js";
+import {
+  MESSAGE_REPOSITORY,
+  type MessageRepository,
+  type MessageTimelineResult,
+} from "./repository.js";
 import { type Message } from "./schema.js";
 import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
 import { unreadCountKey } from "../../utils/cache/keys.js";
+import type { SendMessageDto } from "./dto/request.js";
 
-export interface SendMessageDto {
-  body?: string;
-  kind?: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "FILE" | "SYSTEM";
-  clientMsgId?: string;
-  replyToId?: string;
-}
+export type { SendMessageDto };
 
 @Injectable()
 export class MessageService {
@@ -24,19 +27,23 @@ export class MessageService {
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
   ) {}
 
-  async sendMessage(senderId: string, conversationId: string, dto: SendMessageDto): Promise<Message> {
+  async sendMessage(
+    senderId: string,
+    conversationId: string,
+    dto: SendMessageDto,
+  ): Promise<Message> {
     // 1. Verify that sender is a member of this conversation
     const participantIds = await this.convRepo.getParticipantUserIds(conversationId);
     if (!participantIds.includes(senderId)) {
-      throw new AppHttpException(HttpStatus.FORBIDDEN, "NOT_PARTICIPANT", "Không phải thành viên cuộc trò chuyện");
+      throw new BusinessError("NOT_PARTICIPANT");
     }
 
     if ((!dto.kind || dto.kind === "TEXT") && (!dto.body || dto.body.trim().length === 0)) {
-      throw new AppHttpException(HttpStatus.BAD_REQUEST, "BAD_REQUEST", "Nội dung tin nhắn không được để trống");
+      throw new BusinessError("BAD_REQUEST");
     }
 
     if (dto.body && dto.body.length > 4000) {
-      throw new AppHttpException(HttpStatus.BAD_REQUEST, "BAD_REQUEST", "Nội dung tin nhắn không được vượt quá 4000 ký tự");
+      throw new BusinessError("BAD_REQUEST");
     }
 
     // 2. Persist message in PostgreSQL with transaction
@@ -81,7 +88,7 @@ export class MessageService {
   ): Promise<MessageTimelineResult> {
     const participantIds = await this.convRepo.getParticipantUserIds(conversationId);
     if (!participantIds.includes(userId)) {
-      throw new AppHttpException(HttpStatus.FORBIDDEN, "NOT_PARTICIPANT", "Không phải thành viên cuộc trò chuyện");
+      throw new BusinessError("NOT_PARTICIPANT");
     }
 
     return await this.messageRepo.findTimeline(conversationId, cursor, limit, after);
@@ -90,32 +97,32 @@ export class MessageService {
   async editMessage(userId: string, messageId: string, body: string): Promise<Message> {
     const msg = await this.messageRepo.findById(messageId);
     if (!msg) {
-      throw new AppHttpException(HttpStatus.NOT_FOUND, "MESSAGE_NOT_FOUND", "Không tìm thấy tin nhắn");
+      throw new BusinessError("MESSAGE_NOT_FOUND");
     }
 
     if (msg.deletedAt) {
-      throw new AppHttpException(HttpStatus.BAD_REQUEST, "MESSAGE_REVOKED", "Tin nhắn đã bị thu hồi, không thể chỉnh sửa");
+      throw new BusinessError("MESSAGE_REVOKED");
     }
 
     if (msg.senderId !== userId) {
-      throw new AppHttpException(HttpStatus.FORBIDDEN, "FORBIDDEN", "Bạn không có quyền chỉnh sửa tin nhắn này");
+      throw new BusinessError("FORBIDDEN");
     }
 
     if (msg.kind !== "TEXT") {
-      throw new AppHttpException(HttpStatus.BAD_REQUEST, "BAD_REQUEST", "Chỉ có thể chỉnh sửa tin nhắn văn bản");
+      throw new BusinessError("BAD_REQUEST");
     }
 
     if (!body || body.trim().length === 0) {
-      throw new AppHttpException(HttpStatus.BAD_REQUEST, "BAD_REQUEST", "Nội dung tin nhắn không được để trống");
+      throw new BusinessError("BAD_REQUEST");
     }
 
     if (body.length > 4000) {
-      throw new AppHttpException(HttpStatus.BAD_REQUEST, "BAD_REQUEST", "Nội dung tin nhắn không được vượt quá 4000 ký tự");
+      throw new BusinessError("BAD_REQUEST");
     }
 
     const updated = await this.messageRepo.updateBody(messageId, userId, body);
     if (!updated) {
-      throw new AppHttpException(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_SERVER_ERROR", "Lỗi khi cập nhật tin nhắn");
+      throw new BusinessError("INTERNAL_SERVER_ERROR" as any);
     }
 
     this.realtimeService.emitMessageUpdated(updated.conversationId, updated);
@@ -125,20 +132,20 @@ export class MessageService {
   async revokeMessage(userId: string, messageId: string): Promise<Message> {
     const msg = await this.messageRepo.findById(messageId);
     if (!msg) {
-      throw new AppHttpException(HttpStatus.NOT_FOUND, "MESSAGE_NOT_FOUND", "Không tìm thấy tin nhắn");
+      throw new BusinessError("MESSAGE_NOT_FOUND");
     }
 
     if (msg.deletedAt) {
-      throw new AppHttpException(HttpStatus.BAD_REQUEST, "MESSAGE_REVOKED", "Tin nhắn đã được thu hồi trước đó");
+      throw new BusinessError("MESSAGE_REVOKED");
     }
 
     if (msg.senderId !== userId) {
-      throw new AppHttpException(HttpStatus.FORBIDDEN, "FORBIDDEN", "Bạn không có quyền thu hồi tin nhắn này");
+      throw new BusinessError("FORBIDDEN");
     }
 
     const revoked = await this.messageRepo.softDelete(messageId, userId);
     if (!revoked) {
-      throw new AppHttpException(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_SERVER_ERROR", "Lỗi khi thu hồi tin nhắn");
+      throw new BusinessError("INTERNAL_SERVER_ERROR" as any);
     }
 
     this.realtimeService.emitMessageRevoked(revoked.conversationId, {
@@ -148,4 +155,3 @@ export class MessageService {
     return revoked;
   }
 }
-
