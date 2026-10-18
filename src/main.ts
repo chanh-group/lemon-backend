@@ -1,4 +1,5 @@
 import { NestFactory } from "@nestjs/core";
+import cookieParser from "cookie-parser";
 import { AppModule } from "./app.js";
 import { get_env } from "./helpers/index.js";
 import { createAppLogger } from "./utils/logger.js";
@@ -8,6 +9,7 @@ async function bootstrap() {
     bufferLogs: true,
     logger: createAppLogger(),
   });
+  app.use(cookieParser());
   await app.listen(Number(get_env("PORT", "3000")));
 }
 await bootstrap();
