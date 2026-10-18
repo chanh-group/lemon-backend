@@ -40,10 +40,18 @@ export const signupSchema = z.object({
 export type SignupDto = z.infer<typeof signupSchema>;
 export type SignupInput = z.input<typeof signupSchema>;
 
-export const loginSchema = z.object({
-  identifier: z.string().trim().min(1, "Vui lòng nhập email hoặc tên đăng nhập"),
-  password: z.string().min(1, "Vui lòng nhập mật khẩu"),
-});
+export const loginSchema = z.preprocess(
+  (val: unknown) => {
+    if (val && typeof val === "object" && !("identifier" in val) && "email" in val) {
+      return { ...val, identifier: (val as { email: unknown }).email };
+    }
+    return val;
+  },
+  z.object({
+    identifier: z.string().trim().min(1, "Vui lòng nhập email hoặc tên đăng nhập"),
+    password: z.string().min(1, "Vui lòng nhập mật khẩu"),
+  }),
+);
 export type LoginDto = z.infer<typeof loginSchema>;
 export type LoginInput = z.input<typeof loginSchema>;
 
