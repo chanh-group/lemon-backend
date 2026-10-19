@@ -12,9 +12,19 @@ import { storyFeedKey } from "../../utils/cache/keys.js";
 import { RedisMetricsService } from "../../configs/redis-metrics.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.js";
+import { ConversationService } from "../conversation/service.js";
+import type { MessageResponse } from "../message/dto/response.js";
+import type { StoryPreview } from "../message/schema.js";
+import { MessageService } from "../message/service.js";
+import { RealtimeService } from "../realtime/realtime.service.js";
 import { groupStoriesByUser, reviveUserStoryFeed, toStoryItemResponse } from "./dto/mapper.js";
-import type { CreateStoryDto } from "./dto/request.js";
-import type { StoryItemResponse, UserStoryFeedResponse } from "./dto/response.js";
+import { ALLOWED_STORY_EMOJIS, type CreateStoryDto, type ReplyStoryDto } from "./dto/request.js";
+import type {
+  StoryItemResponse,
+  StoryReactionResponse,
+  UserReactionResponse,
+  UserStoryFeedResponse,
+} from "./dto/response.js";
 import { STORY_REPOSITORY, type StoryRepository } from "./repository.js";
 import type { NewStory } from "./schema.js";
 
@@ -36,6 +46,9 @@ export class StoryService {
     @Inject(STORY_REPOSITORY) private readonly storyRepo: StoryRepository,
     @Inject(CACHE_STORE) private readonly cache: CacheStoreExt,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
+    private readonly conversationService: ConversationService,
+    private readonly messageService: MessageService,
+    private readonly realtimeService: RealtimeService,
     private readonly metrics?: RedisMetricsService,
   ) {}
 
@@ -127,9 +140,19 @@ export class StoryService {
     ]);
 
     const storyIds = stories.map((s) => s.id);
-    const viewedStoryIds = await this.storyRepo.findViewedStoryIds(userId, storyIds);
+    const [viewedStoryIds, userReactionsMap, reactionsCountMap] = await Promise.all([
+      this.storyRepo.findViewedStoryIds(userId, storyIds),
+      this.storyRepo.findUserReactions(userId, storyIds),
+      this.storyRepo.countReactions(storyIds),
+    ]);
 
-    const feed = groupStoriesByUser(usersMap, stories, viewedStoryIds);
+    const feed = groupStoriesByUser(
+      usersMap,
+      stories,
+      viewedStoryIds,
+      userReactionsMap,
+      reactionsCountMap,
+    );
 
     await this.cache.setBestEffort(cacheKey, feed, STORY_FEED_TTL_SECS);
 
@@ -148,8 +171,17 @@ export class StoryService {
       }
     }
 
-    const viewedIds = await this.storyRepo.findViewedStoryIds(userId, [storyId]);
-    return toStoryItemResponse(story, viewedIds.has(storyId));
+    const [viewedIds, userReactionsMap, reactionsCountMap] = await Promise.all([
+      this.storyRepo.findViewedStoryIds(userId, [storyId]),
+      this.storyRepo.findUserReactions(userId, [storyId]),
+      this.storyRepo.countReactions([storyId]),
+    ]);
+    return toStoryItemResponse(
+      story,
+      viewedIds.has(storyId),
+      userReactionsMap.get(storyId) ?? null,
+      reactionsCountMap.get(storyId) ?? 0,
+    );
   }
 
   async viewStory(userId: string, storyId: string): Promise<void> {
@@ -205,4 +237,130 @@ export class StoryService {
 
     this.logger.log("Story deleted", { storyId, userId });
   }
+
+  async reactStory(userId: string, storyId: string, emoji: string): Promise<UserReactionResponse> {
+    if (!ALLOWED_STORY_EMOJIS.includes(emoji as (typeof ALLOWED_STORY_EMOJIS)[number])) {
+      throw new BusinessError("INVALID_EMOJI");
+    }
+
+    const story = await this.storyRepo.findActiveById(storyId);
+    if (!story) {
+      throw new BusinessError("STORY_NOT_FOUND");
+    }
+
+    if (story.userId === userId) {
+      throw new BusinessError("CANNOT_REACT_OWN_STORY");
+    }
+
+    const friendIds = await this.storyRepo.getFriendUserIds(story.userId);
+    if (!friendIds.includes(userId)) {
+      throw new BusinessError("STORY_REACT_FORBIDDEN");
+    }
+
+    await this.storyRepo.markAsViewed(storyId, userId);
+    const reaction = await this.storyRepo.addOrUpdateReaction(storyId, userId, emoji);
+
+    await Promise.all([
+      this.cache.deleteBestEffort(storyFeedKey(userId)),
+      this.cache.deleteBestEffort(storyFeedKey(story.userId)),
+    ]);
+
+    const usersMap = await this.storyRepo.findUsersByIds([userId]);
+    const userSummary = usersMap.get(userId);
+    if (userSummary) {
+      this.realtimeService.emitStoryReaction(story.userId, {
+        storyId,
+        user: userSummary,
+        emoji,
+        createdAt: reaction.createdAt,
+      });
+    }
+
+    return {
+      storyId: reaction.storyId,
+      emoji: reaction.emoji,
+      createdAt: reaction.createdAt,
+    };
+  }
+
+  async unreactStory(userId: string, storyId: string): Promise<void> {
+    const story = await this.storyRepo.findActiveById(storyId);
+    if (!story) {
+      throw new BusinessError("STORY_NOT_FOUND");
+    }
+
+    if (story.userId === userId) {
+      throw new BusinessError("CANNOT_REACT_OWN_STORY");
+    }
+
+    const friendIds = await this.storyRepo.getFriendUserIds(story.userId);
+    if (!friendIds.includes(userId)) {
+      throw new BusinessError("STORY_REACT_FORBIDDEN");
+    }
+
+    await this.storyRepo.deleteReaction(storyId, userId);
+
+    await Promise.all([
+      this.cache.deleteBestEffort(storyFeedKey(userId)),
+      this.cache.deleteBestEffort(storyFeedKey(story.userId)),
+    ]);
+  }
+
+  async getReactions(userId: string, storyId: string): Promise<StoryReactionResponse[]> {
+    const story = await this.storyRepo.findById(storyId);
+    if (!story) {
+      throw new BusinessError("STORY_NOT_FOUND");
+    }
+
+    if (story.userId !== userId) {
+      throw new BusinessError("STORY_VIEWERS_FORBIDDEN");
+    }
+
+    return this.storyRepo.findReactionsByStoryId(storyId);
+  }
+
+  async replyStory(
+    userId: string,
+    storyId: string,
+    dto: ReplyStoryDto,
+  ): Promise<MessageResponse> {
+    const story = await this.storyRepo.findActiveById(storyId);
+    if (!story) {
+      throw new BusinessError("STORY_NOT_FOUND");
+    }
+
+    if (story.userId === userId) {
+      throw new BusinessError("CANNOT_REPLY_OWN_STORY");
+    }
+
+    const friendIds = await this.storyRepo.getFriendUserIds(story.userId);
+    if (!friendIds.includes(userId)) {
+      throw new BusinessError("STORY_REPLY_FORBIDDEN");
+    }
+
+    await this.storyRepo.markAsViewed(storyId, userId);
+
+    const conv = await this.conversationService.getOrCreateDirect(userId, story.userId);
+
+    const storyPreview: StoryPreview = {
+      id: story.id,
+      kind: story.kind,
+      bucket: story.bucket,
+      objectKey: story.objectKey,
+      caption: story.caption,
+      background: story.background,
+    };
+
+    const message = await this.messageService.sendMessage(userId, conv.id, {
+      kind: "TEXT",
+      body: dto.body,
+      storyId: story.id,
+      storyPreview,
+    });
+
+    await this.cache.deleteBestEffort(storyFeedKey(userId));
+
+    return message;
+  }
 }
+

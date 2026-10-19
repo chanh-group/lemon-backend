@@ -94,4 +94,17 @@ export class RealtimeService {
       logger.warn(`Failed to join participants to conv ${conversationId}: ${String(err)}`);
     }
   }
+
+  /**
+   * Broadcast a story reaction to the story author's personal room
+   */
+  emitStoryReaction(ownerId: string, payload: unknown): void {
+    if (!this.gateway?.server) return;
+    try {
+      this.gateway.server.to(userRoom(ownerId)).emit("story:reaction", payload);
+    } catch (err) {
+      logger.warn(`Failed to emit story:reaction for user ${ownerId}: ${String(err)}`);
+    }
+  }
 }
+

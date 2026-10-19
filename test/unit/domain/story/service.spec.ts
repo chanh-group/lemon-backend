@@ -11,6 +11,9 @@ import type {
 } from "../../../../src/domain/story/dto/response.js";
 import { StorageError } from "../../../../src/utils/storage/error.js";
 import type { StorageService } from "../../../../src/utils/storage/store.js";
+import type { ConversationService } from "../../../../src/domain/conversation/service.js";
+import type { MessageService } from "../../../../src/domain/message/service.js";
+import type { RealtimeService } from "../../../../src/domain/realtime/realtime.service.js";
 
 describe("StoryService", () => {
   let service: StoryService;
@@ -64,6 +67,13 @@ describe("StoryService", () => {
   >;
   let getBucketMock: Mock<() => string>;
   let storageMock: StorageService;
+
+  let getOrCreateDirectMock: Mock;
+  let conversationServiceMock: ConversationService;
+  let sendMessageMock: Mock;
+  let messageServiceMock: MessageService;
+  let emitStoryReactionMock: Mock;
+  let realtimeServiceMock: RealtimeService;
 
   const mockStory: Story = {
     id: "0193a2b1-0000-7000-8000-000000000001",
@@ -228,7 +238,29 @@ describe("StoryService", () => {
       deleteManyBestEffort: deleteManyBestEffortMock,
     } as unknown as CacheStoreExt;
 
-    service = new StoryService(mockRepo, mockCache, storageMock);
+    getOrCreateDirectMock = vi.fn().mockResolvedValue({ id: "conv-1" });
+    conversationServiceMock = {
+      getOrCreateDirect: getOrCreateDirectMock,
+    } as unknown as ConversationService;
+
+    sendMessageMock = vi.fn().mockResolvedValue({ id: "msg-1" });
+    messageServiceMock = {
+      sendMessage: sendMessageMock,
+    } as unknown as MessageService;
+
+    emitStoryReactionMock = vi.fn();
+    realtimeServiceMock = {
+      emitStoryReaction: emitStoryReactionMock,
+    } as unknown as RealtimeService;
+
+    service = new StoryService(
+      mockRepo,
+      mockCache,
+      storageMock,
+      conversationServiceMock,
+      messageServiceMock,
+      realtimeServiceMock,
+    );
   });
 
   describe("createStory", () => {

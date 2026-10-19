@@ -35,3 +35,10 @@ export interface StoryReactionResponse {
   emoji: string;
   createdAt: Date;
 }
+
+export interface UserReactionResponse {
+  storyId: string;
+  emoji: string;
+  createdAt: Date;
+}
+
