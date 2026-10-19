@@ -79,6 +79,17 @@ export class MessageService {
       ...(directPartnerId
         ? { requiredFriendship: { userAId: senderId, userBId: directPartnerId } }
         : {}),
+      storyId: dto.storyId,
+      storyPreview: dto.storyPreview
+        ? {
+            id: dto.storyPreview.id,
+            kind: dto.storyPreview.kind,
+            bucket: dto.storyPreview.bucket ?? null,
+            objectKey: dto.storyPreview.objectKey ?? null,
+            caption: dto.storyPreview.caption ?? null,
+            background: dto.storyPreview.background ?? null,
+          }
+        : null,
     });
 
     const response = toMessageResponse(message);

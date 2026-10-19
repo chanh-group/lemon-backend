@@ -13,7 +13,7 @@ import type {
   MessageRepository,
   MessageTimelineResult,
 } from "./repository.js";
-import { type Message, messages } from "./schema.js";
+import { type Message, type StoryPreview, messages } from "./schema.js";
 
 @Injectable()
 export class MessagePgRepository implements MessageRepository {
@@ -46,6 +46,8 @@ export class MessagePgRepository implements MessageRepository {
     clientMsgId?: string | null;
     replyToId?: string | null;
     requiredFriendship?: { userAId: string; userBId: string };
+    storyId?: string | null;
+    storyPreview?: StoryPreview | null;
   }): Promise<CreatedMessageResult> {
     try {
       return await this.db.transaction(async (tx) => {
@@ -91,6 +93,8 @@ export class MessagePgRepository implements MessageRepository {
             kind: messageData.kind ?? "TEXT",
             clientMsgId: messageData.clientMsgId ?? null,
             replyToId: messageData.replyToId ?? null,
+            storyId: messageData.storyId ?? null,
+            storyPreview: messageData.storyPreview ?? null,
           })
           .returning();
 

@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { CacheStoreExt } from "../../../../src/utils/cache/store.js";
 import type { PurgeableStory, StoryRepository } from "../../../../src/domain/story/repository.js";
 import { StoryService } from "../../../../src/domain/story/service.js";
-import type { NewStory, Story } from "../../../../src/domain/story/schema.js";
+import type { NewStory, Story, StoryReaction } from "../../../../src/domain/story/schema.js";
 import type { CreateStoryDto } from "../../../../src/domain/story/dto/request.js";
 import type {
+  StoryReactionResponse,
   StoryViewerResponse,
   UserStoryFeedResponse,
 } from "../../../../src/domain/story/dto/response.js";
@@ -43,6 +44,15 @@ describe("StoryService", () => {
   let isAcceptedFriendMock: Mock<(userAId: string, userBId: string) => Promise<boolean>>;
   let findPurgeableMock: Mock<(limit: number) => Promise<PurgeableStory[]>>;
   let deleteByIdsMock: Mock<(ids: string[]) => Promise<number>>;
+  let addOrUpdateReactionMock: Mock<
+    (storyId: string, userId: string, emoji: string) => Promise<StoryReaction>
+  >;
+  let deleteReactionMock: Mock<(storyId: string, userId: string) => Promise<boolean>>;
+  let findReactionsByStoryIdMock: Mock<(storyId: string) => Promise<StoryReactionResponse[]>>;
+  let findUserReactionsMock: Mock<
+    (userId: string, storyIds: string[]) => Promise<Map<string, string>>
+  >;
+  let countReactionsMock: Mock<(storyIds: string[]) => Promise<Map<string, number>>>;
 
   let getBestEffortMock: Mock<(key: string) => Promise<unknown>>;
   let setBestEffortMock: Mock<(key: string, value: unknown, ttlSeconds?: number) => Promise<void>>;
@@ -151,6 +161,26 @@ describe("StoryService", () => {
       .mockResolvedValue(true);
     findPurgeableMock = vi.fn<(limit: number) => Promise<PurgeableStory[]>>().mockResolvedValue([]);
     deleteByIdsMock = vi.fn<(ids: string[]) => Promise<number>>().mockResolvedValue(0);
+    addOrUpdateReactionMock = vi
+      .fn<(storyId: string, userId: string, emoji: string) => Promise<StoryReaction>>()
+      .mockResolvedValue({
+        storyId: "story-1",
+        userId: "user-1",
+        emoji: "❤️",
+        createdAt: new Date(),
+      });
+    deleteReactionMock = vi
+      .fn<(storyId: string, userId: string) => Promise<boolean>>()
+      .mockResolvedValue(true);
+    findReactionsByStoryIdMock = vi
+      .fn<(storyId: string) => Promise<StoryReactionResponse[]>>()
+      .mockResolvedValue([]);
+    findUserReactionsMock = vi
+      .fn<(userId: string, storyIds: string[]) => Promise<Map<string, string>>>()
+      .mockResolvedValue(new Map());
+    countReactionsMock = vi
+      .fn<(storyIds: string[]) => Promise<Map<string, number>>>()
+      .mockResolvedValue(new Map());
 
     getBestEffortMock = vi.fn<(key: string) => Promise<unknown>>().mockResolvedValue(null);
     setBestEffortMock = vi
@@ -184,6 +214,11 @@ describe("StoryService", () => {
       isAcceptedFriend: isAcceptedFriendMock,
       findPurgeable: findPurgeableMock,
       deleteByIds: deleteByIdsMock,
+      addOrUpdateReaction: addOrUpdateReactionMock,
+      deleteReaction: deleteReactionMock,
+      findReactionsByStoryId: findReactionsByStoryIdMock,
+      findUserReactions: findUserReactionsMock,
+      countReactions: countReactionsMock,
     };
 
     const mockCache = {

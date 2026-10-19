@@ -1,4 +1,4 @@
-import type { Message } from "./schema.js";
+import type { Message, StoryPreview } from "./schema.js";
 
 export interface MessageTimelineResult {
   items: Message[];
@@ -25,6 +25,8 @@ export interface MessageRepository {
     clientMsgId?: string | null;
     replyToId?: string | null;
     requiredFriendship?: { userAId: string; userBId: string };
+    storyId?: string | null;
+    storyPreview?: StoryPreview | null;
   }): Promise<CreatedMessageResult>;
   findTimeline(
     conversationId: string,

@@ -99,4 +99,43 @@ describe("StoryPgRepository purge queries", () => {
       expect(deleteMock).not.toHaveBeenCalled();
     });
   });
+
+  describe("reaction queries", () => {
+    it("deleteReaction returns true when row is deleted", async () => {
+      const { db, returningMock } = makeDb();
+      returningMock.mockResolvedValue([{ storyId: "s1" }]);
+      const repo = new StoryPgRepository(db);
+
+      const result = await repo.deleteReaction("s1", "u1");
+      expect(result).toBe(true);
+    });
+
+    it("deleteReaction returns false when nothing is deleted", async () => {
+      const { db, returningMock } = makeDb();
+      returningMock.mockResolvedValue([]);
+      const repo = new StoryPgRepository(db);
+
+      const result = await repo.deleteReaction("s1", "u1");
+      expect(result).toBe(false);
+    });
+
+    it("findUserReactions returns empty map when storyIds is empty", async () => {
+      const { db, selectMock } = makeDb();
+      const repo = new StoryPgRepository(db);
+
+      const result = await repo.findUserReactions("u1", []);
+      expect(result.size).toBe(0);
+      expect(selectMock).not.toHaveBeenCalled();
+    });
+
+    it("countReactions returns empty map when storyIds is empty", async () => {
+      const { db, selectMock } = makeDb();
+      const repo = new StoryPgRepository(db);
+
+      const result = await repo.countReactions([]);
+      expect(result.size).toBe(0);
+      expect(selectMock).not.toHaveBeenCalled();
+    });
+  });
 });
+

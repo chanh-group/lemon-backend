@@ -251,6 +251,43 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
     ).rejects.toMatchObject({ code: "USER_BLOCKED" });
     expect(insertMock).not.toHaveBeenCalled();
   });
+
+  it("inserts message with storyId and storyPreview", async () => {
+    const { db, txSelect, valuesMock, returningMock } = makeDb();
+    txSelect.limitMock.mockResolvedValueOnce([]);
+    const storyId = "0193a2b1-0000-7000-8000-000000000099";
+    const storyPreview = {
+      id: storyId,
+      kind: "IMAGE" as const,
+      bucket: "lemon-stories",
+      objectKey: "stories/u/a.jpg",
+      caption: "Sunset",
+      background: null,
+    };
+    const storyReplyRow: Message = {
+      ...existingRow,
+      storyId,
+      storyPreview,
+    };
+    returningMock.mockResolvedValueOnce([storyReplyRow]);
+    const repo = new MessagePgRepository(db);
+
+    const result = await repo.createMessageWithConversationUpdate({
+      conversationId,
+      senderId,
+      body: "Nice photo!",
+      storyId,
+      storyPreview,
+    });
+
+    expect(result).toEqual({ message: storyReplyRow, isNew: true });
+    expect(valuesMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        storyId,
+        storyPreview,
+      }),
+    );
+  });
 });
 
 describe("MessagePgRepository.resolveWriteMiss", () => {

@@ -4,9 +4,17 @@ import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from 
 import type { DrizzleDb } from "../../configs/database.js";
 import { friendships } from "../friend/schema.js";
 import { users } from "../user/schema.js";
+import type { StoryReactionResponse } from "./dto/response.js";
 import type { UserSummary } from "../user/dto/response.js";
 import type { PurgeableStory, StoryRepository } from "./repository.js";
-import { type NewStory, type Story, stories, storyViews } from "./schema.js";
+import {
+  type NewStory,
+  type Story,
+  type StoryReaction,
+  stories,
+  storyReactions,
+  storyViews,
+} from "./schema.js";
 import { toCursorPage } from "../shared.js";
 
 @Injectable()
@@ -90,9 +98,17 @@ export class StoryPgRepository implements StoryRepository {
         fullName: users.fullName,
         avatarUrl: users.avatarUrl,
         viewedAt: storyViews.viewedAt,
+        reaction: storyReactions.emoji,
       })
       .from(storyViews)
       .innerJoin(users, eq(storyViews.userId, users.id))
+      .leftJoin(
+        storyReactions,
+        and(
+          eq(storyViews.storyId, storyReactions.storyId),
+          eq(storyViews.userId, storyReactions.userId),
+        ),
+      )
       .where(and(...conditions))
       .orderBy(desc(storyViews.viewedAt), desc(users.id))
       .limit(limit + 1);
@@ -105,6 +121,7 @@ export class StoryPgRepository implements StoryRepository {
         avatarUrl: r.avatarUrl,
       },
       viewedAt: r.viewedAt,
+      reaction: r.reaction ?? null,
     }));
     return toCursorPage(viewers, limit, (viewer) => viewer.user.id);
   }
@@ -184,5 +201,91 @@ export class StoryPgRepository implements StoryRepository {
       .where(inArray(stories.id, ids))
       .returning({ id: stories.id });
     return rows.length;
+  }
+
+  async addOrUpdateReaction(
+    storyId: string,
+    userId: string,
+    emoji: string,
+  ): Promise<StoryReaction> {
+    const [reaction] = await this.db
+      .insert(storyReactions)
+      .values({ storyId, userId, emoji, createdAt: new Date() })
+      .onConflictDoUpdate({
+        target: [storyReactions.storyId, storyReactions.userId],
+        set: { emoji, createdAt: new Date() },
+      })
+      .returning();
+    return reaction;
+  }
+
+  async deleteReaction(storyId: string, userId: string): Promise<boolean> {
+    const rows = await this.db
+      .delete(storyReactions)
+      .where(and(eq(storyReactions.storyId, storyId), eq(storyReactions.userId, userId)))
+      .returning({ storyId: storyReactions.storyId });
+    return rows.length > 0;
+  }
+
+  async findReactionsByStoryId(storyId: string): Promise<StoryReactionResponse[]> {
+    const rows = await this.db
+      .select({
+        userId: users.id,
+        username: users.username,
+        fullName: users.fullName,
+        avatarUrl: users.avatarUrl,
+        emoji: storyReactions.emoji,
+        createdAt: storyReactions.createdAt,
+      })
+      .from(storyReactions)
+      .innerJoin(users, eq(storyReactions.userId, users.id))
+      .where(eq(storyReactions.storyId, storyId))
+      .orderBy(desc(storyReactions.createdAt));
+
+    return rows.map((r) => ({
+      user: {
+        id: r.userId,
+        username: r.username,
+        fullName: r.fullName,
+        avatarUrl: r.avatarUrl,
+      },
+      emoji: r.emoji,
+      createdAt: r.createdAt,
+    }));
+  }
+
+  async findUserReactions(userId: string, storyIds: string[]): Promise<Map<string, string>> {
+    if (storyIds.length === 0) return new Map();
+    const rows = await this.db
+      .select({
+        storyId: storyReactions.storyId,
+        emoji: storyReactions.emoji,
+      })
+      .from(storyReactions)
+      .where(and(eq(storyReactions.userId, userId), inArray(storyReactions.storyId, storyIds)));
+
+    const map = new Map<string, string>();
+    for (const r of rows) {
+      map.set(r.storyId, r.emoji);
+    }
+    return map;
+  }
+
+  async countReactions(storyIds: string[]): Promise<Map<string, number>> {
+    if (storyIds.length === 0) return new Map();
+    const rows = await this.db
+      .select({
+        storyId: storyReactions.storyId,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(storyReactions)
+      .where(inArray(storyReactions.storyId, storyIds))
+      .groupBy(storyReactions.storyId);
+
+    const map = new Map<string, number>();
+    for (const r of rows) {
+      map.set(r.storyId, Number(r.count));
+    }
+    return map;
   }
 }
