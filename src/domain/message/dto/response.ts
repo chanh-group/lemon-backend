@@ -1,3 +1,5 @@
+import type { StoryPreview } from "../schema.js";
+
 export interface MessageResponse {
   id: string;
   conversationId: string;
@@ -5,6 +7,8 @@ export interface MessageResponse {
   kind: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "FILE" | "SYSTEM";
   body: string | null;
   replyToId: string | null;
+  storyId?: string | null;
+  storyPreview?: StoryPreview | null;
   createdAt: Date;
   editedAt: Date | null;
   deletedAt: Date | null;

@@ -77,7 +77,29 @@ export const storyViews = pgTable(
   ],
 );
 
+export const storyReactions = pgTable(
+  "story_reactions",
+  {
+    storyId: uuid("story_id")
+      .notNull()
+      .references(() => stories.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    emoji: text("emoji").notNull(),
+    createdAt: created("created_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.storyId, table.userId] }),
+    index("story_reactions_story_idx").on(table.storyId),
+    index("story_reactions_user_idx").on(table.userId),
+  ],
+);
+
 export type Story = typeof stories.$inferSelect;
 export type NewStory = typeof stories.$inferInsert;
 export type StoryView = typeof storyViews.$inferSelect;
 export type NewStoryView = typeof storyViews.$inferInsert;
+export type StoryReaction = typeof storyReactions.$inferSelect;
+export type NewStoryReaction = typeof storyReactions.$inferInsert;
+

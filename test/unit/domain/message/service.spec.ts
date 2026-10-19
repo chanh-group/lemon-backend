@@ -45,6 +45,8 @@ describe("MessageService", () => {
     kind: "TEXT",
     body: "Hello",
     replyToId: null,
+    storyId: null,
+    storyPreview: null,
     clientMsgId: null,
     editedAt: null,
     deletedAt: null,

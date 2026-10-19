@@ -32,6 +32,14 @@ describe("Drizzle Table Constraints and Schema Metadata Verification", () => {
       expect(cols.userId.notNull).toBe(true);
       expect(cols.viewedAt.notNull).toBe(true);
     });
+
+    it("story_reactions should have composite PK columns", () => {
+      const cols = getTableColumns(schema.storyReactions);
+      expect(cols.storyId.notNull).toBe(true);
+      expect(cols.userId.notNull).toBe(true);
+      expect(cols.emoji.notNull).toBe(true);
+      expect(cols.createdAt.notNull).toBe(true);
+    });
   });
 
   describe("Calls Table Generated Column", () => {

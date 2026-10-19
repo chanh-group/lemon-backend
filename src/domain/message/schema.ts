@@ -5,6 +5,7 @@ import {
   check,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   text,
@@ -14,8 +15,18 @@ import {
 } from "drizzle-orm/pg-core";
 import { created, uuidV7 } from "../../utils/database.js";
 import { conversations } from "../conversation/schema.js";
+import { stories } from "../story/schema.js";
 import { users } from "../user/schema.js";
 import { MESSAGE_MAX_BODY_LENGTH } from "./constants.js";
+
+export interface StoryPreview {
+  id: string;
+  kind: "IMAGE" | "VIDEO" | "TEXT";
+  bucket: string | null;
+  objectKey: string | null;
+  caption: string | null;
+  background: string | null;
+}
 
 export const messageKindEnum = pgEnum("message_kind", [
   "TEXT",
@@ -43,6 +54,10 @@ export const messages = pgTable(
     replyToId: uuid("reply_to_id").references((): AnyPgColumn => messages.id, {
       onDelete: "set null",
     }),
+    storyId: uuid("story_id").references(() => stories.id, {
+      onDelete: "set null",
+    }),
+    storyPreview: jsonb("story_preview").$type<StoryPreview>(),
     clientMsgId: text("client_msg_id"),
     editedAt: timestamp("edited_at", { withTimezone: true, mode: "date" }),
     deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
@@ -65,6 +80,7 @@ export const messages = pgTable(
       .where(sql`${table.deletedAt} IS NULL`),
     index("messages_sender_idx").on(table.senderId, table.id.desc()),
     index("messages_reply_idx").on(table.replyToId),
+    index("messages_story_idx").on(table.storyId),
   ],
 );
 

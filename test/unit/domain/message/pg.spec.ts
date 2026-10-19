@@ -66,6 +66,8 @@ const existingRow: Message = {
   kind: "TEXT",
   body: "Hello from the first attempt",
   replyToId: null,
+  storyId: null,
+  storyPreview: null,
   clientMsgId,
   editedAt: null,
   deletedAt: null,
