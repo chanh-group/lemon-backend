@@ -1,9 +1,22 @@
-import { NotFoundException, UnprocessableEntityException } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { UserRepository } from "../../../../src/domain/user/repository.js";
 import type { User } from "../../../../src/domain/user/schema.js";
 import { UserService } from "../../../../src/domain/user/service.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
+
+async function expectBusinessError(
+  promise: Promise<unknown>,
+  code: BusinessError["code"],
+): Promise<BusinessError> {
+  const error: unknown = await promise.then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  expect(error).toBeInstanceOf(BusinessError);
+  const businessError = error as BusinessError;
+  expect(businessError.code).toBe(code);
+  return businessError;
+}
 
 type MockRepo = {
   findById: ReturnType<typeof vi.fn>;
@@ -139,14 +152,18 @@ describe("UserService", () => {
       await expect(service.create(validDto)).rejects.toMatchObject({ code: "USERNAME_TAKEN" });
     });
 
-    it("throws UnprocessableEntityException when payload fails zod validation", async () => {
-      await expect(
+    it("throws BusinessError VALIDATION_ERROR with non-empty issues when payload fails zod validation", async () => {
+      const error = await expectBusinessError(
         service.create({
           email: "invalid-email",
           username: "le",
           fullName: "",
         }),
-      ).rejects.toThrow(UnprocessableEntityException);
+        "VALIDATION_ERROR",
+      );
+
+      expect(error.issues?.length).toBeGreaterThan(0);
+      expect(error.issues?.map((issue) => issue.path)).toContain("email");
     });
 
     it("maps 23505 duplicate email errors to CONFLICT", async () => {
@@ -186,10 +203,10 @@ describe("UserService", () => {
       expect("passwordHash" in result).toBe(false);
     });
 
-    it("throws NotFoundException USER_NOT_FOUND when user does not exist", async () => {
+    it("throws BusinessError USER_NOT_FOUND when user does not exist", async () => {
       mockRepo.findById.mockResolvedValueOnce(null);
 
-      await expect(service.getProfile("not-found")).rejects.toThrow(NotFoundException);
+      await expectBusinessError(service.getProfile("not-found"), "USER_NOT_FOUND");
     });
   });
 
@@ -209,11 +226,12 @@ describe("UserService", () => {
       );
     });
 
-    it("throws NotFoundException when user to update does not exist", async () => {
+    it("throws BusinessError USER_NOT_FOUND when user to update does not exist", async () => {
       mockRepo.updateProfile.mockResolvedValueOnce(null);
 
-      await expect(service.updateProfile("not-found", { fullName: "New Name" })).rejects.toThrow(
-        NotFoundException,
+      await expectBusinessError(
+        service.updateProfile("not-found", { fullName: "New Name" }),
+        "USER_NOT_FOUND",
       );
     });
   });

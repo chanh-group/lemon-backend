@@ -1,11 +1,23 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   changePasswordSchema,
   createUserSchema,
+  updatePasswordHashSchema,
   updateUserSchema,
 } from "../../../../src/domain/user/dto/request.js";
 import { toUserResponse } from "../../../../src/domain/user/dto/mapper.js";
 import type { User } from "../../../../src/domain/user/schema.js";
+
+function messagesFor(schema: z.ZodType, input: unknown, path?: string): string[] {
+  const result = schema.safeParse(input);
+  if (result.success) {
+    return [];
+  }
+  return result.error.issues
+    .filter((issue) => (path === undefined ? true : issue.path.join(".") === path))
+    .map((issue) => issue.message);
+}
 
 describe("User DTOs & Validation Schemas", () => {
   describe("createUserSchema", () => {
@@ -23,14 +35,18 @@ describe("User DTOs & Validation Schemas", () => {
       expect(parsed.passwordHash).toBe("argon2id$mockhash");
     });
 
-    it("rejects when neither passwordHash nor googleId is provided", () => {
-      expect(() =>
-        createUserSchema.parse({
-          email: "lemon@example.com",
-          username: "lemon_user",
-          fullName: "Nguyen Van Lemon",
-        }),
-      ).toThrow();
+    it("rejects when neither passwordHash nor googleId is provided with VALIDATION_ACCOUNT_CREDENTIALS_REQUIRED", () => {
+      expect(
+        messagesFor(
+          createUserSchema,
+          {
+            email: "lemon@example.com",
+            username: "lemon_user",
+            fullName: "Nguyen Van Lemon",
+          },
+          "passwordHash",
+        ),
+      ).toEqual(["VALIDATION_ACCOUNT_CREDENTIALS_REQUIRED"]);
     });
 
     it("accepts when googleId is provided without passwordHash (OAuth)", () => {
@@ -44,45 +60,83 @@ describe("User DTOs & Validation Schemas", () => {
       expect(parsed.passwordHash).toBeUndefined();
     });
 
-    it("rejects invalid email formats", () => {
-      expect(() =>
-        createUserSchema.parse({
-          email: "not-an-email",
-          username: "lemon_user",
-          fullName: "Nguyen Van Lemon",
-        }),
-      ).toThrow();
+    it("rejects invalid email formats with VALIDATION_EMAIL", () => {
+      expect(
+        messagesFor(
+          createUserSchema,
+          {
+            email: "not-an-email",
+            username: "lemon_user",
+            fullName: "Nguyen Van Lemon",
+          },
+          "email",
+        ),
+      ).toEqual(["VALIDATION_EMAIL"]);
     });
 
-    it("rejects invalid username formats", () => {
+    it("rejects invalid username formats with username validation keys", () => {
+      const base = { email: "lemon@example.com", fullName: "Nguyen Van Lemon" };
+
       // Too short
-      expect(() =>
-        createUserSchema.parse({
-          email: "lemon@example.com",
-          username: "ab",
-          fullName: "Nguyen Van Lemon",
-        }),
-      ).toThrow();
+      expect(messagesFor(createUserSchema, { ...base, username: "ab" }, "username")).toEqual([
+        "VALIDATION_USERNAME_MIN|min=3",
+        "VALIDATION_USERNAME_FORMAT",
+      ]);
+
+      // Too long
+      expect(
+        messagesFor(createUserSchema, { ...base, username: "a".repeat(31) }, "username"),
+      ).toEqual(["VALIDATION_USERNAME_MAX|max=30", "VALIDATION_USERNAME_FORMAT"]);
 
       // Special characters
-      expect(() =>
-        createUserSchema.parse({
-          email: "lemon@example.com",
-          username: "lemon@user",
-          fullName: "Nguyen Van Lemon",
-        }),
-      ).toThrow();
+      expect(
+        messagesFor(createUserSchema, { ...base, username: "lemon@user" }, "username"),
+      ).toEqual(["VALIDATION_USERNAME_FORMAT"]);
     });
 
-    it("rejects invalid fullName length", () => {
+    it("rejects invalid fullName length with full name validation keys", () => {
+      const base = { email: "lemon@example.com", username: "lemon_user" };
+
       // Too short
-      expect(() =>
-        createUserSchema.parse({
-          email: "lemon@example.com",
-          username: "lemon_user",
-          fullName: "A",
-        }),
-      ).toThrow();
+      expect(messagesFor(createUserSchema, { ...base, fullName: "A" }, "fullName")).toEqual([
+        "VALIDATION_FULL_NAME_MIN|min=2",
+      ]);
+
+      // Too long
+      expect(
+        messagesFor(createUserSchema, { ...base, fullName: "A".repeat(101) }, "fullName"),
+      ).toEqual(["VALIDATION_FULL_NAME_MAX|max=100"]);
+    });
+
+    it("rejects empty passwordHash with VALIDATION_PASSWORD_HASH_REQUIRED", () => {
+      expect(
+        messagesFor(
+          createUserSchema,
+          {
+            email: "lemon@example.com",
+            username: "lemon_user",
+            fullName: "Nguyen Van Lemon",
+            passwordHash: "",
+          },
+          "passwordHash",
+        ),
+      ).toEqual(["VALIDATION_PASSWORD_HASH_REQUIRED", "VALIDATION_ACCOUNT_CREDENTIALS_REQUIRED"]);
+    });
+
+    it("rejects invalid avatarUrl with VALIDATION_URL and bio over 500 with VALIDATION_BIO_MAX", () => {
+      const base = {
+        email: "lemon@example.com",
+        username: "lemon_user",
+        fullName: "Nguyen Van Lemon",
+        passwordHash: "argon2id$mockhash",
+      };
+
+      expect(
+        messagesFor(createUserSchema, { ...base, avatarUrl: "not-a-url" }, "avatarUrl"),
+      ).toEqual(["VALIDATION_URL"]);
+      expect(messagesFor(createUserSchema, { ...base, bio: "a".repeat(501) }, "bio")).toEqual([
+        "VALIDATION_BIO_MAX|max=500",
+      ]);
     });
   });
 
@@ -97,12 +151,16 @@ describe("User DTOs & Validation Schemas", () => {
       expect(parsed.bio).toBe("Just a lemon");
     });
 
-    it("rejects invalid avatar URLs", () => {
-      expect(() =>
-        updateUserSchema.parse({
-          avatarUrl: "not-a-valid-url",
-        }),
-      ).toThrow();
+    it("rejects invalid avatar URLs with VALIDATION_URL", () => {
+      expect(messagesFor(updateUserSchema, { avatarUrl: "not-a-valid-url" }, "avatarUrl")).toEqual([
+        "VALIDATION_URL",
+      ]);
+    });
+
+    it("rejects bio longer than 500 characters with VALIDATION_BIO_MAX", () => {
+      expect(messagesFor(updateUserSchema, { bio: "a".repeat(501) }, "bio")).toEqual([
+        "VALIDATION_BIO_MAX|max=500",
+      ]);
     });
   });
 
@@ -115,13 +173,32 @@ describe("User DTOs & Validation Schemas", () => {
       expect(parsed.newPassword).toBe("new_password_123");
     });
 
-    it("rejects short new passwords (< 6 chars)", () => {
-      expect(() =>
-        changePasswordSchema.parse({
-          oldPassword: "old_password_123",
-          newPassword: "12345",
-        }),
-      ).toThrow();
+    it("rejects empty old password with VALIDATION_OLD_PASSWORD_REQUIRED", () => {
+      expect(
+        messagesFor(
+          changePasswordSchema,
+          { oldPassword: "", newPassword: "123456" },
+          "oldPassword",
+        ),
+      ).toEqual(["VALIDATION_OLD_PASSWORD_REQUIRED"]);
+    });
+
+    it("rejects short new passwords (< 6 chars) with VALIDATION_NEW_PASSWORD_MIN", () => {
+      expect(
+        messagesFor(
+          changePasswordSchema,
+          { oldPassword: "old_password_123", newPassword: "12345" },
+          "newPassword",
+        ),
+      ).toEqual(["VALIDATION_NEW_PASSWORD_MIN|min=6"]);
+    });
+  });
+
+  describe("updatePasswordHashSchema", () => {
+    it("rejects empty passwordHash with VALIDATION_PASSWORD_HASH_REQUIRED", () => {
+      expect(messagesFor(updatePasswordHashSchema, { passwordHash: "" })).toEqual([
+        "VALIDATION_PASSWORD_HASH_REQUIRED",
+      ]);
     });
   });
 
