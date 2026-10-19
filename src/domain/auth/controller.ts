@@ -11,8 +11,10 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { CurrentUser, Public, type AuthUser } from "../../utils/decorators.js";
+import { CurrentUser, Lang, Public, type AuthUser } from "../../utils/decorators.js";
 import { BusinessError } from "../../utils/errors/business.js";
+import { t } from "../../utils/i18n/index.js";
+import { created, messageOnly, withMessage } from "../../utils/response.js";
 import { extractClientIp } from "../../middleware/ratelimit.js";
 import type { RateLimiter } from "../../middleware/ratelimit.js";
 import { MemoryRateLimiter } from "../../middleware/ratelimit.js";
@@ -101,6 +103,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async requestOtp(
     @Body({ schema: requestOtpSchema }) body: RequestOtpDto,
+    @Lang() lang: string,
     @Headers("x-request-id") requestId?: string,
     @Req() req?: Request,
   ) {
@@ -126,16 +129,17 @@ export class AuthController {
       throw new BusinessError("TOO_MANY_REQUESTS");
     }
     await this.authService.requestOtp(body, requestId);
-    return {
-      success: true,
-      message: "OTP sent successfully",
-    };
+    return messageOnly(t("OTP_SENT", lang));
   }
 
   @Public()
   @Post("verify-otp")
   @HttpCode(HttpStatus.OK)
-  async verifyOtp(@Body({ schema: verifyOtpSchema }) body: VerifyOtpDto, @Req() req?: Request) {
+  async verifyOtp(
+    @Body({ schema: verifyOtpSchema }) body: VerifyOtpDto,
+    @Lang() lang: string,
+    @Req() req?: Request,
+  ) {
     const ip = extractClientIp(req);
     if (
       !(await this.rateLimiter.checkIpLimit(
@@ -148,23 +152,15 @@ export class AuthController {
       throw new BusinessError("TOO_MANY_REQUESTS");
     }
     const valid = await this.authService.verifyOtp(body);
-    return {
-      success: true,
-      message: "OTP verified successfully",
-      data: { valid },
-    };
+    return withMessage({ valid }, t("OTP_VERIFIED", lang));
   }
 
   @Public()
   @Post("signup")
   @HttpCode(HttpStatus.CREATED)
-  async signup(@Body({ schema: signupSchema }) body: SignupDto) {
+  async signup(@Body({ schema: signupSchema }) body: SignupDto, @Lang() lang: string) {
     const data = await this.authService.signup(body);
-    return {
-      success: true,
-      message: "Signed up successfully",
-      data,
-    };
+    return created(data, t("USER_CREATED", lang));
   }
 
   @Public()
@@ -172,6 +168,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async login(
     @Body({ schema: loginSchema }) body: LoginDto,
+    @Lang() lang: string,
     @Res({ passthrough: true }) res: Response,
     @Req() req?: Request,
   ) {
@@ -188,17 +185,20 @@ export class AuthController {
     }
     const result = await this.authService.login(body);
     setRefreshCookie(res, result.tokens.refreshToken, this.cookieConfig);
-    return {
-      success: true,
-      message: "Signed in successfully",
-      data: toLoginResponse(result.tokens.accessToken, result.user),
-    };
+    return withMessage(
+      toLoginResponse(result.tokens.accessToken, result.user),
+      t("SIGNED_IN", lang),
+    );
   }
 
   @Public()
   @Post("refresh")
   @HttpCode(HttpStatus.OK)
-  async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Lang() lang: string,
+  ) {
     const rawRefreshToken = extractRefreshToken(req);
     if (!rawRefreshToken) {
       throw new BusinessError("UNAUTHORIZED");
@@ -206,26 +206,23 @@ export class AuthController {
 
     const newTokens = await this.authService.refreshToken(rawRefreshToken);
     setRefreshCookie(res, newTokens.refreshToken, this.cookieConfig);
-    return {
-      success: true,
-      message: "OK",
-      data: toAuthTokenResponse(newTokens.accessToken),
-    };
+    return withMessage(toAuthTokenResponse(newTokens.accessToken), t("TOKEN_REFRESHED", lang));
   }
 
   @Public()
   @Post("logout")
   @HttpCode(HttpStatus.OK)
-  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+  async logout(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Lang() lang: string,
+  ) {
     const rawRefreshToken = extractRefreshToken(req);
     if (rawRefreshToken) {
       await this.authService.logout(rawRefreshToken);
     }
     clearRefreshCookie(res, this.cookieConfig);
-    return {
-      success: true,
-      message: "Signed out successfully",
-    };
+    return messageOnly(t("SIGNED_OUT", lang));
   }
 
   @Public()
@@ -233,6 +230,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async forgotPasswordOtp(
     @Body({ schema: forgotPasswordOtpSchema }) body: ForgotPasswordOtpDto,
+    @Lang() lang: string,
     @Headers("x-request-id") requestId?: string,
     @Req() req?: Request,
   ) {
@@ -258,10 +256,7 @@ export class AuthController {
       throw new BusinessError("TOO_MANY_REQUESTS");
     }
     await this.authService.forgotPasswordOtp(body, requestId);
-    return {
-      success: true,
-      message: "If the email exists, a reset OTP has been sent",
-    };
+    return messageOnly(t("OTP_SENT", lang));
   }
 
   @Public()
@@ -269,12 +264,10 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async forgotPasswordReset(
     @Body({ schema: forgotPasswordResetSchema }) body: ForgotPasswordResetDto,
+    @Lang() lang: string,
   ) {
     await this.authService.forgotPasswordReset(body);
-    return {
-      success: true,
-      message: "Password reset successfully",
-    };
+    return messageOnly(t("PASSWORD_RESET", lang));
   }
 
   @Post("change-password")
@@ -283,6 +276,7 @@ export class AuthController {
     @CurrentUser() user: AuthUser,
     @Body({ schema: changePasswordSchema }) body: ChangePasswordDto,
     @Res({ passthrough: true }) res: Response,
+    @Lang() lang: string,
     @Req() req?: Request,
   ) {
     const ip = extractClientIp(req);
@@ -300,22 +294,15 @@ export class AuthController {
     }
     await this.authService.changePassword(user.id, body);
     clearRefreshCookie(res, this.cookieConfig);
-    return {
-      success: true,
-      message: "Password changed successfully. Please sign in again",
-    };
+    return messageOnly(t("PASSWORD_CHANGED", lang));
   }
 
   @Get("me")
-  async getMe(@CurrentUser() user: AuthUser) {
+  async getMe(@CurrentUser() user: AuthUser, @Lang() lang: string) {
     const entity = await this.userService.findById(user.id);
     if (!entity) {
       throw new BusinessError("USER_NOT_FOUND");
     }
-    return {
-      success: true,
-      message: "OK",
-      data: toUserResponse(entity),
-    };
+    return withMessage(toUserResponse(entity), t("USER_FOUND", lang));
   }
 }

@@ -1,9 +1,15 @@
+import type { INestApplication } from "@nestjs/common";
+import { Test } from "@nestjs/testing";
 import type { Request, Response } from "express";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import request from "supertest";
+import type { App } from "supertest/types.js";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthController } from "../../../../src/domain/auth/controller.js";
-import type { AuthService } from "../../../../src/domain/auth/service.js";
-import type { UserService } from "../../../../src/domain/user/service.js";
+import { RATE_LIMITER } from "../../../../src/domain/auth/constants.js";
+import { AuthService } from "../../../../src/domain/auth/service.js";
+import { UserService } from "../../../../src/domain/user/service.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
+import { standardSchemaPipe } from "../../../../src/utils/validation.js";
 
 async function expectBusinessError(
   promise: Promise<unknown>,
@@ -81,23 +87,26 @@ describe("AuthController", () => {
   });
 
   describe("requestOtp", () => {
-    it("calls authService.requestOtp and returns success message", async () => {
+    it("calls authService.requestOtp and returns the default vi success message", async () => {
       authService.requestOtp.mockResolvedValueOnce(undefined);
-      const res = await controller.requestOtp({ email: "lemon@example.com" }, "req-1");
+      const res = await controller.requestOtp({ email: "lemon@example.com" }, "vi", "req-1");
 
       expect(authService.requestOtp).toHaveBeenCalledWith({ email: "lemon@example.com" }, "req-1");
-      expect(res).toEqual({ success: true, message: "OTP sent successfully" });
+      expect(res).toEqual({ success: true, message: "Đã gửi mã OTP" });
     });
   });
 
   describe("verifyOtp", () => {
-    it("calls authService.verifyOtp and returns valid boolean", async () => {
+    it("calls authService.verifyOtp and returns valid boolean with the vi message", async () => {
       authService.verifyOtp.mockResolvedValueOnce(true);
-      const res = await controller.verifyOtp({
-        email: "lemon@example.com",
-        otp: "123456",
-        purpose: "signup",
-      });
+      const res = await controller.verifyOtp(
+        {
+          email: "lemon@example.com",
+          otp: "123456",
+          purpose: "signup",
+        },
+        "vi",
+      );
 
       expect(authService.verifyOtp).toHaveBeenCalledWith({
         email: "lemon@example.com",
@@ -106,14 +115,14 @@ describe("AuthController", () => {
       });
       expect(res).toEqual({
         success: true,
-        message: "OTP verified successfully",
+        message: "Mã OTP hợp lệ",
         data: { valid: true },
       });
     });
   });
 
   describe("signup", () => {
-    it("calls authService.signup and returns created user", async () => {
+    it("calls authService.signup and returns created user with the vi message", async () => {
       authService.signup.mockResolvedValueOnce(mockUserResponse);
       const payload = {
         email: "lemon@example.com",
@@ -123,11 +132,11 @@ describe("AuthController", () => {
         otp: "123456",
       };
 
-      const res = await controller.signup(payload);
+      const res = await controller.signup(payload, "vi");
       expect(authService.signup).toHaveBeenCalledWith(payload);
       expect(res).toEqual({
         success: true,
-        message: "Signed up successfully",
+        message: "Tạo tài khoản thành công",
         data: mockUserResponse,
       });
     });
@@ -145,6 +154,7 @@ describe("AuthController", () => {
 
       const res = await controller.login(
         { identifier: "lemon", password: "Password#123" },
+        "vi",
         mockRes as unknown as Response,
       );
 
@@ -163,7 +173,7 @@ describe("AuthController", () => {
       );
       expect(res).toEqual({
         success: true,
-        message: "Signed in successfully",
+        message: "Đăng nhập thành công",
         data: {
           accessToken: "access-token-123",
           user: mockUserResponse,
@@ -177,7 +187,7 @@ describe("AuthController", () => {
       const mockReq = { cookies: {}, headers: {} } as unknown as Request;
 
       await expectBusinessError(
-        controller.refresh(mockReq, mockRes as unknown as Response),
+        controller.refresh(mockReq, mockRes as unknown as Response, "vi"),
         "UNAUTHORIZED",
       );
     });
@@ -193,7 +203,7 @@ describe("AuthController", () => {
         refreshToken: "new-refresh-token",
       });
 
-      const res = await controller.refresh(mockReq, mockRes as unknown as Response);
+      const res = await controller.refresh(mockReq, mockRes as unknown as Response, "vi");
 
       expect(authService.refreshToken).toHaveBeenCalledWith("valid-refresh-token");
       expect(mockRes.cookie).toHaveBeenCalledWith(
@@ -207,7 +217,7 @@ describe("AuthController", () => {
       );
       expect(res).toEqual({
         success: true,
-        message: "OK",
+        message: "Đã cấp token mới",
         data: { accessToken: "new-access-token" },
       });
     });
@@ -223,12 +233,12 @@ describe("AuthController", () => {
         refreshToken: "new-refresh-token-header",
       });
 
-      const res = await controller.refresh(mockReq, mockRes as unknown as Response);
+      const res = await controller.refresh(mockReq, mockRes as unknown as Response, "vi");
 
       expect(authService.refreshToken).toHaveBeenCalledWith("header-refresh-token");
       expect(res).toEqual({
         success: true,
-        message: "OK",
+        message: "Đã cấp token mới",
         data: { accessToken: "new-access-token-header" },
       });
     });
@@ -241,7 +251,7 @@ describe("AuthController", () => {
         headers: {},
       } as unknown as Request;
 
-      const res = await controller.logout(mockReq, mockRes as unknown as Response);
+      const res = await controller.logout(mockReq, mockRes as unknown as Response, "vi");
 
       expect(authService.logout).toHaveBeenCalledWith("token-to-logout");
       expect(mockRes.clearCookie).toHaveBeenCalledWith(
@@ -251,14 +261,15 @@ describe("AuthController", () => {
           path: "/auth",
         }),
       );
-      expect(res).toEqual({ success: true, message: "Signed out successfully" });
+      expect(res).toEqual({ success: true, message: "Đăng xuất thành công" });
     });
   });
 
   describe("forgot-password", () => {
-    it("forgotPasswordOtp calls authService and returns message", async () => {
+    it("forgotPasswordOtp calls authService and returns the vi message", async () => {
       const res = await controller.forgotPasswordOtp(
         { email: "lemon@example.com" },
+        "vi",
         "req-forgot-1",
       );
       expect(authService.forgotPasswordOtp).toHaveBeenCalledWith(
@@ -267,31 +278,35 @@ describe("AuthController", () => {
       );
       expect(res).toEqual({
         success: true,
-        message: "If the email exists, a reset OTP has been sent",
+        message: "Đã gửi mã OTP",
       });
     });
 
-    it("forgotPasswordReset calls authService and returns message", async () => {
-      const res = await controller.forgotPasswordReset({
-        email: "lemon@example.com",
-        otp: "654321",
-        newPassword: "NewPassword#123",
-      });
+    it("forgotPasswordReset calls authService and returns the vi message", async () => {
+      const res = await controller.forgotPasswordReset(
+        {
+          email: "lemon@example.com",
+          otp: "654321",
+          newPassword: "NewPassword#123",
+        },
+        "vi",
+      );
       expect(authService.forgotPasswordReset).toHaveBeenCalledWith({
         email: "lemon@example.com",
         otp: "654321",
         newPassword: "NewPassword#123",
       });
-      expect(res).toEqual({ success: true, message: "Password reset successfully" });
+      expect(res).toEqual({ success: true, message: "Đặt lại mật khẩu thành công" });
     });
   });
 
   describe("changePassword", () => {
-    it("calls authService.changePassword, clears cookie, and returns message", async () => {
+    it("calls authService.changePassword, clears cookie, and returns the vi message", async () => {
       const res = await controller.changePassword(
         { id: "usr-123" },
         { oldPassword: "OldPassword#123", newPassword: "NewPassword#123" },
         mockRes as unknown as Response,
+        "vi",
       );
 
       expect(authService.changePassword).toHaveBeenCalledWith("usr-123", {
@@ -307,7 +322,7 @@ describe("AuthController", () => {
       );
       expect(res).toEqual({
         success: true,
-        message: "Password changed successfully. Please sign in again",
+        message: "Đổi mật khẩu thành công",
       });
     });
   });
@@ -331,7 +346,7 @@ describe("AuthController", () => {
   });
 
   describe("getMe", () => {
-    it("returns mapped user profile if found", async () => {
+    it("returns mapped user profile if found with the vi message", async () => {
       userService.findById.mockResolvedValueOnce({
         id: "usr-123",
         email: "lemon@example.com",
@@ -349,9 +364,9 @@ describe("AuthController", () => {
         updatedAt: new Date("2026-01-01T00:00:00Z"),
       });
 
-      const res = await controller.getMe({ id: "usr-123" });
+      const res = await controller.getMe({ id: "usr-123" }, "vi");
       expect(userService.findById).toHaveBeenCalledWith("usr-123");
-      expect(res.message).toBe("OK");
+      expect(res.message).toBe("Tìm thấy người dùng");
       expect(res.data.id).toBe("usr-123");
       expect(res.data.email).toBe("lemon@example.com");
       expect((res.data as unknown as { passwordHash?: string }).passwordHash).toBeUndefined();
@@ -359,7 +374,115 @@ describe("AuthController", () => {
 
     it("throws BusinessError USER_NOT_FOUND if user not found", async () => {
       userService.findById.mockResolvedValueOnce(null);
-      await expectBusinessError(controller.getMe({ id: "usr-non-existent" }), "USER_NOT_FOUND");
+      await expectBusinessError(
+        controller.getMe({ id: "usr-non-existent" }, "vi"),
+        "USER_NOT_FOUND",
+      );
+    });
+  });
+
+  describe("HTTP request path (@Lang wiring)", () => {
+    let app: INestApplication<App>;
+    let httpAuthService: {
+      requestOtp: ReturnType<typeof vi.fn>;
+      verifyOtp: ReturnType<typeof vi.fn>;
+      signup: ReturnType<typeof vi.fn>;
+      login: ReturnType<typeof vi.fn>;
+      refreshToken: ReturnType<typeof vi.fn>;
+      logout: ReturnType<typeof vi.fn>;
+      forgotPasswordOtp: ReturnType<typeof vi.fn>;
+      forgotPasswordReset: ReturnType<typeof vi.fn>;
+      changePassword: ReturnType<typeof vi.fn>;
+    };
+    let httpUserService: {
+      findById: ReturnType<typeof vi.fn>;
+    };
+    const httpRateLimiter = {
+      checkIpLimit: vi.fn().mockResolvedValue(true),
+      checkEmailLimit: vi.fn().mockResolvedValue(true),
+      checkMixedLimit: vi.fn().mockResolvedValue(true),
+    };
+
+    beforeAll(async () => {
+      httpAuthService = {
+        requestOtp: vi.fn(),
+        verifyOtp: vi.fn(),
+        signup: vi.fn(),
+        login: vi.fn(),
+        refreshToken: vi.fn(),
+        logout: vi.fn(),
+        forgotPasswordOtp: vi.fn(),
+        forgotPasswordReset: vi.fn(),
+        changePassword: vi.fn(),
+      };
+      httpUserService = { findById: vi.fn() };
+
+      const moduleRef = await Test.createTestingModule({
+        controllers: [AuthController],
+        providers: [
+          { provide: AuthService, useValue: httpAuthService },
+          { provide: UserService, useValue: httpUserService },
+          { provide: RATE_LIMITER, useValue: httpRateLimiter },
+        ],
+      }).compile();
+
+      app = moduleRef.createNestApplication();
+      app.useGlobalPipes(standardSchemaPipe());
+      await app.init();
+    });
+
+    afterAll(async () => {
+      await app.close();
+    });
+
+    it("resolves @Lang() to vi when no accept-language header is sent", async () => {
+      httpAuthService.verifyOtp.mockResolvedValueOnce(true);
+
+      const response = await request(app.getHttpServer())
+        .post("/auth/verify-otp")
+        .send({ email: "lemon@example.com", otp: "123456", purpose: "signup" })
+        .expect(200);
+
+      expect(response.body).toEqual({
+        success: true,
+        message: "Mã OTP hợp lệ",
+        data: { valid: true },
+      });
+    });
+
+    it("resolves @Lang() from accept-language: en for login", async () => {
+      httpAuthService.login.mockResolvedValueOnce({
+        tokens: { accessToken: "access-token-123", refreshToken: "refresh-token-456" },
+        user: mockUserResponse,
+      });
+
+      const response = await request(app.getHttpServer())
+        .post("/auth/login")
+        .set("accept-language", "en")
+        .send({ identifier: "lemon", password: "Password#123" })
+        .expect(200);
+
+      expect(response.body.message).toBe("Signed in successfully");
+      expect(response.body.data.accessToken).toBe("access-token-123");
+      expect(response.body.data.user.id).toBe("usr-123");
+    });
+
+    it("keeps signup at 201 and resolves the vi message through the wire", async () => {
+      httpAuthService.signup.mockResolvedValueOnce(mockUserResponse);
+
+      const response = await request(app.getHttpServer())
+        .post("/auth/signup")
+        .send({
+          email: "lemon@example.com",
+          fullName: "Lemon Nguyen",
+          username: "lemon",
+          password: "Password#123",
+          otp: "123456",
+        })
+        .expect(201);
+
+      expect(response.body.message).toBe("Tạo tài khoản thành công");
+      expect(response.body.data.id).toBe("usr-123");
     });
   });
 });

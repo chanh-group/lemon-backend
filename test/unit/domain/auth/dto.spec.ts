@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   changePasswordSchema,
   forgotPasswordOtpSchema,
@@ -9,6 +10,16 @@ import {
   verifyOtpSchema,
 } from "../../../../src/domain/auth/dto/request.js";
 
+function messagesFor(schema: z.ZodType, input: unknown, path?: string): string[] {
+  const result = schema.safeParse(input);
+  if (result.success) {
+    return [];
+  }
+  return result.error.issues
+    .filter((issue) => (path === undefined ? true : issue.path.join(".") === path))
+    .map((issue) => issue.message);
+}
+
 describe("Auth DTO Validation Schemas", () => {
   describe("requestOtpSchema", () => {
     it("lowercases and trims valid email", () => {
@@ -16,8 +27,10 @@ describe("Auth DTO Validation Schemas", () => {
       expect(parsed.email).toBe("lemon@gmail.com");
     });
 
-    it("rejects invalid email", () => {
-      expect(() => requestOtpSchema.parse({ email: "invalid-email" })).toThrow();
+    it("rejects invalid email with the VALIDATION_EMAIL key", () => {
+      expect(messagesFor(requestOtpSchema, { email: "invalid-email" }, "email")).toEqual([
+        "VALIDATION_EMAIL",
+      ]);
     });
   });
 
@@ -32,14 +45,29 @@ describe("Auth DTO Validation Schemas", () => {
       expect(parsed.purpose).toBe("signup");
     });
 
-    it("rejects non-digit OTP or OTP with incorrect length", () => {
-      expect(() => verifyOtpSchema.parse({ email: "lemon@gmail.com", otp: "12345" })).toThrow();
-      expect(() => verifyOtpSchema.parse({ email: "lemon@gmail.com", otp: "1234567" })).toThrow();
-      expect(() => verifyOtpSchema.parse({ email: "lemon@gmail.com", otp: "abcdef" })).toThrow();
+    it("rejects non-digit OTP or OTP with incorrect length with VALIDATION_OTP_FORMAT", () => {
+      const base = { email: "lemon@gmail.com" };
+      expect(messagesFor(verifyOtpSchema, { ...base, otp: "12345" }, "otp")).toEqual([
+        "VALIDATION_OTP_FORMAT",
+      ]);
+      expect(messagesFor(verifyOtpSchema, { ...base, otp: "1234567" }, "otp")).toEqual([
+        "VALIDATION_OTP_FORMAT",
+      ]);
+      expect(messagesFor(verifyOtpSchema, { ...base, otp: "abcdef" }, "otp")).toEqual([
+        "VALIDATION_OTP_FORMAT",
+      ]);
     });
   });
 
   describe("signupSchema", () => {
+    const validPayload = {
+      email: "lemon@gmail.com",
+      fullName: "Nguyen Van Lemon",
+      username: "lemon_van",
+      password: "MatKhau#123",
+      otp: "123456",
+    };
+
     it("validates full signup payload", () => {
       const parsed = signupSchema.parse({
         email: " LEMON@GMAIL.COM ",
@@ -56,28 +84,35 @@ describe("Auth DTO Validation Schemas", () => {
       expect(parsed.otp).toBe("123456");
     });
 
-    it("rejects passwords shorter than 6 characters", () => {
-      expect(() =>
-        signupSchema.parse({
-          email: "lemon@gmail.com",
-          fullName: "Nguyen Van Lemon",
-          username: "lemon_van",
-          password: "12345",
-          otp: "123456",
-        }),
-      ).toThrow();
+    it("rejects passwords shorter than 6 characters with VALIDATION_PASSWORD_MIN", () => {
+      expect(messagesFor(signupSchema, { ...validPayload, password: "12345" }, "password")).toEqual(
+        ["VALIDATION_PASSWORD_MIN|min=6"],
+      );
     });
 
-    it("rejects invalid username characters", () => {
-      expect(() =>
-        signupSchema.parse({
-          email: "lemon@gmail.com",
-          fullName: "Nguyen Van Lemon",
-          username: "lemon.van",
-          password: "MatKhau#123",
-          otp: "123456",
-        }),
-      ).toThrow();
+    it("rejects invalid username characters with VALIDATION_USERNAME_FORMAT", () => {
+      expect(
+        messagesFor(signupSchema, { ...validPayload, username: "lemon.van" }, "username"),
+      ).toEqual(["VALIDATION_USERNAME_FORMAT"]);
+    });
+
+    it("rejects full names outside the 2-100 character range", () => {
+      expect(messagesFor(signupSchema, { ...validPayload, fullName: "L" }, "fullName")).toEqual([
+        "VALIDATION_FULL_NAME_MIN|min=2",
+      ]);
+      expect(
+        messagesFor(signupSchema, { ...validPayload, fullName: "L".repeat(101) }, "fullName"),
+      ).toEqual(["VALIDATION_FULL_NAME_MAX|max=100"]);
+    });
+
+    it("rejects usernames outside the 3-30 character range", () => {
+      expect(messagesFor(signupSchema, { ...validPayload, username: "ab" }, "username")).toEqual([
+        "VALIDATION_USERNAME_MIN|min=3",
+        "VALIDATION_USERNAME_FORMAT",
+      ]);
+      expect(
+        messagesFor(signupSchema, { ...validPayload, username: "a".repeat(31) }, "username"),
+      ).toEqual(["VALIDATION_USERNAME_MAX|max=30", "VALIDATION_USERNAME_FORMAT"]);
     });
   });
 
@@ -91,9 +126,13 @@ describe("Auth DTO Validation Schemas", () => {
       expect(parsed.password).toBe("MatKhau#123");
     });
 
-    it("rejects empty identifier or password", () => {
-      expect(() => loginSchema.parse({ identifier: "", password: "123" })).toThrow();
-      expect(() => loginSchema.parse({ identifier: "lemon", password: "" })).toThrow();
+    it("rejects empty identifier or password with the required keys", () => {
+      expect(messagesFor(loginSchema, { identifier: "", password: "123" }, "identifier")).toEqual([
+        "VALIDATION_IDENTIFIER_REQUIRED",
+      ]);
+      expect(messagesFor(loginSchema, { identifier: "lemon", password: "" }, "password")).toEqual([
+        "VALIDATION_PASSWORD_REQUIRED",
+      ]);
     });
   });
 
@@ -103,30 +142,40 @@ describe("Auth DTO Validation Schemas", () => {
       expect(parsed.email).toBe("reset@gmail.com");
     });
 
-    it("rejects invalid email", () => {
-      expect(() => forgotPasswordOtpSchema.parse({ email: "invalid" })).toThrow();
+    it("rejects invalid email with the VALIDATION_EMAIL key", () => {
+      expect(messagesFor(forgotPasswordOtpSchema, { email: "invalid" }, "email")).toEqual([
+        "VALIDATION_EMAIL",
+      ]);
     });
   });
 
   describe("forgotPasswordResetSchema", () => {
+    const validReset = {
+      email: "lemon@gmail.com",
+      otp: "654321",
+      newPassword: "NewMatKhau#123",
+    };
+
     it("validates reset payload", () => {
-      const parsed = forgotPasswordResetSchema.parse({
-        email: "lemon@gmail.com",
-        otp: "654321",
-        newPassword: "NewMatKhau#123",
-      });
+      const parsed = forgotPasswordResetSchema.parse(validReset);
       expect(parsed.newPassword).toBe("NewMatKhau#123");
       expect(parsed.otp).toBe("654321");
     });
 
-    it("rejects short new password", () => {
-      expect(() =>
-        forgotPasswordResetSchema.parse({
-          email: "lemon@gmail.com",
-          otp: "654321",
-          newPassword: "123",
-        }),
-      ).toThrow();
+    it("rejects short new password with VALIDATION_NEW_PASSWORD_MIN", () => {
+      expect(
+        messagesFor(
+          forgotPasswordResetSchema,
+          { ...validReset, newPassword: "123" },
+          "newPassword",
+        ),
+      ).toEqual(["VALIDATION_NEW_PASSWORD_MIN|min=6"]);
+    });
+
+    it("rejects malformed OTP with VALIDATION_OTP_FORMAT", () => {
+      expect(messagesFor(forgotPasswordResetSchema, { ...validReset, otp: "12ab" }, "otp")).toEqual(
+        ["VALIDATION_OTP_FORMAT"],
+      );
     });
   });
 
@@ -140,13 +189,21 @@ describe("Auth DTO Validation Schemas", () => {
       expect(parsed.newPassword).toBe("NewPassword#123");
     });
 
-    it("rejects empty old password or short new password", () => {
-      expect(() =>
-        changePasswordSchema.parse({ oldPassword: "", newPassword: "NewPassword#123" }),
-      ).toThrow();
-      expect(() =>
-        changePasswordSchema.parse({ oldPassword: "OldPassword", newPassword: "12345" }),
-      ).toThrow();
+    it("rejects empty old password or short new password with the required keys", () => {
+      expect(
+        messagesFor(
+          changePasswordSchema,
+          { oldPassword: "", newPassword: "NewPassword#123" },
+          "oldPassword",
+        ),
+      ).toEqual(["VALIDATION_OLD_PASSWORD_REQUIRED"]);
+      expect(
+        messagesFor(
+          changePasswordSchema,
+          { oldPassword: "OldPassword", newPassword: "12345" },
+          "newPassword",
+        ),
+      ).toEqual(["VALIDATION_NEW_PASSWORD_MIN|min=6"]);
     });
   });
 
