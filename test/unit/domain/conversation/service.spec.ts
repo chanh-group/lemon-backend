@@ -157,15 +157,17 @@ describe("ConversationService", () => {
       expect(joinConversationMock).toHaveBeenCalledWith([userA, userB], convId);
     });
 
-    it("joins both participants when a concurrent insert falls back to the existing conversation", async () => {
+    it("joins both participants when a concurrent insert returns the winning conversation", async () => {
+      const raceConvId = "0193a2b1-0000-7000-8000-000000000011";
       findUserByIdMock.mockResolvedValue({ id: userB });
       findDirectByParticipantsMock.mockResolvedValue(null);
-      createDirectConversationMock.mockResolvedValue(mockConvWithPartner);
+      createDirectConversationMock.mockResolvedValue({ ...mockConvWithPartner, id: raceConvId });
 
-      await service.getOrCreateDirect(userA, userB);
+      const result = await service.getOrCreateDirect(userA, userB);
 
+      expect(result.id).toBe(raceConvId);
       expect(createDirectConversationMock).toHaveBeenCalledWith(userA, userB);
-      expect(joinConversationMock).toHaveBeenCalledWith([userA, userB], convId);
+      expect(joinConversationMock).toHaveBeenCalledWith([userA, userB], raceConvId);
     });
 
     it("still returns the new conversation when the realtime join throws", async () => {
@@ -177,12 +179,15 @@ describe("ConversationService", () => {
       });
       const warn = vi.spyOn(Logger.prototype, "warn").mockReturnValue(undefined);
 
-      const result = await service.getOrCreateDirect(userA, userB);
+      try {
+        const result = await service.getOrCreateDirect(userA, userB);
 
-      expect(result.id).toBe(convId);
-      expect(createDirectConversationMock).toHaveBeenCalledWith(userA, userB);
-      expect(warn).toHaveBeenCalled();
-      warn.mockRestore();
+        expect(result.id).toBe(convId);
+        expect(createDirectConversationMock).toHaveBeenCalledWith(userA, userB);
+        expect(warn).toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
     });
   });
 

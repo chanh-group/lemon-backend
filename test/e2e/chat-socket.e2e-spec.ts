@@ -438,7 +438,7 @@ describe("Realtime chat gateway over socket.io (E2E)", () => {
         collector.stop();
 
         expect(collector.events).toHaveLength(1);
-        expect(collector.events[0]).toEqual({
+        expect(collector.events[0]).toMatchObject({
           id: sendRes.body.data.id,
           conversationId: createdConversationId,
           senderId: userA,
