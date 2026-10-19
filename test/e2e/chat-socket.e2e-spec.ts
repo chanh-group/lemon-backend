@@ -41,12 +41,14 @@ interface MessageNewPayload {
 }
 
 interface ReadUpdatedPayload {
+  conversationId: string;
   userId: string;
   lastReadMessageId: string;
   readAt: string;
 }
 
 interface MessageRevokedPayload {
+  conversationId: string;
   id: string;
   deletedAt: string;
 }
@@ -383,6 +385,7 @@ describe("Realtime chat gateway over socket.io (E2E)", () => {
 
         const readUpdated = await readPromise;
         expect(readUpdated).toEqual({
+          conversationId,
           userId: userB,
           lastReadMessageId: messageId,
           readAt: expect.any(String),
@@ -395,7 +398,7 @@ describe("Realtime chat gateway over socket.io (E2E)", () => {
           .expect(200);
 
         const revoked = await revokedPromise;
-        expect(revoked).toEqual({ id: messageId, deletedAt: expect.any(String) });
+        expect(revoked).toEqual({ conversationId, id: messageId, deletedAt: expect.any(String) });
       } finally {
         clientA.disconnect();
         clientB.disconnect();

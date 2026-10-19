@@ -38,7 +38,10 @@ export class RealtimeService {
   emitMessageRevoked(conversationId: string, payload: { id: string; deletedAt: Date }): void {
     if (!this.gateway?.server) return;
     try {
-      this.gateway.server.to(convRoom(conversationId)).emit("message:revoked", payload);
+      this.gateway.server.to(convRoom(conversationId)).emit("message:revoked", {
+        ...payload,
+        conversationId,
+      });
     } catch (err) {
       logger.warn(`Failed to emit message:revoked: ${String(err)}`);
     }
@@ -53,7 +56,10 @@ export class RealtimeService {
   ): void {
     if (!this.gateway?.server) return;
     try {
-      this.gateway.server.to(convRoom(conversationId)).emit("read:updated", payload);
+      this.gateway.server.to(convRoom(conversationId)).emit("read:updated", {
+        ...payload,
+        conversationId,
+      });
     } catch (err) {
       logger.warn(`Failed to emit read:updated: ${String(err)}`);
     }

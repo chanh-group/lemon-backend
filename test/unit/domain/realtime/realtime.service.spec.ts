@@ -54,6 +54,39 @@ describe("RealtimeService", () => {
     });
   });
 
+  describe("emitMessageRevoked", () => {
+    it("includes the conversation id in the event payload", () => {
+      const emit = vi.fn();
+      const service = createService(vi.fn().mockReturnValue({ emit }));
+      const deletedAt = new Date();
+
+      service.emitMessageRevoked("c1", { id: "m1", deletedAt });
+
+      expect(emit).toHaveBeenCalledWith("message:revoked", {
+        id: "m1",
+        deletedAt,
+        conversationId: "c1",
+      });
+    });
+  });
+
+  describe("emitReadUpdated", () => {
+    it("includes the conversation id in the event payload", () => {
+      const emit = vi.fn();
+      const service = createService(vi.fn().mockReturnValue({ emit }));
+      const readAt = new Date();
+
+      service.emitReadUpdated("c1", { userId: "u1", lastReadMessageId: "m1", readAt });
+
+      expect(emit).toHaveBeenCalledWith("read:updated", {
+        userId: "u1",
+        lastReadMessageId: "m1",
+        readAt,
+        conversationId: "c1",
+      });
+    });
+  });
+
   describe("joinConversation", () => {
     it("makes every socket of each participant join the conversation room", () => {
       const socketsJoin = vi.fn();
