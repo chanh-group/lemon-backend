@@ -14,9 +14,15 @@ import {
 import { Lang } from "../../utils/decorators.js";
 import { t } from "../../utils/i18n/index.js";
 import { messageOnly, ok, withMessage } from "../../utils/response.js";
-import { getAuthUser, type AuthUser } from "../shared.js";
-import { parseCursorPage } from "../shared.js";
-import { createStorySchema, type CreateStoryDto } from "./dto/request.js";
+import { getAuthUser, parseCursorPage, type AuthUser } from "../shared.js";
+import {
+  createStorySchema,
+  reactStorySchema,
+  replyStorySchema,
+  type CreateStoryDto,
+  type ReactStoryDto,
+  type ReplyStoryDto,
+} from "./dto/request.js";
 import { StoryService } from "./service.js";
 
 @Controller("stories")
@@ -72,6 +78,53 @@ export class StoryController {
     const page = parseCursorPage(cursor, limit);
     const data = await this.storyService.getViewers(userId, storyId, page.cursor, page.size);
     return ok(data);
+  }
+
+  @Post(":id/react")
+  @HttpCode(HttpStatus.OK)
+  async reactStory(
+    @Req() req: { user?: unknown },
+    @Param("id", ParseUUIDPipe) storyId: string,
+    @Body({ schema: reactStorySchema }) dto: ReactStoryDto,
+    @Lang() lang: string,
+  ) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    const data = await this.storyService.reactStory(userId, storyId, dto.emoji);
+    return withMessage(data, t("STORY_REACTION_ADDED", lang));
+  }
+
+  @Delete(":id/react")
+  async unreactStory(
+    @Req() req: { user?: unknown },
+    @Param("id", ParseUUIDPipe) storyId: string,
+    @Lang() lang: string,
+  ) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    await this.storyService.unreactStory(userId, storyId);
+    return messageOnly(t("STORY_REACTION_REMOVED", lang));
+  }
+
+  @Get(":id/reactions")
+  async getReactions(
+    @Req() req: { user?: unknown },
+    @Param("id", ParseUUIDPipe) storyId: string,
+  ) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    const data = await this.storyService.getReactions(userId, storyId);
+    return ok(data);
+  }
+
+  @Post(":id/reply")
+  @HttpCode(HttpStatus.CREATED)
+  async replyStory(
+    @Req() req: { user?: unknown },
+    @Param("id", ParseUUIDPipe) storyId: string,
+    @Body({ schema: replyStorySchema }) dto: ReplyStoryDto,
+    @Lang() lang: string,
+  ) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    const data = await this.storyService.replyStory(userId, storyId, dto);
+    return withMessage(data, t("STORY_REPLIED", lang));
   }
 
   @Delete(":id")
