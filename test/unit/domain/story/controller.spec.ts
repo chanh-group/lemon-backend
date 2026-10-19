@@ -6,12 +6,18 @@ import type { App } from "supertest/types.js";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { StoryController } from "../../../../src/domain/story/controller.js";
 import { StoryService } from "../../../../src/domain/story/service.js";
-import type { CreateStoryDto } from "../../../../src/domain/story/dto/request.js";
+import type {
+  CreateStoryDto,
+  ReplyStoryDto,
+} from "../../../../src/domain/story/dto/request.js";
 import type {
   StoryItemResponse,
+  StoryReactionResponse,
   StoryViewerResponse,
+  UserReactionResponse,
   UserStoryFeedResponse,
 } from "../../../../src/domain/story/dto/response.js";
+import type { MessageResponse } from "../../../../src/domain/message/dto/response.js";
 import { standardSchemaPipe } from "../../../../src/utils/validation.js";
 
 describe("StoryController", () => {
@@ -30,6 +36,14 @@ describe("StoryController", () => {
     ) => Promise<{ items: StoryViewerResponse[]; nextCursor?: string; hasMore: boolean }>
   >;
   let deleteStoryMock: Mock<(userId: string, storyId: string) => Promise<void>>;
+  let reactStoryMock: Mock<
+    (userId: string, storyId: string, emoji: string) => Promise<UserReactionResponse>
+  >;
+  let unreactStoryMock: Mock<(userId: string, storyId: string) => Promise<void>>;
+  let getReactionsMock: Mock<(userId: string, storyId: string) => Promise<StoryReactionResponse[]>>;
+  let replyStoryMock: Mock<
+    (userId: string, storyId: string, dto: ReplyStoryDto) => Promise<MessageResponse>
+  >;
 
   const mockStoryItem: StoryItemResponse = {
     id: "0193a2b1-0000-7000-8000-000000000001",
@@ -94,6 +108,52 @@ describe("StoryController", () => {
     deleteStoryMock = vi
       .fn<(userId: string, storyId: string) => Promise<void>>()
       .mockResolvedValue(undefined);
+    reactStoryMock = vi
+      .fn<(userId: string, storyId: string, emoji: string) => Promise<UserReactionResponse>>()
+      .mockResolvedValue({
+        storyId: mockStoryItem.id,
+        emoji: "❤️",
+        createdAt: new Date("2026-10-14T01:00:00Z"),
+      });
+    unreactStoryMock = vi
+      .fn<(userId: string, storyId: string) => Promise<void>>()
+      .mockResolvedValue(undefined);
+    getReactionsMock = vi
+      .fn<(userId: string, storyId: string) => Promise<StoryReactionResponse[]>>()
+      .mockResolvedValue([
+        {
+          user: {
+            id: "viewer-1",
+            username: "friend1",
+            fullName: "Friend One",
+            avatarUrl: null,
+          },
+          emoji: "❤️",
+          createdAt: new Date("2026-10-14T01:00:00Z"),
+        },
+      ]);
+    replyStoryMock = vi
+      .fn<(userId: string, storyId: string, dto: ReplyStoryDto) => Promise<MessageResponse>>()
+      .mockResolvedValue({
+        id: "msg-1",
+        conversationId: "conv-1",
+        senderId: "user-1",
+        kind: "TEXT",
+        body: "Awesome!",
+        storyId: mockStoryItem.id,
+        storyPreview: {
+          id: mockStoryItem.id,
+          kind: "IMAGE",
+          bucket: "lemon-stories",
+          objectKey: "stories/u/a.jpg",
+          caption: null,
+          background: null,
+        },
+        replyToId: null,
+        editedAt: null,
+        deletedAt: null,
+        createdAt: new Date("2026-10-14T01:00:00Z"),
+      });
 
     const mockService = {
       createStory: createStoryMock,
@@ -102,6 +162,10 @@ describe("StoryController", () => {
       viewStory: viewStoryMock,
       getViewers: getViewersMock,
       deleteStory: deleteStoryMock,
+      reactStory: reactStoryMock,
+      unreactStory: unreactStoryMock,
+      getReactions: getReactionsMock,
+      replyStory: replyStoryMock,
     } as unknown as StoryService;
 
     controller = new StoryController(mockService);
@@ -229,6 +293,108 @@ describe("StoryController", () => {
     });
   });
 
+  describe("reactStory", () => {
+    it("delegates to storyService.reactStory and returns withMessage (vi)", async () => {
+      const result = await controller.reactStory(
+        { user: { id: "user-2" } },
+        mockStoryItem.id,
+        { emoji: "❤️" },
+        "vi",
+      );
+
+      expect(reactStoryMock).toHaveBeenCalledWith("user-2", mockStoryItem.id, "❤️");
+      expect(result).toEqual({
+        success: true,
+        message: "Đã bày tỏ cảm xúc về story",
+        data: {
+          storyId: mockStoryItem.id,
+          emoji: "❤️",
+          createdAt: new Date("2026-10-14T01:00:00Z"),
+        },
+      });
+    });
+
+    it("localizes reaction message to en", async () => {
+      const result = await controller.reactStory(
+        { user: { id: "user-2" } },
+        mockStoryItem.id,
+        { emoji: "❤️" },
+        "en",
+      );
+
+      expect(result.message).toBe("Story reaction added");
+    });
+  });
+
+  describe("unreactStory", () => {
+    it("delegates to storyService.unreactStory and returns messageOnly (vi)", async () => {
+      const result = await controller.unreactStory(
+        { user: { id: "user-2" } },
+        mockStoryItem.id,
+        "vi",
+      );
+
+      expect(unreactStoryMock).toHaveBeenCalledWith("user-2", mockStoryItem.id);
+      expect(result).toEqual({
+        success: true,
+        message: "Đã gỡ cảm xúc khỏi story",
+      });
+    });
+
+    it("localizes unreact message to en", async () => {
+      const result = await controller.unreactStory(
+        { user: { id: "user-2" } },
+        mockStoryItem.id,
+        "en",
+      );
+
+      expect(result.message).toBe("Story reaction removed");
+    });
+  });
+
+  describe("getReactions", () => {
+    it("delegates to storyService.getReactions and wraps in response envelope", async () => {
+      const result = await controller.getReactions(
+        { user: { id: "user-1" } },
+        mockStoryItem.id,
+      );
+
+      expect(getReactionsMock).toHaveBeenCalledWith("user-1", mockStoryItem.id);
+      expect(result.success).toBe(true);
+      expect(result.message).toBe("OK");
+      expect(result.data).toHaveLength(1);
+    });
+  });
+
+  describe("replyStory", () => {
+    const replyDto = { body: "Awesome!" };
+
+    it("delegates to storyService.replyStory and returns withMessage (vi)", async () => {
+      const result = await controller.replyStory(
+        { user: { id: "user-2" } },
+        mockStoryItem.id,
+        replyDto,
+        "vi",
+      );
+
+      expect(replyStoryMock).toHaveBeenCalledWith("user-2", mockStoryItem.id, replyDto);
+      expect(result.success).toBe(true);
+      expect(result.message).toBe("Đã trả lời story");
+      expect(result.data.body).toBe("Awesome!");
+    });
+
+    it("localizes reply message to en", async () => {
+      const result = await controller.replyStory(
+        { user: { id: "user-2" } },
+        mockStoryItem.id,
+        replyDto,
+        "en",
+      );
+
+      expect(result.message).toBe("Story reply sent");
+    });
+  });
+
   describe("auth contract", () => {
     it("throws UNAUTHORIZED when req.user is absent", async () => {
       await expect(controller.getFeed({})).rejects.toMatchObject({ code: "UNAUTHORIZED" });
@@ -258,6 +424,10 @@ describe("StoryController", () => {
         viewStory: httpViewStory,
         getViewers: vi.fn(),
         deleteStory: vi.fn(),
+        reactStory: vi.fn(),
+        unreactStory: vi.fn(),
+        getReactions: vi.fn(),
+        replyStory: vi.fn(),
       } as unknown as StoryService;
 
       const moduleRef = await Test.createTestingModule({
