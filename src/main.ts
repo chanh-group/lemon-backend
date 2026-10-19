@@ -42,8 +42,11 @@ async function bootstrap() {
 
   app.enableShutdownHooks();
 
+  let shuttingDown = false;
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    process.once(signal, async () => {
+    process.on(signal, async () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
       await app.close();
       await redisIoAdapter.disconnect();
       process.exit(0);
