@@ -10,12 +10,18 @@ import {
 } from "@nestjs/websockets";
 import type { Server, Socket } from "socket.io";
 import { presenceOnlineKey, presenceUserKey, typingKey } from "../../utils/cache/keys.js";
+import {
+  PRESENCE_GRACE_MS,
+  PRESENCE_OTHER_NODE_TTL_SECONDS,
+  PRESENCE_TTL_SECONDS,
+} from "../../utils/cache/constants.js";
 import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
 import { InjectDrizzle } from "@nestjs/drizzle";
 import { and, eq, isNull } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { conversationParticipants } from "../conversation/schema.js";
+import { users } from "../user/schema.js";
 import { JWT_CONFIG } from "../auth/constants.js";
 import type { JwtConfig } from "../auth/jwt.js";
 
@@ -83,8 +89,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const currentConns = (this.userConnections.get(userId) ?? 0) + 1;
     this.userConnections.set(userId, currentConns);
 
-    // Update Redis presence (TTL 90s)
-    await this.setOnlinePresence(userId);
+    await this.setOnlinePresence(userId, currentConns);
 
     logger.log(
       `User connected: ${userId} (socket ${client.id}, active connections: ${currentConns})`,
@@ -99,12 +104,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (currentConns <= 0) {
       this.userConnections.delete(userId);
 
-      // Start 60-second grace period before marking offline
+      // Start grace period before marking offline; a reconnect within the window cancels it
+      const existingTimer = this.graceTimers.get(userId);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+      }
+
       const timer = setTimeout(async () => {
-        await this.setOfflinePresence(userId);
-        this.graceTimers.delete(userId);
-        logger.log(`User marked offline after 60s grace: ${userId}`);
-      }, 60000);
+        await this.finalizeOffline(userId);
+      }, PRESENCE_GRACE_MS);
 
       this.graceTimers.set(userId, timer);
     } else {
@@ -229,7 +237,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handlePresencePing(@ConnectedSocket() client: Socket): Promise<void> {
     const userId = client.data?.userId as string;
     if (!userId) return;
-    await this.setOnlinePresence(userId);
+    await this.setOnlinePresence(userId, this.userConnections.get(userId) ?? 1);
   }
 
   // --- Helper methods ---
@@ -265,13 +273,49 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  private async setOnlinePresence(userId: string): Promise<void> {
+  private async finalizeOffline(userId: string): Promise<void> {
+    this.graceTimers.delete(userId);
+
+    // Another node still heartbeats when the state key has a healthy remaining TTL —
+    // leave the user online (the reconnect may also have refreshed presence meanwhile).
+    if (this.redis) {
+      try {
+        const ttl = await this.redis.ttl(presenceUserKey(userId));
+        if (ttl > PRESENCE_OTHER_NODE_TTL_SECONDS) {
+          logger.log(
+            `Presence grace skipped for ${userId}: another node still heartbeats (ttl ${ttl}s)`,
+          );
+          return;
+        }
+      } catch (err) {
+        logger.warn(`Presence TTL check failed for ${userId}: ${String(err)}`);
+      }
+    }
+
+    await Promise.all([this.setOfflinePresence(userId), this.touchLastSeen(userId)]);
+    logger.log(`User marked offline after ${PRESENCE_GRACE_MS / 1000}s grace: ${userId}`);
+  }
+
+  private async touchLastSeen(userId: string): Promise<void> {
+    try {
+      await this.db.update(users).set({ lastSeenAt: new Date() }).where(eq(users.id, userId));
+    } catch (err) {
+      logger.warn(`Failed to touch lastSeen for ${userId}: ${String(err)}`);
+    }
+  }
+
+  private async setOnlinePresence(userId: string, conns: number): Promise<void> {
     if (!this.redis) return;
     try {
       const now = Date.now();
       await this.redis
         .pipeline()
-        .set(presenceUserKey(userId), JSON.stringify({ state: "online", lastSeen: now }), "EX", 90)
+        .set(
+          presenceUserKey(userId),
+          JSON.stringify({ state: "online", lastSeen: now, conns }),
+          "EX",
+          PRESENCE_TTL_SECONDS,
+        )
         .zadd(presenceOnlineKey(), now, userId)
         .exec();
     } catch (err) {

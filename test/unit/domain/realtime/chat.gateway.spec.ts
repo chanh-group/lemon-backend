@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { ChatGateway } from "../../../../src/domain/realtime/chat.gateway.js";
 import type { JwtConfig } from "../../../../src/domain/auth/jwt.js";
 import type { DrizzleDb } from "../../../../src/configs/database.js";
@@ -9,7 +9,17 @@ describe("ChatGateway", () => {
   let gateway: ChatGateway;
   let verifyAccessTokenMock: Mock;
   let dbSelectMock: Mock;
+  let dbUpdateMock: Mock;
+  let updateSetMock: Mock;
+  let updateWhereMock: Mock;
   let redisPipelineMock: Mock;
+  let pipelineSetMock: Mock;
+  let pipelineZaddMock: Mock;
+  let pipelineZremMock: Mock;
+  let redisTtlMock: Mock;
+  let mockJwt: JwtConfig;
+  let mockRedis: Redis;
+  let mockDb: DrizzleDb;
 
   const mockUserId = "0193a2b1-0000-7000-8000-000000000001";
   const mockConvId = "0193a2b1-0000-7000-8000-000000000010";
@@ -36,30 +46,44 @@ describe("ChatGateway", () => {
 
   beforeEach(() => {
     verifyAccessTokenMock = vi.fn();
-    const mockJwt = {
+    mockJwt = {
       verifyAccessToken: verifyAccessTokenMock,
     } as unknown as JwtConfig;
 
     dbSelectMock = vi.fn().mockImplementation(() => makeDb());
 
+    updateWhereMock = vi.fn().mockResolvedValue(undefined);
+    updateSetMock = vi.fn().mockReturnValue({ where: updateWhereMock });
+    dbUpdateMock = vi.fn().mockReturnValue({ set: updateSetMock });
+
+    pipelineSetMock = vi.fn().mockReturnThis();
+    pipelineZaddMock = vi.fn().mockReturnThis();
+    pipelineZremMock = vi.fn().mockReturnThis();
     redisPipelineMock = vi.fn().mockReturnValue({
-      set: vi.fn().mockReturnThis(),
-      zadd: vi.fn().mockReturnThis(),
-      zrem: vi.fn().mockReturnThis(),
+      set: pipelineSetMock,
+      zadd: pipelineZaddMock,
+      zrem: pipelineZremMock,
       exec: vi.fn().mockResolvedValue([]),
     });
 
-    const mockRedis = {
+    redisTtlMock = vi.fn().mockResolvedValue(-2);
+    mockRedis = {
       pipeline: redisPipelineMock,
       set: vi.fn().mockResolvedValue("OK"),
       del: vi.fn().mockResolvedValue(1),
+      ttl: redisTtlMock,
     } as unknown as Redis;
 
-    const mockDb = {
+    mockDb = {
       select: dbSelectMock,
+      update: dbUpdateMock,
     } as unknown as DrizzleDb;
 
     gateway = new ChatGateway(mockDb, mockJwt, mockRedis);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   interface MockSocketHandle {
@@ -184,6 +208,133 @@ describe("ChatGateway", () => {
         "error",
         expect.objectContaining({ code: "UNAUTHORIZED" }),
       );
+    });
+  });
+
+  describe("presence", () => {
+    it("stores online presence with the live connection count", async () => {
+      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
+
+      await gateway.handleConnection(client);
+
+      expect(pipelineSetMock).toHaveBeenCalledTimes(1);
+      const [key, payload, ex, ttl] = pipelineSetMock.mock.calls[0];
+      expect(key).toBe(`presence:${mockUserId}`);
+      expect(ex).toBe("EX");
+      expect(ttl).toBe(90);
+      expect(JSON.parse(payload as string)).toEqual({
+        state: "online",
+        lastSeen: expect.any(Number),
+        conns: 1,
+      });
+      expect(pipelineZaddMock).toHaveBeenCalledWith(
+        "presence:online",
+        expect.any(Number),
+        mockUserId,
+      );
+    });
+
+    it("presence:ping refreshes online presence with the tracked connection count", async () => {
+      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      const { client: first } = createMockSocket({ auth: { token: "valid-jwt" } });
+      const { client: second } = createMockSocket({ auth: { token: "valid-jwt" } });
+
+      await gateway.handleConnection(first);
+      await gateway.handleConnection(second);
+      await gateway.handlePresencePing(first);
+
+      expect(pipelineSetMock).toHaveBeenCalledTimes(3);
+      const lastCall = pipelineSetMock.mock.calls[pipelineSetMock.mock.calls.length - 1];
+      expect(JSON.parse(lastCall[1] as string)).toEqual({
+        state: "online",
+        lastSeen: expect.any(Number),
+        conns: 2,
+      });
+    });
+
+    it("skips marking offline when another node still heartbeats (ttl > 30)", async () => {
+      vi.useFakeTimers();
+      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
+
+      await gateway.handleConnection(client);
+      await gateway.handleDisconnect(client);
+
+      redisTtlMock.mockResolvedValue(60);
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(redisTtlMock).toHaveBeenCalledWith(`presence:${mockUserId}`);
+      expect(redisPipelineMock).toHaveBeenCalledTimes(1);
+      expect(pipelineZremMock).not.toHaveBeenCalled();
+      expect(dbUpdateMock).not.toHaveBeenCalled();
+    });
+
+    it("marks offline when no other node heartbeats (ttl <= 30)", async () => {
+      vi.useFakeTimers();
+      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
+
+      await gateway.handleConnection(client);
+      await gateway.handleDisconnect(client);
+
+      redisTtlMock.mockResolvedValue(-1);
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(redisPipelineMock).toHaveBeenCalledTimes(2);
+      expect(pipelineZremMock).toHaveBeenCalledWith("presence:online", mockUserId);
+      expect(dbUpdateMock).toHaveBeenCalled();
+      expect(updateSetMock).toHaveBeenCalledWith({ lastSeenAt: expect.any(Date) });
+      expect(updateWhereMock).toHaveBeenCalled();
+    });
+
+    it("reconnect within the grace period cancels the offline timer and refreshes presence", async () => {
+      vi.useFakeTimers();
+      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      const { client: first } = createMockSocket({ auth: { token: "valid-jwt" } });
+      const { client: second } = createMockSocket({ auth: { token: "valid-jwt" } });
+
+      await gateway.handleConnection(first);
+      await gateway.handleDisconnect(first);
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      await gateway.handleConnection(second);
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(redisPipelineMock).toHaveBeenCalledTimes(2);
+      expect(pipelineZremMock).not.toHaveBeenCalled();
+      const lastCall = pipelineSetMock.mock.calls[pipelineSetMock.mock.calls.length - 1];
+      expect(JSON.parse(lastCall[1] as string)).toMatchObject({ state: "online", conns: 1 });
+    });
+
+    it("still marks offline after grace when the lastSeen DB write fails", async () => {
+      vi.useFakeTimers();
+      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
+
+      await gateway.handleConnection(client);
+      await gateway.handleDisconnect(client);
+
+      redisTtlMock.mockResolvedValue(-1);
+      updateWhereMock.mockRejectedValue(new Error("db down"));
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(dbUpdateMock).toHaveBeenCalled();
+      expect(pipelineZremMock).toHaveBeenCalledWith("presence:online", mockUserId);
+    });
+
+    it("degrades safely in memory mode without a redis client", async () => {
+      vi.useFakeTimers();
+      const memoryGateway = new ChatGateway(mockDb, mockJwt, null);
+      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
+
+      await memoryGateway.handleConnection(client);
+      await memoryGateway.handleDisconnect(client);
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(redisPipelineMock).not.toHaveBeenCalled();
+      expect(dbUpdateMock).toHaveBeenCalled();
     });
   });
 

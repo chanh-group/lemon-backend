@@ -55,6 +55,12 @@ export const PURGE_LOCK_TTL_SECS = 60;
 export const PURGE_CRON_EXPRESSION = "*/5 * * * *";
 export const PURGE_BATCH_LIMIT = 500;
 
+// Realtime presence: per-user state key TTL, disconnect grace window, and the
+// remaining-TTL threshold above which another node is still heartbeating.
+export const PRESENCE_TTL_SECONDS = 90;
+export const PRESENCE_GRACE_MS = 60_000;
+export const PRESENCE_OTHER_NODE_TTL_SECONDS = 30;
+
 // ioredis client tuning (mirrors Rust ConnectionManager timeouts).
 export const REDIS_COMMAND_TIMEOUT_MS = 2000;
 export const REDIS_MAX_RETRIES_PER_REQUEST = 2;
