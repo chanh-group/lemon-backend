@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   editMessageSchema,
   sendMessageSchema,
 } from "../../../../src/domain/message/dto/request.js";
+
+function messagesFor(schema: z.ZodType, input: unknown, path?: string): string[] {
+  const result = schema.safeParse(input);
+  if (result.success) {
+    return [];
+  }
+  return result.error.issues
+    .filter((issue) => (path === undefined ? true : issue.path.join(".") === path))
+    .map((issue) => issue.message);
+}
 
 describe("Message DTOs", () => {
   describe("sendMessageSchema", () => {
@@ -37,36 +48,40 @@ describe("Message DTOs", () => {
       expect(result.success).toBe(true);
     });
 
-    it("rejects non-UUID clientMsgId", () => {
-      const result = sendMessageSchema.safeParse({
-        body: "Hello",
-        clientMsgId: "not-a-uuid",
-      });
-      expect(result.success).toBe(false);
+    it("rejects non-UUID clientMsgId with the VALIDATION_UUID_CLIENT_MSG key", () => {
+      expect(
+        messagesFor(sendMessageSchema, { body: "Hello", clientMsgId: "not-a-uuid" }, "clientMsgId"),
+      ).toEqual(["VALIDATION_UUID_CLIENT_MSG"]);
     });
 
-    it("rejects TEXT message with empty body", () => {
-      const result = sendMessageSchema.safeParse({
-        body: "",
-        kind: "TEXT",
-      });
-      expect(result.success).toBe(false);
+    it("rejects non-UUID replyToId with the VALIDATION_UUID_REPLY_TO key", () => {
+      expect(
+        messagesFor(sendMessageSchema, { body: "Hello", replyToId: "not-a-uuid" }, "replyToId"),
+      ).toEqual(["VALIDATION_UUID_REPLY_TO"]);
     });
 
-    it("rejects TEXT message with whitespace-only body", () => {
-      const result = sendMessageSchema.safeParse({
-        body: "     ",
-        kind: "TEXT",
-      });
-      expect(result.success).toBe(false);
+    it("rejects TEXT message with empty body with VALIDATION_MESSAGE_BODY_REQUIRED", () => {
+      expect(messagesFor(sendMessageSchema, { body: "", kind: "TEXT" }, "body")).toEqual([
+        "VALIDATION_MESSAGE_BODY_REQUIRED",
+      ]);
     });
 
-    it("rejects body longer than 4000 characters", () => {
-      const result = sendMessageSchema.safeParse({
-        body: "a".repeat(4001),
-        kind: "TEXT",
-      });
-      expect(result.success).toBe(false);
+    it("rejects TEXT message with whitespace-only body with VALIDATION_MESSAGE_BODY_REQUIRED", () => {
+      expect(messagesFor(sendMessageSchema, { body: "     ", kind: "TEXT" }, "body")).toEqual([
+        "VALIDATION_MESSAGE_BODY_REQUIRED",
+      ]);
+    });
+
+    it("rejects TEXT message with missing body with VALIDATION_MESSAGE_BODY_REQUIRED", () => {
+      expect(messagesFor(sendMessageSchema, { kind: "TEXT" }, "body")).toEqual([
+        "VALIDATION_MESSAGE_BODY_REQUIRED",
+      ]);
+    });
+
+    it("rejects body longer than 4000 characters with the encoded VALIDATION_BODY_MAX key", () => {
+      expect(
+        messagesFor(sendMessageSchema, { body: "a".repeat(4001), kind: "TEXT" }, "body"),
+      ).toEqual(["VALIDATION_BODY_MAX|max=4000"]);
     });
 
     it("accepts IMAGE or FILE kind without body", () => {
@@ -93,18 +108,16 @@ describe("Message DTOs", () => {
       expect(result.success).toBe(true);
     });
 
-    it("rejects empty body", () => {
-      const result = editMessageSchema.safeParse({
-        body: "",
-      });
-      expect(result.success).toBe(false);
+    it("rejects empty body with VALIDATION_MESSAGE_BODY_REQUIRED", () => {
+      expect(messagesFor(editMessageSchema, { body: "" }, "body")).toEqual([
+        "VALIDATION_MESSAGE_BODY_REQUIRED",
+      ]);
     });
 
-    it("rejects body longer than 4000 characters", () => {
-      const result = editMessageSchema.safeParse({
-        body: "x".repeat(4001),
-      });
-      expect(result.success).toBe(false);
+    it("rejects body longer than 4000 characters with the encoded VALIDATION_BODY_MAX key", () => {
+      expect(messagesFor(editMessageSchema, { body: "x".repeat(4001) }, "body")).toEqual([
+        "VALIDATION_BODY_MAX|max=4000",
+      ]);
     });
   });
 });

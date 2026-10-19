@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   createDirectSchema,
   markReadSchema,
 } from "../../../../src/domain/conversation/dto/request.js";
+
+function messagesFor(schema: z.ZodType, input: unknown, path?: string): string[] {
+  const result = schema.safeParse(input);
+  if (result.success) {
+    return [];
+  }
+  return result.error.issues
+    .filter((issue) => (path === undefined ? true : issue.path.join(".") === path))
+    .map((issue) => issue.message);
+}
 
 describe("Conversation DTOs", () => {
   describe("createDirectSchema", () => {
@@ -13,23 +24,20 @@ describe("Conversation DTOs", () => {
       expect(result.success).toBe(true);
     });
 
-    it("rejects a non-UUID string", () => {
-      const result = createDirectSchema.safeParse({
-        targetUserId: "not-a-uuid",
-      });
-      expect(result.success).toBe(false);
+    it("rejects a non-UUID string with the VALIDATION_UUID_TARGET_USER key", () => {
+      expect(
+        messagesFor(createDirectSchema, { targetUserId: "not-a-uuid" }, "targetUserId"),
+      ).toEqual(["VALIDATION_UUID_TARGET_USER"]);
     });
 
-    it("rejects an empty string", () => {
-      const result = createDirectSchema.safeParse({
-        targetUserId: "",
-      });
-      expect(result.success).toBe(false);
+    it("rejects an empty string with the VALIDATION_UUID_TARGET_USER key", () => {
+      expect(messagesFor(createDirectSchema, { targetUserId: "" }, "targetUserId")).toEqual([
+        "VALIDATION_UUID_TARGET_USER",
+      ]);
     });
 
-    it("rejects missing targetUserId", () => {
-      const result = createDirectSchema.safeParse({});
-      expect(result.success).toBe(false);
+    it("rejects missing targetUserId with VALIDATION_REQUIRED", () => {
+      expect(messagesFor(createDirectSchema, {}, "targetUserId")).toEqual(["VALIDATION_REQUIRED"]);
     });
   });
 
@@ -41,16 +49,14 @@ describe("Conversation DTOs", () => {
       expect(result.success).toBe(true);
     });
 
-    it("rejects an invalid UUID lastReadMessageId", () => {
-      const result = markReadSchema.safeParse({
-        lastReadMessageId: "abc-123",
-      });
-      expect(result.success).toBe(false);
+    it("rejects an invalid UUID with the VALIDATION_UUID_LAST_READ key", () => {
+      expect(
+        messagesFor(markReadSchema, { lastReadMessageId: "abc-123" }, "lastReadMessageId"),
+      ).toEqual(["VALIDATION_UUID_LAST_READ"]);
     });
 
-    it("rejects missing lastReadMessageId", () => {
-      const result = markReadSchema.safeParse({});
-      expect(result.success).toBe(false);
+    it("rejects missing lastReadMessageId with VALIDATION_REQUIRED", () => {
+      expect(messagesFor(markReadSchema, {}, "lastReadMessageId")).toEqual(["VALIDATION_REQUIRED"]);
     });
   });
 });

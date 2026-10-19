@@ -140,6 +140,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       .expect(201);
 
     expect(res.body.success).toBe(true);
+    expect(res.body.message).toBe("Cuộc trò chuyện sẵn sàng");
     expect(res.body.data).toBeDefined();
     expect(res.body.data.kind).toBe("DIRECT");
     expect(res.body.data.partner.id).toBe(userB);
@@ -158,6 +159,20 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       .expect(201);
 
     expect(res.body.success).toBe(true);
+    expect(res.body.message).toBe("Cuộc trò chuyện sẵn sàng");
+    expect(res.body.data.id).toBe(conversationId);
+  });
+
+  it("POST /api/conversations/direct - localizes the success message from accept-language", async () => {
+    const res = await request(app.getHttpServer())
+      .post("/api/conversations/direct")
+      .set("Authorization", `Bearer ${tokenA}`)
+      .set("accept-language", "en")
+      .send({ targetUserId: userB })
+      .expect(201);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.message).toBe("Conversation ready");
     expect(res.body.data.id).toBe(conversationId);
   });
 
@@ -168,8 +183,9 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       .expect(200);
 
     expect(res.body.success).toBe(true);
+    expect(res.body.message).toBe("OK");
     expect(Array.isArray(res.body.data)).toBe(true);
-    const found = res.body.data.find((c: any) => c.id === conversationId);
+    const found = res.body.data.find((c: { id: string }) => c.id === conversationId);
     expect(found).toBeDefined();
   });
 
@@ -186,6 +202,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       .expect(201);
 
     expect(res.body.success).toBe(true);
+    expect(res.body.message).toBe("Đã gửi tin nhắn");
     expect(res.body.data.body).toBe("Xin chao tu User Alpha qua JWT!");
     expect(res.body.data.senderId).toBe(userA);
     expect(res.body.data.clientMsgId).toBeUndefined();
@@ -203,6 +220,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       })
       .expect(201);
 
+    expect(retryRes.body.message).toBe("Đã gửi tin nhắn");
     expect(retryRes.body.data.id).toBe(messageId);
   });
 
@@ -218,6 +236,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       .expect(201);
 
     expect(res.body.success).toBe(true);
+    expect(res.body.message).toBe("Đã gửi tin nhắn");
     expect(res.body.data.body).toBe(xssPayload);
   });
 
@@ -228,9 +247,10 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       .expect(200);
 
     expect(res.body.success).toBe(true);
+    expect(res.body.message).toBe("OK");
     expect(res.body.data.items).toBeDefined();
     expect(res.body.data.items.length).toBeGreaterThan(0);
-    const ids = res.body.data.items.map((m: any) => m.id);
+    const ids = res.body.data.items.map((m: { id: string }) => m.id);
     expect(ids).toContain(messageId);
     expect(res.body.data.items[0].clientMsgId).toBeUndefined();
     expect(typeof res.body.data.hasMore).toBe("boolean");
@@ -244,6 +264,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       .expect(200);
 
     expect(res.body.success).toBe(true);
+    expect(res.body.message).toBe("Đã chỉnh sửa tin nhắn");
     expect(res.body.data.body).toBe("Noi dung da duoc chinh sua voi JWT!");
     expect(res.body.data.editedAt).not.toBeNull();
   });
@@ -255,7 +276,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       .send({ lastReadMessageId: messageId })
       .expect(200);
 
-    expect(res.body.success).toBe(true);
+    expect(res.body).toEqual({ success: true, message: "Đã đánh dấu đã đọc" });
   });
 
   it("DELETE /api/messages/:id - should revoke message with Bearer token", async () => {
@@ -265,6 +286,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       .expect(200);
 
     expect(res.body.success).toBe(true);
+    expect(res.body.message).toBe("Đã thu hồi tin nhắn");
     expect(res.body.data.deletedAt).not.toBeNull();
     expect(res.body.data.body).toBeNull();
     expect(res.body.data.clientMsgId).toBeUndefined();
@@ -317,6 +339,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
 
     expect(res.body.success).toBe(false);
     expect(res.body.code).toBe("VALIDATION_ERROR");
+    expect(res.body.message).toBe("body: Nội dung tin nhắn văn bản không được để trống");
   });
 
   it("POST /api/conversations/:id/messages - should reject message longer than 4000 chars with 422 VALIDATION_ERROR", async () => {
@@ -329,6 +352,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
 
     expect(res.body.success).toBe(false);
     expect(res.body.code).toBe("VALIDATION_ERROR");
+    expect(res.body.message).toBe("body: Nội dung tin nhắn tối đa 4000 ký tự");
   });
 
   it("PATCH /api/messages/:id - should return 400 MESSAGE_REVOKED if message was already revoked", async () => {
@@ -382,6 +406,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
 
     expect(res.body.success).toBe(false);
     expect(res.body.code).toBe("VALIDATION_ERROR");
+    expect(res.body.message).toBe("targetUserId: targetUserId phải là định dạng UUID hợp lệ");
   });
 
   it("POST /api/conversations/:id/read - should reject invalid lastReadMessageId format with 422 VALIDATION_ERROR", async () => {
@@ -393,6 +418,9 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
 
     expect(res.body.success).toBe(false);
     expect(res.body.code).toBe("VALIDATION_ERROR");
+    expect(res.body.message).toBe(
+      "lastReadMessageId: lastReadMessageId phải là định dạng UUID hợp lệ",
+    );
   });
 
   it("POST /api/conversations/:id/messages - clientMsgId idempotency returns existing message", async () => {

@@ -67,9 +67,20 @@
   "VALIDATION_URL": "URL không hợp lệ",
   "VALIDATION_BIO_MAX": "Bio tối đa {max} ký tự",
   "VALIDATION_ACCOUNT_CREDENTIALS_REQUIRED": "Tài khoản phải có passwordHash hoặc googleId (đăng nhập bên thứ ba)",
+  "VALIDATION_UUID_TARGET_USER": "targetUserId phải là định dạng UUID hợp lệ",
+  "VALIDATION_UUID_CLIENT_MSG": "clientMsgId phải là định dạng UUID hợp lệ",
+  "VALIDATION_UUID_REPLY_TO": "replyToId phải là định dạng UUID hợp lệ",
+  "VALIDATION_UUID_LAST_READ": "lastReadMessageId phải là định dạng UUID hợp lệ",
+  "VALIDATION_MESSAGE_BODY_REQUIRED": "Nội dung tin nhắn văn bản không được để trống",
+  "VALIDATION_BODY_MAX": "Nội dung tin nhắn tối đa {max} ký tự",
   "CONVERSATION_NOT_FOUND": "Không tìm thấy cuộc trò chuyện",
   "NOT_PARTICIPANT": "Không phải thành viên cuộc trò chuyện",
   "MESSAGE_NOT_FOUND": "Không tìm thấy tin nhắn",
   "MESSAGE_REVOKED": "Tin nhắn đã bị thu hồi",
-  "CANNOT_CHAT_WITH_SELF": "Không thể tự tạo hội thoại với chính mình"
+  "CANNOT_CHAT_WITH_SELF": "Không thể tự tạo hội thoại với chính mình",
+  "CONVERSATION_READY": "Cuộc trò chuyện sẵn sàng",
+  "MESSAGE_SENT": "Đã gửi tin nhắn",
+  "MESSAGE_EDITED": "Đã chỉnh sửa tin nhắn",
+  "MESSAGE_DELETED": "Đã thu hồi tin nhắn",
+  "MESSAGES_READ": "Đã đánh dấu đã đọc"
 }
