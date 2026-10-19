@@ -87,6 +87,23 @@ describe("RealtimeService", () => {
     });
   });
 
+  describe("emitFriendRequestReceived", () => {
+    it("emits the request to only the recipient's user room", () => {
+      const emit = vi.fn();
+      const to = vi.fn().mockReturnValue({ emit });
+      const service = createService(to);
+      const payload = {
+        id: "request-id",
+        user: { id: "requester-id", name: "Requester", username: "requester" },
+      };
+
+      service.emitFriendRequestReceived("recipient-id", payload);
+
+      expect(to).toHaveBeenCalledWith(userRoom("recipient-id"));
+      expect(emit).toHaveBeenCalledWith("friend:request:new", payload);
+    });
+  });
+
   describe("joinConversation", () => {
     it("makes every socket of each participant join the conversation room", () => {
       const socketsJoin = vi.fn();

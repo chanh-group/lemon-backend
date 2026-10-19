@@ -6,6 +6,8 @@ import type { RealtimeService } from "../../../../src/domain/realtime/realtime.s
 import type { Redis } from "ioredis";
 import type { Message } from "../../../../src/domain/message/schema.js";
 import { unreadCountKey } from "../../../../src/utils/cache/keys.js";
+import type { FriendService } from "../../../../src/domain/friend/service.js";
+import { BusinessError } from "../../../../src/utils/errors/business.js";
 
 describe("MessageService", () => {
   let service: MessageService;
@@ -18,6 +20,8 @@ describe("MessageService", () => {
   let resolveWriteMissMock: Mock;
 
   let getParticipantUserIdsMock: Mock;
+  let findConversationByIdMock: Mock;
+  let assertCanChatMock: Mock;
   let emitNewMessageMock: Mock;
   let emitMessageUpdatedMock: Mock;
   let emitMessageRevokedMock: Mock;
@@ -54,6 +58,8 @@ describe("MessageService", () => {
     resolveWriteMissMock = vi.fn();
 
     getParticipantUserIdsMock = vi.fn().mockResolvedValue([userA, userB]);
+    findConversationByIdMock = vi.fn().mockResolvedValue({ kind: "GROUP" });
+    assertCanChatMock = vi.fn().mockResolvedValue(undefined);
     emitNewMessageMock = vi.fn();
     emitMessageUpdatedMock = vi.fn();
     emitMessageRevokedMock = vi.fn();
@@ -69,7 +75,11 @@ describe("MessageService", () => {
 
     const mockConvRepo = {
       getParticipantUserIds: getParticipantUserIdsMock,
+      findById: findConversationByIdMock,
     } as unknown as ConversationRepository;
+    const mockFriendService = {
+      assertCanChat: assertCanChatMock,
+    } as unknown as FriendService;
 
     const mockRealtime = {
       emitNewMessage: emitNewMessageMock,
@@ -92,7 +102,7 @@ describe("MessageService", () => {
       pipeline: redisPipelineMock,
     } as unknown as Redis;
 
-    service = new MessageService(mockMessageRepo, mockConvRepo, mockRealtime, mockRedis);
+    service = new MessageService(mockMessageRepo, mockConvRepo, mockFriendService, mockRealtime, mockRedis);
   });
 
   describe("sendMessage", () => {
@@ -106,6 +116,19 @@ describe("MessageService", () => {
       await expect(
         service.sendMessage(userA, convId, { body: "   ", kind: "TEXT" }),
       ).rejects.toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
+    });
+
+    it("does not send direct messages unless both users are friends", async () => {
+      findConversationByIdMock.mockResolvedValue({
+        kind: "DIRECT",
+        partner: { id: userB },
+      });
+      assertCanChatMock.mockRejectedValue(new BusinessError("FRIENDSHIP_REQUIRED"));
+
+      await expect(
+        service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" }),
+      ).rejects.toMatchObject({ code: "FRIENDSHIP_REQUIRED" });
+      expect(createMessageMock).not.toHaveBeenCalled();
     });
 
     it("throws BAD_REQUEST if message body exceeds 4000 characters", async () => {

@@ -13,6 +13,7 @@ import { unreadCountKey } from "../../utils/cache/keys.js";
 import type { SendMessageDto } from "./dto/request.js";
 import type { MessageResponse, MessageTimelineResponse } from "./dto/response.js";
 import { toMessageResponse, toMessageTimeline } from "./dto/mapper.js";
+import { FriendService } from "../friend/service.js";
 
 export type { SendMessageDto };
 
@@ -21,6 +22,7 @@ export class MessageService {
   constructor(
     @Inject(MESSAGE_REPOSITORY) private readonly messageRepo: MessageRepository,
     @Inject(CONVERSATION_REPOSITORY) private readonly convRepo: ConversationRepository,
+    private readonly friendService: FriendService,
     private readonly realtimeService: RealtimeService,
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
   ) {}
@@ -35,6 +37,7 @@ export class MessageService {
     if (!participantIds.includes(senderId)) {
       throw new BusinessError("NOT_PARTICIPANT");
     }
+    await this.assertDirectConversationAllowed(conversationId, senderId);
 
     if ((!dto.kind || dto.kind === "TEXT") && (!dto.body || dto.body.trim().length === 0)) {
       throw new BusinessError("BAD_REQUEST");
@@ -99,10 +102,19 @@ export class MessageService {
     if (!participantIds.includes(userId)) {
       throw new BusinessError("NOT_PARTICIPANT");
     }
+    await this.assertDirectConversationAllowed(conversationId, userId);
 
     return toMessageTimeline(
       await this.messageRepo.findTimeline(conversationId, cursor, limit, after),
     );
+  }
+
+  private async assertDirectConversationAllowed(conversationId: string, userId: string): Promise<void> {
+    const conversation = await this.convRepo.findById(conversationId, userId);
+    if (!conversation) throw new BusinessError("NOT_PARTICIPANT");
+    if (conversation.kind === "DIRECT" && conversation.partner) {
+      await this.friendService.assertCanChat(userId, conversation.partner.id);
+    }
   }
 
   async editMessage(userId: string, messageId: string, body: string): Promise<MessageResponse> {
@@ -110,6 +122,7 @@ export class MessageService {
     if (!msg) {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
+    await this.assertDirectConversationAllowed(msg.conversationId, userId);
 
     if (msg.deletedAt) {
       throw new BusinessError("MESSAGE_REVOKED");
@@ -146,6 +159,7 @@ export class MessageService {
     if (!msg) {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
+    await this.assertDirectConversationAllowed(msg.conversationId, userId);
 
     if (msg.deletedAt) {
       throw new BusinessError("MESSAGE_REVOKED");

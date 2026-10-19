@@ -10,6 +10,7 @@ import { AuthModule } from "./domain/auth/module.js";
 import { ConversationModule } from "./domain/conversation/module.js";
 import { ExampleModule } from "./domain/example/module.js";
 import { FileModule } from "./domain/file/module.js";
+import { FriendModule } from "./domain/friend/module.js";
 import { MessageModule } from "./domain/message/module.js";
 import { NoteModule } from "./domain/note/module.js";
 import { RealtimeModule } from "./domain/realtime/realtime.module.js";
@@ -30,6 +31,7 @@ import { RequestLoggerMiddleware } from "./middleware/request-logger.js";
     RealtimeModule,
     ConversationModule,
     MessageModule,
+    FriendModule,
     StoryModule,
     NoteModule,
     FileModule,

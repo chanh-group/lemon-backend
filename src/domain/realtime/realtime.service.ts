@@ -65,6 +65,18 @@ export class RealtimeService {
     }
   }
 
+  emitFriendRequestReceived(
+    userId: string,
+    payload: { id: string; user: { id: string; name: string; username: string } },
+  ): void {
+    if (!this.gateway?.server) return;
+    try {
+      this.gateway.server.to(userRoom(userId)).emit("friend:request:new", payload);
+    } catch (err) {
+      logger.warn(`Failed to emit friend:request:new for user ${userId}: ${String(err)}`);
+    }
+  }
+
   /**
    * Make every socket of the given participants join the conversation room.
    * Best-effort: no server (REST-only bootstrap / unit tests) is a no-op and
