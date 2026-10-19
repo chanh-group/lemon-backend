@@ -2,6 +2,8 @@ import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
 import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
+import { BusinessError } from "../../utils/errors/business.js";
+import { isUniqueViolation } from "../../utils/errors/pg.js";
 import { users } from "../user/schema.js";
 import type { ConversationRepository, ConversationWithPartner } from "./repository.js";
 import { conversationParticipants, conversations } from "./schema.js";
@@ -60,65 +62,74 @@ export class ConversationPgRepository implements ConversationRepository {
   ): Promise<ConversationWithPartner> {
     const directKey = this.getDirectKey(userAId, userBId);
 
-    return await this.db.transaction(async (tx) => {
-      const [existingConv] = await tx
-        .select()
-        .from(conversations)
-        .where(eq(conversations.directKey, directKey))
-        .limit(1);
+    try {
+      return await this.db.transaction(async (tx) => {
+        const [existingConv] = await tx
+          .select()
+          .from(conversations)
+          .where(eq(conversations.directKey, directKey))
+          .limit(1);
 
-      let convId: string;
-      let createdAt: Date;
-      let lastMessagePreview: string | null = null;
-      let lastMessageAt: Date | null = null;
+        let convId: string;
+        let createdAt: Date;
+        let lastMessagePreview: string | null = null;
+        let lastMessageAt: Date | null = null;
 
-      if (existingConv) {
-        convId = existingConv.id;
-        createdAt = existingConv.createdAt;
-        lastMessagePreview = existingConv.lastMessagePreview;
-        lastMessageAt = existingConv.lastMessageAt;
-      } else {
-        const [newConv] = await tx
-          .insert(conversations)
-          .values({
-            kind: "DIRECT",
-            directKey,
+        if (existingConv) {
+          convId = existingConv.id;
+          createdAt = existingConv.createdAt;
+          lastMessagePreview = existingConv.lastMessagePreview;
+          lastMessageAt = existingConv.lastMessageAt;
+        } else {
+          const [newConv] = await tx
+            .insert(conversations)
+            .values({
+              kind: "DIRECT",
+              directKey,
+            })
+            .returning();
+          convId = newConv.id;
+          createdAt = newConv.createdAt;
+        }
+
+        // Ensure both participants exist
+        await tx
+          .insert(conversationParticipants)
+          .values([
+            { conversationId: convId, userId: userAId, role: "MEMBER" },
+            { conversationId: convId, userId: userBId, role: "MEMBER" },
+          ])
+          .onConflictDoNothing();
+
+        const [partner] = await tx
+          .select({
+            id: users.id,
+            username: users.username,
+            fullName: users.fullName,
+            avatarUrl: users.avatarUrl,
           })
-          .returning();
-        convId = newConv.id;
-        createdAt = newConv.createdAt;
+          .from(users)
+          .where(eq(users.id, userBId))
+          .limit(1);
+
+        return {
+          id: convId,
+          kind: "DIRECT",
+          directKey,
+          lastMessagePreview,
+          lastMessageAt,
+          createdAt,
+          partner,
+        };
+      });
+    } catch (err: unknown) {
+      if (isUniqueViolation(err, "conversations_direct_key_uq")) {
+        const existing = await this.findDirectByParticipants(userAId, userBId);
+        if (existing) return existing;
+        throw new BusinessError("CONFLICT");
       }
-
-      // Ensure both participants exist
-      await tx
-        .insert(conversationParticipants)
-        .values([
-          { conversationId: convId, userId: userAId, role: "MEMBER" },
-          { conversationId: convId, userId: userBId, role: "MEMBER" },
-        ])
-        .onConflictDoNothing();
-
-      const [partner] = await tx
-        .select({
-          id: users.id,
-          username: users.username,
-          fullName: users.fullName,
-          avatarUrl: users.avatarUrl,
-        })
-        .from(users)
-        .where(eq(users.id, userBId))
-        .limit(1);
-
-      return {
-        id: convId,
-        kind: "DIRECT",
-        directKey,
-        lastMessagePreview,
-        lastMessageAt,
-        createdAt,
-        partner,
-      };
-    });
+      throw err;
+    }
   }
 
   async findUserConversations(userId: string, limit = 20): Promise<ConversationWithPartner[]> {
