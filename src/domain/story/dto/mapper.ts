@@ -2,7 +2,12 @@ import type { Story } from "../schema.js";
 import type { UserSummary } from "../../user/dto/response.js";
 import type { StoryItemResponse, UserStoryFeedResponse } from "./response.js";
 
-export function toStoryItemResponse(story: Story, hasViewed?: boolean): StoryItemResponse {
+export function toStoryItemResponse(
+  story: Story,
+  hasViewed?: boolean,
+  myReaction?: string | null,
+  reactionsCount?: number,
+): StoryItemResponse {
   return {
     id: story.id,
     userId: story.userId,
@@ -18,6 +23,8 @@ export function toStoryItemResponse(story: Story, hasViewed?: boolean): StoryIte
     createdAt: story.createdAt,
     expiresAt: story.expiresAt,
     ...(hasViewed !== undefined && { hasViewed }),
+    ...(myReaction !== undefined && { myReaction }),
+    ...(reactionsCount !== undefined && { reactionsCount }),
   };
 }
 
@@ -41,12 +48,21 @@ export function groupStoriesByUser(
   usersMap: Map<string, UserSummary>,
   stories: Story[],
   viewedStoryIds: Set<string>,
+  userReactionsMap?: Map<string, string>,
+  reactionsCountMap?: Map<string, number>,
 ): UserStoryFeedResponse[] {
   const userStoriesMap = new Map<string, StoryItemResponse[]>();
 
   for (const story of stories) {
     const list = userStoriesMap.get(story.userId) ?? [];
-    list.push(toStoryItemResponse(story, viewedStoryIds.has(story.id)));
+    list.push(
+      toStoryItemResponse(
+        story,
+        viewedStoryIds.has(story.id),
+        userReactionsMap?.get(story.id) ?? null,
+        reactionsCountMap?.get(story.id) ?? 0,
+      ),
+    );
     userStoriesMap.set(story.userId, list);
   }
 

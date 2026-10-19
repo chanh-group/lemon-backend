@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createStorySchema } from "../../../../src/domain/story/dto/request.js";
+import {
+  createStorySchema,
+  reactStorySchema,
+  replyStorySchema,
+} from "../../../../src/domain/story/dto/request.js";
 
 describe("createStorySchema", () => {
   it("accepts a valid IMAGE payload", () => {
@@ -68,6 +72,51 @@ describe("createStorySchema", () => {
       durationMs: 10.5,
     });
 
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("reactStorySchema", () => {
+  it("accepts a valid emoji", () => {
+    const result = reactStorySchema.safeParse({ emoji: "❤️" });
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error("expected success");
+    expect(result.data.emoji).toBe("❤️");
+  });
+
+  it("trims whitespace from emoji", () => {
+    const result = reactStorySchema.safeParse({ emoji: "  🔥  " });
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error("expected success");
+    expect(result.data.emoji).toBe("🔥");
+  });
+
+  it("rejects empty emoji string", () => {
+    const result = reactStorySchema.safeParse({ emoji: "   " });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects emoji exceeding max length", () => {
+    const result = reactStorySchema.safeParse({ emoji: "a".repeat(33) });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("replyStorySchema", () => {
+  it("accepts valid reply body", () => {
+    const result = replyStorySchema.safeParse({ body: "What a view! 🌟" });
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error("expected success");
+    expect(result.data.body).toBe("What a view! 🌟");
+  });
+
+  it("rejects empty or whitespace-only reply body", () => {
+    const result = replyStorySchema.safeParse({ body: "   " });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects body exceeding 4000 characters", () => {
+    const result = replyStorySchema.safeParse({ body: "x".repeat(4001) });
     expect(result.success).toBe(false);
   });
 });

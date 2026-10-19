@@ -15,6 +15,8 @@ export interface StoryItemResponse {
   createdAt: Date;
   expiresAt: Date;
   hasViewed?: boolean;
+  myReaction?: string | null;
+  reactionsCount?: number;
 }
 
 export interface UserStoryFeedResponse {
@@ -25,4 +27,11 @@ export interface UserStoryFeedResponse {
 export interface StoryViewerResponse {
   user: UserSummary;
   viewedAt: Date;
+  reaction?: string | null;
+}
+
+export interface StoryReactionResponse {
+  user: UserSummary;
+  emoji: string;
+  createdAt: Date;
 }

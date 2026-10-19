@@ -50,6 +50,15 @@ describe("toStoryItemResponse", () => {
     const item = toStoryItemResponse(makeStory({ id: "s1", userId: "u1" }));
 
     expect(item).not.toHaveProperty("hasViewed");
+    expect(item).not.toHaveProperty("myReaction");
+    expect(item).not.toHaveProperty("reactionsCount");
+  });
+
+  it("includes myReaction and reactionsCount when provided", () => {
+    const item = toStoryItemResponse(makeStory({ id: "s1", userId: "u1" }), false, "❤️", 5);
+
+    expect(item.myReaction).toBe("❤️");
+    expect(item.reactionsCount).toBe(5);
   });
 });
 
@@ -92,4 +101,21 @@ describe("groupStoriesByUser", () => {
     expect(feed[0].user.id).toBe("ghost");
     expect(feed[0].stories).toHaveLength(1);
   });
+
+  it("populates myReaction and reactionsCount from lookup maps", () => {
+    const userReactions = new Map([["s1", "🔥"]]);
+    const reactionCounts = new Map([["s1", 3]]);
+
+    const feed = groupStoriesByUser(
+      users,
+      [makeStory({ id: "s1", userId: "u1" })],
+      new Set(),
+      userReactions,
+      reactionCounts,
+    );
+
+    expect(feed[0].stories[0].myReaction).toBe("🔥");
+    expect(feed[0].stories[0].reactionsCount).toBe(3);
+  });
 });
+
