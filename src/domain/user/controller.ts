@@ -1,5 +1,7 @@
-import { Controller, Get, Query } from "@nestjs/common";
+import { Controller, Get, Param, Query } from "@nestjs/common";
 import { CurrentUser, type AuthUser } from "../../utils/decorators.js";
+import { ok } from "../../utils/response.js";
+import { toUserResponse } from "./dto/mapper.js";
 import { UserService } from "./service.js";
 
 interface UserSearchResponse {
@@ -36,5 +38,19 @@ export class UserController {
       username: user.username,
       email: user.email,
     }));
+  }
+
+  @Get("by-username/:username")
+  async getByUsername(@Param("username") username: string) {
+    const cleanUsername = decodeURIComponent(username).trim().toLowerCase().replace(/^@/, "");
+    const user = await this.userService.findByUsername(cleanUsername);
+    return ok(user ? toUserResponse(user) : null);
+  }
+
+  @Get("by-email/:email")
+  async getByEmail(@Param("email") email: string) {
+    const cleanEmail = decodeURIComponent(email).trim().toLowerCase();
+    const user = await this.userService.findByEmail(cleanEmail);
+    return ok(user ? toUserResponse(user) : null);
   }
 }
