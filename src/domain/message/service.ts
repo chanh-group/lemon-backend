@@ -5,16 +5,13 @@ import {
   type ConversationRepository,
 } from "../conversation/repository.js";
 import { RealtimeService } from "../realtime/realtime.service.js";
-import {
-  MESSAGE_REPOSITORY,
-  type MessageRepository,
-  type MessageTimelineResult,
-} from "./repository.js";
-import { type Message } from "./schema.js";
+import { MESSAGE_REPOSITORY, type MessageRepository } from "./repository.js";
 import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
 import { unreadCountKey } from "../../utils/cache/keys.js";
 import type { SendMessageDto } from "./dto/request.js";
+import type { MessageResponse, MessageTimelineResponse } from "./dto/response.js";
+import { toMessageResponse, toMessageTimeline } from "./dto/mapper.js";
 
 export type { SendMessageDto };
 
@@ -31,7 +28,7 @@ export class MessageService {
     senderId: string,
     conversationId: string,
     dto: SendMessageDto,
-  ): Promise<Message> {
+  ): Promise<MessageResponse> {
     // 1. Verify that sender is a member of this conversation
     const participantIds = await this.convRepo.getParticipantUserIds(conversationId);
     if (!participantIds.includes(senderId)) {
@@ -56,6 +53,8 @@ export class MessageService {
       replyToId: dto.replyToId,
     });
 
+    const response = toMessageResponse(message);
+
     if (isNew) {
       const recipientIds = participantIds.filter((id) => id !== senderId);
 
@@ -73,10 +72,10 @@ export class MessageService {
       }
 
       // 4. Emit realtime event to the conversation room
-      this.realtimeService.emitNewMessage(conversationId, message);
+      this.realtimeService.emitNewMessage(conversationId, response);
     }
 
-    return message;
+    return response;
   }
 
   async getTimeline(
@@ -85,16 +84,18 @@ export class MessageService {
     cursor?: string,
     limit?: number,
     after?: string,
-  ): Promise<MessageTimelineResult> {
+  ): Promise<MessageTimelineResponse> {
     const participantIds = await this.convRepo.getParticipantUserIds(conversationId);
     if (!participantIds.includes(userId)) {
       throw new BusinessError("NOT_PARTICIPANT");
     }
 
-    return await this.messageRepo.findTimeline(conversationId, cursor, limit, after);
+    return toMessageTimeline(
+      await this.messageRepo.findTimeline(conversationId, cursor, limit, after),
+    );
   }
 
-  async editMessage(userId: string, messageId: string, body: string): Promise<Message> {
+  async editMessage(userId: string, messageId: string, body: string): Promise<MessageResponse> {
     const msg = await this.messageRepo.findById(messageId);
     if (!msg) {
       throw new BusinessError("MESSAGE_NOT_FOUND");
@@ -125,11 +126,12 @@ export class MessageService {
       throw new BusinessError("INTERNAL_SERVER_ERROR" as any);
     }
 
-    this.realtimeService.emitMessageUpdated(updated.conversationId, updated);
-    return updated;
+    const response = toMessageResponse(updated);
+    this.realtimeService.emitMessageUpdated(response.conversationId, response);
+    return response;
   }
 
-  async revokeMessage(userId: string, messageId: string): Promise<Message> {
+  async revokeMessage(userId: string, messageId: string): Promise<MessageResponse> {
     const msg = await this.messageRepo.findById(messageId);
     if (!msg) {
       throw new BusinessError("MESSAGE_NOT_FOUND");
@@ -148,10 +150,11 @@ export class MessageService {
       throw new BusinessError("INTERNAL_SERVER_ERROR" as any);
     }
 
-    this.realtimeService.emitMessageRevoked(revoked.conversationId, {
-      id: revoked.id,
-      deletedAt: revoked.deletedAt!,
+    const response = toMessageResponse(revoked);
+    this.realtimeService.emitMessageRevoked(response.conversationId, {
+      id: response.id,
+      deletedAt: response.deletedAt!,
     });
-    return revoked;
+    return response;
   }
 }

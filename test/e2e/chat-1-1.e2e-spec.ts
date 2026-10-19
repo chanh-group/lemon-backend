@@ -143,6 +143,9 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     expect(res.body.data).toBeDefined();
     expect(res.body.data.kind).toBe("DIRECT");
     expect(res.body.data.partner.id).toBe(userB);
+    expect(res.body.data.directKey).toBeUndefined();
+    expect(res.body.data.lastReadMessageId).toBeUndefined();
+    expect(typeof res.body.data.unreadCount).toBe("number");
 
     conversationId = res.body.data.id;
   });
@@ -185,6 +188,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.body).toBe("Xin chao tu User Alpha qua JWT!");
     expect(res.body.data.senderId).toBe(userA);
+    expect(res.body.data.clientMsgId).toBeUndefined();
 
     messageId = res.body.data.id;
 
@@ -228,6 +232,8 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     expect(res.body.data.items.length).toBeGreaterThan(0);
     const ids = res.body.data.items.map((m: any) => m.id);
     expect(ids).toContain(messageId);
+    expect(res.body.data.items[0].clientMsgId).toBeUndefined();
+    expect(typeof res.body.data.hasMore).toBe("boolean");
   });
 
   it("PATCH /api/messages/:id - should edit own message with Bearer token", async () => {
@@ -260,6 +266,8 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
 
     expect(res.body.success).toBe(true);
     expect(res.body.data.deletedAt).not.toBeNull();
+    expect(res.body.data.body).toBeNull();
+    expect(res.body.data.clientMsgId).toBeUndefined();
   });
 
   // --- EDGE CASES & AUTHORIZATION TESTS ---

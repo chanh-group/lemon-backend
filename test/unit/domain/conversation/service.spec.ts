@@ -116,7 +116,10 @@ describe("ConversationService", () => {
 
       const result = await service.getOrCreateDirect(userA, userB);
 
-      expect(result).toBe(mockConvWithPartner);
+      expect(result.id).toBe(convId);
+      expect(result.partner?.id).toBe(userB);
+      expect(result).not.toHaveProperty("directKey");
+      expect(result).not.toHaveProperty("lastReadMessageId");
       expect(createDirectConversationMock).not.toHaveBeenCalled();
     });
 
@@ -127,8 +130,33 @@ describe("ConversationService", () => {
 
       const result = await service.getOrCreateDirect(userA, userB);
 
-      expect(result).toBe(mockConvWithPartner);
+      expect(result.id).toBe(convId);
+      expect(result).not.toHaveProperty("directKey");
       expect(createDirectConversationMock).toHaveBeenCalledWith(userA, userB);
+    });
+  });
+
+  describe("listConversations", () => {
+    it("returns mapped DTOs without directKey or lastReadMessageId", async () => {
+      findUserConversationsMock.mockResolvedValue([{ ...mockConvWithPartner }]);
+
+      const result = await service.listConversations(userA, 20);
+
+      expect(findUserConversationsMock).toHaveBeenCalledWith(userA, 20);
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe(convId);
+      expect(result[0].partner?.isOnline).toBe(true);
+      expect(result[0]).not.toHaveProperty("directKey");
+      expect(result[0]).not.toHaveProperty("lastReadMessageId");
+    });
+
+    it("maps unreadCount and presence enriched from Redis", async () => {
+      findUserConversationsMock.mockResolvedValue([{ ...mockConvWithPartner }]);
+
+      const result = await service.listConversations(userA);
+
+      expect(result[0].unreadCount).toBe(3);
+      expect(result[0].partner?.isOnline).toBe(true);
     });
   });
 
@@ -158,6 +186,8 @@ describe("ConversationService", () => {
 
       expect(result.unreadCount).toBe(3);
       expect(result.partner?.isOnline).toBe(true);
+      expect(result).not.toHaveProperty("directKey");
+      expect(result).not.toHaveProperty("lastReadMessageId");
     });
   });
 

@@ -1,15 +1,13 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { BusinessError } from "../../utils/errors/business.js";
 import { USER_REPOSITORY, type UserRepository } from "../user/repository.js";
-import {
-  CONVERSATION_REPOSITORY,
-  type ConversationRepository,
-  type ConversationWithPartner,
-} from "./repository.js";
+import { CONVERSATION_REPOSITORY, type ConversationRepository } from "./repository.js";
 import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
 import { presenceUserKey, unreadCountKey } from "../../utils/cache/keys.js";
 import { RealtimeService } from "../realtime/realtime.service.js";
+import type { ConversationResponse } from "./dto/response.js";
+import { toConversationResponse } from "./dto/mapper.js";
 
 @Injectable()
 export class ConversationService {
@@ -20,7 +18,7 @@ export class ConversationService {
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
   ) {}
 
-  async getOrCreateDirect(userId: string, targetUserId: string): Promise<ConversationWithPartner> {
+  async getOrCreateDirect(userId: string, targetUserId: string): Promise<ConversationResponse> {
     if (!targetUserId || typeof targetUserId !== "string" || targetUserId.trim().length === 0) {
       throw new BusinessError("BAD_REQUEST");
     }
@@ -36,13 +34,15 @@ export class ConversationService {
 
     const existing = await this.convRepo.findDirectByParticipants(userId, targetUserId);
     if (existing) {
-      return existing;
+      return toConversationResponse(existing);
     }
 
-    return await this.convRepo.createDirectConversation(userId, targetUserId);
+    return toConversationResponse(
+      await this.convRepo.createDirectConversation(userId, targetUserId),
+    );
   }
 
-  async listConversations(userId: string, limit = 20): Promise<ConversationWithPartner[]> {
+  async listConversations(userId: string, limit = 20): Promise<ConversationResponse[]> {
     const list = await this.convRepo.findUserConversations(userId, limit);
 
     // Enrich with unread counts and presence from Redis
@@ -86,10 +86,10 @@ export class ConversationService {
       }
     }
 
-    return list;
+    return list.map(toConversationResponse);
   }
 
-  async getById(conversationId: string, userId: string): Promise<ConversationWithPartner> {
+  async getById(conversationId: string, userId: string): Promise<ConversationResponse> {
     const exists = await this.convRepo.existsById(conversationId);
     if (!exists) {
       throw new BusinessError("CONVERSATION_NOT_FOUND");
@@ -131,7 +131,7 @@ export class ConversationService {
       }
     }
 
-    return conv;
+    return toConversationResponse(conv);
   }
 
   async markAsRead(

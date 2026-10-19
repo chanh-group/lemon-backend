@@ -107,9 +107,23 @@ describe("MessageService", () => {
 
       const res = await service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" });
 
-      expect(res).toBe(mockMessage);
+      expect(res).not.toBe(mockMessage);
+      expect(res.id).toBe(msgId);
+      expect(res.body).toBe("Hello");
+      expect(res).not.toHaveProperty("clientMsgId");
       expect(redisPipelineMock).toHaveBeenCalled();
-      expect(emitNewMessageMock).toHaveBeenCalledWith(convId, mockMessage);
+      expect(emitNewMessageMock).toHaveBeenCalledWith(convId, res);
+    });
+
+    it("does not emit or increment unread for idempotent retries", async () => {
+      createMessageMock.mockResolvedValue({ message: mockMessage, isNew: false });
+
+      const res = await service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" });
+
+      expect(res.id).toBe(msgId);
+      expect(res).not.toHaveProperty("clientMsgId");
+      expect(redisPipelineMock).not.toHaveBeenCalled();
+      expect(emitNewMessageMock).not.toHaveBeenCalled();
     });
   });
 
@@ -126,6 +140,9 @@ describe("MessageService", () => {
       const res = await service.getTimeline(userA, convId);
 
       expect(res.items).toHaveLength(1);
+      expect(res.items[0].id).toBe(msgId);
+      expect(res.items[0]).not.toHaveProperty("clientMsgId");
+      expect(res.hasMore).toBe(false);
       expect(findTimelineMock).toHaveBeenCalledWith(convId, undefined, undefined, undefined);
     });
   });
@@ -171,7 +188,8 @@ describe("MessageService", () => {
       const res = await service.editMessage(userA, msgId, "Updated");
 
       expect(res.body).toBe("Updated");
-      expect(emitMessageUpdatedMock).toHaveBeenCalledWith(convId, updatedMsg);
+      expect(res).not.toHaveProperty("clientMsgId");
+      expect(emitMessageUpdatedMock).toHaveBeenCalledWith(convId, res);
     });
   });
 
@@ -209,6 +227,8 @@ describe("MessageService", () => {
       const res = await service.revokeMessage(userA, msgId);
 
       expect(res.deletedAt).toBe(deletedAt);
+      expect(res.body).toBeNull();
+      expect(res).not.toHaveProperty("clientMsgId");
       expect(emitMessageRevokedMock).toHaveBeenCalledWith(convId, { id: msgId, deletedAt });
     });
   });
