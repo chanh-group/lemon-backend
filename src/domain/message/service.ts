@@ -133,7 +133,7 @@ export class MessageService {
 
     const updated = await this.messageRepo.updateBody(messageId, userId, body);
     if (!updated) {
-      throw new BusinessError("INTERNAL_SERVER_ERROR" as any);
+      return await this.resolveWriteMiss(messageId, userId, msg.conversationId);
     }
 
     const response = toMessageResponse(updated);
@@ -157,7 +157,7 @@ export class MessageService {
 
     const revoked = await this.messageRepo.softDelete(messageId, userId);
     if (!revoked) {
-      throw new BusinessError("INTERNAL_SERVER_ERROR" as any);
+      return await this.resolveWriteMiss(messageId, userId, msg.conversationId);
     }
 
     const response = toMessageResponse(revoked);
@@ -166,5 +166,17 @@ export class MessageService {
       deletedAt: response.deletedAt!,
     });
     return response;
+  }
+
+  private async resolveWriteMiss(
+    messageId: string,
+    userId: string,
+    conversationId: string,
+  ): Promise<MessageResponse> {
+    const missed = await this.messageRepo.resolveWriteMiss(messageId, userId, conversationId);
+    if (!missed) {
+      throw new BusinessError("MESSAGE_NOT_FOUND");
+    }
+    return toMessageResponse(missed);
   }
 }

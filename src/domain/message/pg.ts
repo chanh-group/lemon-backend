@@ -143,6 +143,25 @@ export class MessagePgRepository implements MessageRepository {
     return msg ?? null;
   }
 
+  async resolveWriteMiss(
+    messageId: string,
+    userId: string,
+    conversationId: string,
+  ): Promise<Message | null> {
+    const [msg] = await this.db
+      .select()
+      .from(messages)
+      .where(
+        and(
+          eq(messages.id, messageId),
+          eq(messages.conversationId, conversationId),
+          eq(messages.senderId, userId),
+        ),
+      )
+      .limit(1);
+    return msg ?? null;
+  }
+
   async updateBody(messageId: string, senderId: string, body: string): Promise<Message | null> {
     return await this.db.transaction(async (tx) => {
       const [updated] = await tx

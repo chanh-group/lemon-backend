@@ -32,6 +32,11 @@ export interface MessageRepository {
     after?: string,
   ): Promise<MessageTimelineResult>;
   findById(messageId: string): Promise<Message | null>;
+  resolveWriteMiss(
+    messageId: string,
+    userId: string,
+    conversationId: string,
+  ): Promise<Message | null>;
   updateBody(messageId: string, senderId: string, body: string): Promise<Message | null>;
   softDelete(messageId: string, senderId: string): Promise<Message | null>;
 }

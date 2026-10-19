@@ -15,6 +15,7 @@ describe("MessageService", () => {
   let findTimelineMock: Mock;
   let updateBodyMock: Mock;
   let softDeleteMock: Mock;
+  let resolveWriteMissMock: Mock;
 
   let getParticipantUserIdsMock: Mock;
   let emitNewMessageMock: Mock;
@@ -50,6 +51,7 @@ describe("MessageService", () => {
     findTimelineMock = vi.fn();
     updateBodyMock = vi.fn();
     softDeleteMock = vi.fn();
+    resolveWriteMissMock = vi.fn();
 
     getParticipantUserIdsMock = vi.fn().mockResolvedValue([userA, userB]);
     emitNewMessageMock = vi.fn();
@@ -62,6 +64,7 @@ describe("MessageService", () => {
       findTimeline: findTimelineMock,
       updateBody: updateBodyMock,
       softDelete: softDeleteMock,
+      resolveWriteMiss: resolveWriteMissMock,
     } as unknown as MessageRepository;
 
     const mockConvRepo = {
@@ -251,6 +254,38 @@ describe("MessageService", () => {
       expect(res.body).toBe("Updated");
       expect(res).not.toHaveProperty("clientMsgId");
       expect(emitMessageUpdatedMock).toHaveBeenCalledWith(convId, res);
+      expect(resolveWriteMissMock).not.toHaveBeenCalled();
+    });
+
+    it("returns the concurrently revoked message without rewriting or emitting", async () => {
+      const deletedAt = new Date();
+      const revoked = { ...mockMessage, body: null, deletedAt };
+      findByIdMock.mockResolvedValue(mockMessage);
+      updateBodyMock.mockResolvedValue(null);
+      resolveWriteMissMock.mockResolvedValue(revoked);
+
+      const res = await service.editMessage(userA, msgId, "Updated");
+
+      expect(res.id).toBe(msgId);
+      expect(res.body).toBeNull();
+      expect(res.deletedAt).toBe(deletedAt);
+      expect(res).not.toHaveProperty("clientMsgId");
+      expect(updateBodyMock).toHaveBeenCalledTimes(1);
+      expect(resolveWriteMissMock).toHaveBeenCalledTimes(1);
+      expect(resolveWriteMissMock).toHaveBeenCalledWith(msgId, userA, convId);
+      expect(emitMessageUpdatedMock).not.toHaveBeenCalled();
+    });
+
+    it("throws MESSAGE_NOT_FOUND when the edit target vanished and cannot be resolved", async () => {
+      findByIdMock.mockResolvedValue(mockMessage);
+      updateBodyMock.mockResolvedValue(null);
+      resolveWriteMissMock.mockResolvedValue(null);
+
+      await expect(service.editMessage(userA, msgId, "Updated")).rejects.toThrow(
+        expect.objectContaining({ code: "MESSAGE_NOT_FOUND" }),
+      );
+      expect(resolveWriteMissMock).toHaveBeenCalledWith(msgId, userA, convId);
+      expect(emitMessageUpdatedMock).not.toHaveBeenCalled();
     });
   });
 
@@ -291,6 +326,38 @@ describe("MessageService", () => {
       expect(res.body).toBeNull();
       expect(res).not.toHaveProperty("clientMsgId");
       expect(emitMessageRevokedMock).toHaveBeenCalledWith(convId, { id: msgId, deletedAt });
+      expect(resolveWriteMissMock).not.toHaveBeenCalled();
+    });
+
+    it("returns the already-revoked message without re-deleting or emitting", async () => {
+      const deletedAt = new Date();
+      const revoked = { ...mockMessage, body: null, deletedAt };
+      findByIdMock.mockResolvedValue(mockMessage);
+      softDeleteMock.mockResolvedValue(null);
+      resolveWriteMissMock.mockResolvedValue(revoked);
+
+      const res = await service.revokeMessage(userA, msgId);
+
+      expect(res.id).toBe(msgId);
+      expect(res.body).toBeNull();
+      expect(res.deletedAt).toBe(deletedAt);
+      expect(res).not.toHaveProperty("clientMsgId");
+      expect(softDeleteMock).toHaveBeenCalledTimes(1);
+      expect(resolveWriteMissMock).toHaveBeenCalledTimes(1);
+      expect(resolveWriteMissMock).toHaveBeenCalledWith(msgId, userA, convId);
+      expect(emitMessageRevokedMock).not.toHaveBeenCalled();
+    });
+
+    it("throws MESSAGE_NOT_FOUND when the revoke target vanished and cannot be resolved", async () => {
+      findByIdMock.mockResolvedValue(mockMessage);
+      softDeleteMock.mockResolvedValue(null);
+      resolveWriteMissMock.mockResolvedValue(null);
+
+      await expect(service.revokeMessage(userA, msgId)).rejects.toThrow(
+        expect.objectContaining({ code: "MESSAGE_NOT_FOUND" }),
+      );
+      expect(resolveWriteMissMock).toHaveBeenCalledWith(msgId, userA, convId);
+      expect(emitMessageRevokedMock).not.toHaveBeenCalled();
     });
   });
 });

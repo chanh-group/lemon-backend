@@ -12,6 +12,7 @@ import {
   errorStatus,
   isAppError,
   toAppError,
+  type AppError,
 } from "../../../../src/utils/errors/app.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
 import { SystemError } from "../../../../src/utils/errors/system.js";
@@ -61,5 +62,31 @@ describe("toAppError", () => {
     expect(codeForStatus(404)).toBe("NOT_FOUND");
     expect(codeForStatus(503)).toBe("SERVICE_UNAVAILABLE");
     expect(codeForStatus(599)).toBe("INTERNAL_SERVER_ERROR");
+  });
+});
+
+describe("errorStatus", () => {
+  it("keeps the exact business-code lookup as the first branch", () => {
+    expect(errorStatus(new BusinessError("MESSAGE_NOT_FOUND"))).toBe(404);
+    expect(errorStatus(new BusinessError("MESSAGE_REVOKED"))).toBe(400);
+  });
+
+  it("keeps the exact system-kind lookup", () => {
+    expect(errorStatus(new SystemError("cache", "redis down"))).toBe(503);
+    expect(errorStatus(new SystemError("internal", "boom"))).toBe(500);
+  });
+
+  it("falls back to the dictionary status for a system code smuggled into a business error", () => {
+    expect(errorStatus(new BusinessError("SERVICE_UNAVAILABLE" as never))).toBe(503);
+  });
+
+  it("falls back to the dictionary status matched by message when no code is present", () => {
+    const malformed = { message: "MESSAGE_NOT_FOUND" } as unknown as AppError;
+    expect(errorStatus(malformed)).toBe(404);
+  });
+
+  it("defaults to 500 when neither code nor message matches", () => {
+    expect(errorStatus(new BusinessError("NOPE" as never))).toBe(500);
+    expect(errorStatus({ message: "boom" } as unknown as AppError)).toBe(500);
   });
 });

@@ -70,6 +70,8 @@ const existingRow: Message = {
   createdAt: new Date("2026-10-19T00:00:00Z"),
 };
 
+const messageId = existingRow.id;
+
 const uniqueViolation = { code: "23505", constraint: "messages_client_msg_uq" };
 
 describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
@@ -201,5 +203,42 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
     expect(setMock).toHaveBeenCalledWith(
       expect.objectContaining({ lastMessagePreview: "[Tệp đính kèm]" }),
     );
+  });
+});
+
+describe("MessagePgRepository.resolveWriteMiss", () => {
+  it("scopes the read to id, conversation and sender without filtering revoked rows", async () => {
+    const { db, dbSelect } = makeDb();
+    const revokedRow: Message = {
+      ...existingRow,
+      body: null,
+      deletedAt: new Date("2026-10-19T01:00:00Z"),
+    };
+    dbSelect.limitMock.mockResolvedValueOnce([revokedRow]);
+    const repo = new MessagePgRepository(db);
+
+    const result = await repo.resolveWriteMiss(messageId, senderId, conversationId);
+
+    expect(result).toEqual(revokedRow);
+    expect(dbSelect.fromMock).toHaveBeenCalledWith(messages);
+    expect(dbSelect.limitMock).toHaveBeenCalledWith(1);
+    const lookup = render(dbSelect.whereMock.mock.calls[0][0]);
+    expect(lookup.sql).toContain('"messages"."id" =');
+    expect(lookup.sql).toContain('"messages"."conversation_id" =');
+    expect(lookup.sql).toContain('"messages"."sender_id" =');
+    expect(lookup.sql).not.toContain("deleted_at");
+    expect(lookup.params).toEqual([messageId, conversationId, senderId]);
+  });
+
+  it("returns null when no row matches the write scope", async () => {
+    const { db, dbSelect } = makeDb();
+    dbSelect.limitMock.mockResolvedValueOnce([]);
+    const repo = new MessagePgRepository(db);
+
+    const result = await repo.resolveWriteMiss(messageId, senderId, conversationId);
+
+    expect(result).toBeNull();
+    const lookup = render(dbSelect.whereMock.mock.calls[0][0]);
+    expect(lookup.params).toEqual([messageId, conversationId, senderId]);
   });
 });
