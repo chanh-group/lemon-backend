@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { Logger } from "@nestjs/common";
 import { ConversationService } from "../../../../src/domain/conversation/service.js";
 import type {
   ConversationRepository,
@@ -6,6 +7,7 @@ import type {
 } from "../../../../src/domain/conversation/repository.js";
 import type { UserRepository } from "../../../../src/domain/user/repository.js";
 import type { RealtimeService } from "../../../../src/domain/realtime/realtime.service.js";
+import { unreadCountKey } from "../../../../src/utils/cache/keys.js";
 import type { Redis } from "ioredis";
 
 describe("ConversationService", () => {
@@ -17,11 +19,19 @@ describe("ConversationService", () => {
   let existsByIdMock: Mock;
   let findByIdMock: Mock;
   let updateLastReadMock: Mock;
+  let countUnreadMock: Mock;
 
   let findUserByIdMock: Mock;
   let emitReadUpdatedMock: Mock;
   let redisPipelineMock: Mock;
+  let redisPipelineExecMock: Mock;
   let redisDelMock: Mock;
+  let redisSetMock: Mock;
+
+  const presenceOnline: [Error | null, unknown] = [
+    null,
+    JSON.stringify({ state: "online", lastSeen: Date.now() }),
+  ];
 
   const userA = "0193a2b1-0000-7000-8000-000000000001";
   const userB = "0193a2b1-0000-7000-8000-000000000002";
@@ -51,6 +61,7 @@ describe("ConversationService", () => {
     existsByIdMock = vi.fn();
     findByIdMock = vi.fn();
     updateLastReadMock = vi.fn();
+    countUnreadMock = vi.fn();
 
     findUserByIdMock = vi.fn();
     emitReadUpdatedMock = vi.fn();
@@ -62,6 +73,7 @@ describe("ConversationService", () => {
       existsById: existsByIdMock,
       findById: findByIdMock,
       updateLastRead: updateLastReadMock,
+      countUnread: countUnreadMock,
     } as unknown as ConversationRepository;
 
     const mockUserRepo = {
@@ -72,18 +84,20 @@ describe("ConversationService", () => {
       emitReadUpdated: emitReadUpdatedMock,
     } as unknown as RealtimeService;
 
+    redisPipelineExecMock = vi
+      .fn()
+      .mockResolvedValue([[null, "3"], presenceOnline] satisfies [Error | null, unknown][]);
     redisPipelineMock = vi.fn().mockReturnValue({
       get: vi.fn().mockReturnThis(),
-      exec: vi.fn().mockResolvedValue([
-        [null, "3"], // unreadCount
-        [null, JSON.stringify({ state: "online", lastSeen: Date.now() })], // presence
-      ]),
+      exec: redisPipelineExecMock,
     });
     redisDelMock = vi.fn().mockResolvedValue(1);
+    redisSetMock = vi.fn().mockResolvedValue("OK");
 
     const mockRedis = {
       pipeline: redisPipelineMock,
       del: redisDelMock,
+      set: redisSetMock,
     } as unknown as Redis;
 
     service = new ConversationService(mockConvRepo, mockUserRepo, mockRealtimeService, mockRedis);
@@ -157,6 +171,76 @@ describe("ConversationService", () => {
 
       expect(result[0].unreadCount).toBe(3);
       expect(result[0].partner?.isOnline).toBe(true);
+      expect(countUnreadMock).not.toHaveBeenCalled();
+      expect(redisSetMock).not.toHaveBeenCalled();
+    });
+
+    it("rebuilds unreadCount from the database and caches it when Redis has no value", async () => {
+      findUserConversationsMock.mockResolvedValue([{ ...mockConvWithPartner }]);
+      redisPipelineExecMock.mockResolvedValue([[null, null], presenceOnline]);
+      countUnreadMock.mockResolvedValue(3);
+
+      const result = await service.listConversations(userA);
+
+      expect(countUnreadMock).toHaveBeenCalledWith(convId, userA);
+      expect(result[0].unreadCount).toBe(3);
+      expect(redisSetMock).toHaveBeenCalledWith(unreadCountKey(userA, convId), "3", "EX", 604800);
+    });
+
+    it("rebuilds unreadCount from the database when the Redis pipeline row carries an error", async () => {
+      findUserConversationsMock.mockResolvedValue([{ ...mockConvWithPartner }]);
+      redisPipelineExecMock.mockResolvedValue([[new Error("READONLY"), null], presenceOnline]);
+      countUnreadMock.mockResolvedValue(5);
+
+      const result = await service.listConversations(userA);
+
+      expect(countUnreadMock).toHaveBeenCalledWith(convId, userA);
+      expect(result[0].unreadCount).toBe(5);
+      expect(redisSetMock).toHaveBeenCalledWith(unreadCountKey(userA, convId), "5", "EX", 604800);
+    });
+
+    it("rebuilds all missing counters in one batch across conversations", async () => {
+      const otherConvId = "0193a2b1-0000-7000-8000-000000000011";
+      findUserConversationsMock.mockResolvedValue([
+        { ...mockConvWithPartner },
+        { ...mockConvWithPartner, id: otherConvId },
+      ]);
+      redisPipelineExecMock.mockResolvedValue([
+        [null, null],
+        [null, null],
+        presenceOnline,
+        presenceOnline,
+      ]);
+      let inFlight = 0;
+      let maxInFlight = 0;
+      countUnreadMock.mockImplementation(async () => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await Promise.resolve();
+        inFlight -= 1;
+        return 1;
+      });
+
+      const result = await service.listConversations(userA);
+
+      expect(countUnreadMock).toHaveBeenCalledTimes(2);
+      expect(maxInFlight).toBe(2);
+      expect(result[0].unreadCount).toBe(1);
+      expect(result[1].unreadCount).toBe(1);
+    });
+
+    it("keeps the list usable with unreadCount 0 and warns when the database rebuild fails", async () => {
+      findUserConversationsMock.mockResolvedValue([{ ...mockConvWithPartner }]);
+      redisPipelineExecMock.mockResolvedValue([[null, null], presenceOnline]);
+      countUnreadMock.mockRejectedValue(new Error("db down"));
+      const warn = vi.spyOn(Logger.prototype, "warn").mockReturnValue(undefined);
+
+      const result = await service.listConversations(userA);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].unreadCount).toBe(0);
+      expect(warn).toHaveBeenCalled();
+      warn.mockRestore();
     });
   });
 
@@ -188,6 +272,47 @@ describe("ConversationService", () => {
       expect(result.partner?.isOnline).toBe(true);
       expect(result).not.toHaveProperty("directKey");
       expect(result).not.toHaveProperty("lastReadMessageId");
+      expect(countUnreadMock).not.toHaveBeenCalled();
+    });
+
+    it("rebuilds unreadCount from the database and caches it when Redis has no value", async () => {
+      existsByIdMock.mockResolvedValue(true);
+      findByIdMock.mockResolvedValue({ ...mockConvWithPartner });
+      redisPipelineExecMock.mockResolvedValue([[null, null], presenceOnline]);
+      countUnreadMock.mockResolvedValue(4);
+
+      const result = await service.getById(convId, userA);
+
+      expect(countUnreadMock).toHaveBeenCalledWith(convId, userA);
+      expect(result.unreadCount).toBe(4);
+      expect(redisSetMock).toHaveBeenCalledWith(unreadCountKey(userA, convId), "4", "EX", 604800);
+    });
+
+    it("rebuilds unreadCount when the Redis pipeline row carries an error", async () => {
+      existsByIdMock.mockResolvedValue(true);
+      findByIdMock.mockResolvedValue({ ...mockConvWithPartner });
+      redisPipelineExecMock.mockResolvedValue([[new Error("READONLY"), null], presenceOnline]);
+      countUnreadMock.mockResolvedValue(6);
+
+      const result = await service.getById(convId, userA);
+
+      expect(countUnreadMock).toHaveBeenCalledWith(convId, userA);
+      expect(result.unreadCount).toBe(6);
+      expect(redisSetMock).toHaveBeenCalledWith(unreadCountKey(userA, convId), "6", "EX", 604800);
+    });
+
+    it("keeps the conversation usable with unreadCount 0 and warns when the database rebuild fails", async () => {
+      existsByIdMock.mockResolvedValue(true);
+      findByIdMock.mockResolvedValue({ ...mockConvWithPartner });
+      redisPipelineExecMock.mockResolvedValue([[null, null]]);
+      countUnreadMock.mockRejectedValue(new Error("db down"));
+      const warn = vi.spyOn(Logger.prototype, "warn").mockReturnValue(undefined);
+
+      const result = await service.getById(convId, userA);
+
+      expect(result.unreadCount).toBe(0);
+      expect(warn).toHaveBeenCalled();
+      warn.mockRestore();
     });
   });
 

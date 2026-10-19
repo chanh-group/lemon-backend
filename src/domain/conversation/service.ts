@@ -1,9 +1,10 @@
-import { Inject, Injectable, Optional } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { BusinessError } from "../../utils/errors/business.js";
 import { USER_REPOSITORY, type UserRepository } from "../user/repository.js";
 import { CONVERSATION_REPOSITORY, type ConversationRepository } from "./repository.js";
 import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
+import { UNREAD_TTL_SECONDS } from "../../utils/cache/constants.js";
 import { presenceUserKey, unreadCountKey } from "../../utils/cache/keys.js";
 import { RealtimeService } from "../realtime/realtime.service.js";
 import type { ConversationResponse } from "./dto/response.js";
@@ -11,6 +12,8 @@ import { toConversationResponse } from "./dto/mapper.js";
 
 @Injectable()
 export class ConversationService {
+  private readonly logger = new Logger(ConversationService.name);
+
   constructor(
     @Inject(CONVERSATION_REPOSITORY) private readonly convRepo: ConversationRepository,
     @Inject(USER_REPOSITORY) private readonly userRepo: UserRepository,
@@ -47,6 +50,7 @@ export class ConversationService {
 
     // Enrich with unread counts and presence from Redis
     if (this.redis && list.length > 0) {
+      let results: [Error | null, unknown][] | null = null;
       try {
         const pipeline = this.redis.pipeline();
         for (const conv of list) {
@@ -57,32 +61,51 @@ export class ConversationService {
             pipeline.get(presenceUserKey(conv.partner.id));
           }
         }
-        const results = await pipeline.exec();
-        if (results) {
-          for (let i = 0; i < list.length; i++) {
-            const [err, val] = results[i];
-            list[i].unreadCount = !err && val ? parseInt(val as string, 10) || 0 : 0;
-          }
+        results = await pipeline.exec();
+      } catch {
+        results = null;
+      }
 
-          let partnerIdx = list.length;
-          for (let i = 0; i < list.length; i++) {
-            if (list[i].partner) {
-              const [err, val] = results[partnerIdx++];
-              if (!err && val) {
-                try {
-                  const presence = JSON.parse(val as string);
-                  list[i].partner!.isOnline = presence.state === "online";
-                } catch {
-                  list[i].partner!.isOnline = false;
-                }
-              } else {
+      const missing: number[] = [];
+      if (results) {
+        for (let i = 0; i < list.length; i++) {
+          const [err, val] = results[i];
+          if (!err && val !== null && val !== undefined) {
+            list[i].unreadCount = parseInt(val as string, 10) || 0;
+          } else {
+            missing.push(i);
+          }
+        }
+
+        let partnerIdx = list.length;
+        for (let i = 0; i < list.length; i++) {
+          if (list[i].partner) {
+            const [err, val] = results[partnerIdx++];
+            if (!err && val) {
+              try {
+                const presence = JSON.parse(val as string);
+                list[i].partner!.isOnline = presence.state === "online";
+              } catch {
                 list[i].partner!.isOnline = false;
               }
+            } else {
+              list[i].partner!.isOnline = false;
             }
           }
         }
-      } catch {
-        // Fallback gracefully
+      } else {
+        for (let i = 0; i < list.length; i++) {
+          missing.push(i);
+        }
+      }
+
+      if (missing.length > 0) {
+        const counts = await Promise.all(
+          missing.map((i) => this.rebuildUnread(userId, list[i].id)),
+        );
+        missing.forEach((idx, j) => {
+          list[idx].unreadCount = counts[j];
+        });
       }
     }
 
@@ -102,36 +125,66 @@ export class ConversationService {
 
     // Enrich with unreadCount and presence from Redis
     if (this.redis) {
+      let results: [Error | null, unknown][] | null = null;
       try {
         const pipeline = this.redis.pipeline();
         pipeline.get(unreadCountKey(userId, conversationId));
         if (conv.partner) {
           pipeline.get(presenceUserKey(conv.partner.id));
         }
-        const results = await pipeline.exec();
-        if (results) {
-          const [errCount, valCount] = results[0];
-          conv.unreadCount = !errCount && valCount ? parseInt(valCount as string, 10) || 0 : 0;
-          if (conv.partner && results.length > 1) {
-            const [errPres, valPres] = results[1];
-            if (!errPres && valPres) {
-              try {
-                const presence = JSON.parse(valPres as string);
-                conv.partner.isOnline = presence.state === "online";
-              } catch {
-                conv.partner.isOnline = false;
-              }
-            } else {
-              conv.partner.isOnline = false;
-            }
-          }
-        }
+        results = await pipeline.exec();
       } catch {
-        conv.unreadCount = 0;
+        results = null;
+      }
+
+      const [errCount, valCount] = results?.[0] ?? [null, null];
+      if (!errCount && valCount !== null && valCount !== undefined) {
+        conv.unreadCount = parseInt(valCount as string, 10) || 0;
+      } else {
+        conv.unreadCount = await this.rebuildUnread(userId, conversationId);
+      }
+
+      if (results && conv.partner && results.length > 1) {
+        const [errPres, valPres] = results[1];
+        if (!errPres && valPres) {
+          try {
+            const presence = JSON.parse(valPres as string);
+            conv.partner.isOnline = presence.state === "online";
+          } catch {
+            conv.partner.isOnline = false;
+          }
+        } else {
+          conv.partner.isOnline = false;
+        }
       }
     }
 
     return toConversationResponse(conv);
+  }
+
+  private async rebuildUnread(userId: string, conversationId: string): Promise<number> {
+    try {
+      const count = await this.convRepo.countUnread(conversationId, userId);
+      if (this.redis) {
+        try {
+          await this.redis.set(
+            unreadCountKey(userId, conversationId),
+            String(count),
+            "EX",
+            UNREAD_TTL_SECONDS,
+          );
+        } catch {
+          // Best-effort cache write — the DB count is still returned to the caller.
+        }
+      }
+      return count;
+    } catch (err) {
+      this.logger.warn("Failed to rebuild unread count from the database", {
+        conversationId,
+        err,
+      });
+      return 0;
+    }
   }
 
   async markAsRead(

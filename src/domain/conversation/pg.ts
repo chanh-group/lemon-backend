@@ -1,9 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { isUniqueViolation } from "../../utils/errors/pg.js";
+import { messages } from "../message/schema.js";
 import { users } from "../user/schema.js";
 import type { ConversationRepository, ConversationWithPartner } from "./repository.js";
 import { conversationParticipants, conversations } from "./schema.js";
@@ -296,5 +297,31 @@ export class ConversationPgRepository implements ConversationRepository {
           eq(conversationParticipants.userId, userId),
         ),
       );
+  }
+
+  async countUnread(conversationId: string, userId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(messages)
+      .innerJoin(
+        conversationParticipants,
+        and(
+          eq(conversationParticipants.conversationId, messages.conversationId),
+          eq(conversationParticipants.userId, userId),
+        ),
+      )
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          isNull(messages.deletedAt),
+          ne(messages.senderId, userId),
+          or(
+            isNull(conversationParticipants.lastReadMessageId),
+            gt(messages.id, conversationParticipants.lastReadMessageId),
+          ),
+        ),
+      );
+
+    return row?.count ?? 0;
   }
 }

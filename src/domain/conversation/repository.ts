@@ -28,6 +28,7 @@ export interface ConversationRepository {
   isParticipant(conversationId: string, userId: string): Promise<boolean>;
   getParticipantUserIds(conversationId: string): Promise<string[]>;
   updateLastRead(conversationId: string, userId: string, messageId: string): Promise<void>;
+  countUnread(conversationId: string, userId: string): Promise<number>;
 }
 
 export const CONVERSATION_REPOSITORY = Symbol("CONVERSATION_REPOSITORY");

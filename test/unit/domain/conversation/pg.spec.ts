@@ -7,6 +7,7 @@ import {
   conversationParticipants,
   conversations,
 } from "../../../../src/domain/conversation/schema.js";
+import { messages } from "../../../../src/domain/message/schema.js";
 import { users } from "../../../../src/domain/user/schema.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
 
@@ -48,6 +49,17 @@ function makeDb() {
     onConflictDoNothingMock,
     transactionMock,
   };
+}
+
+function makeCountUnreadChain() {
+  const whereMock = vi.fn<(condition: SQL) => Promise<unknown[]>>();
+  const innerJoinMock = vi.fn<(table: unknown, condition: SQL) => unknown>(() => ({
+    where: whereMock,
+  }));
+  const fromMock = vi.fn(() => ({ innerJoin: innerJoinMock }));
+  const selectMock = vi.fn<(columns: unknown) => unknown>(() => ({ from: fromMock }));
+
+  return { selectMock, fromMock, innerJoinMock, whereMock };
 }
 
 const dialect = new PgDialect();
@@ -189,5 +201,58 @@ describe("ConversationPgRepository.createDirectConversation", () => {
       { conversationId: newConvRow.id, userId: userBId, role: "MEMBER" },
     ]);
     expect(onConflictDoNothingMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ConversationPgRepository.countUnread", () => {
+  it("counts non-deleted messages from others newer than the participant's last read", async () => {
+    const chain = makeCountUnreadChain();
+    chain.whereMock.mockResolvedValue([{ count: 3 }]);
+    const db = { select: chain.selectMock } as unknown as DrizzleDb;
+    const repo = new ConversationPgRepository(db);
+
+    const result = await repo.countUnread(convRow.id, userAId);
+
+    expect(result).toBe(3);
+    expect(chain.fromMock).toHaveBeenCalledWith(messages);
+
+    const projection = chain.selectMock.mock.calls[0][0] as { count: SQL };
+    expect(render(projection.count).sql).toContain("count(*)::int");
+
+    expect(chain.innerJoinMock).toHaveBeenCalledWith(conversationParticipants, expect.anything());
+    const join = render(chain.innerJoinMock.mock.calls[0][1]);
+    expect(join.sql).toContain(
+      '"conversation_participants"."conversation_id" = "messages"."conversation_id"',
+    );
+    expect(join.sql).toContain('"conversation_participants"."user_id" =');
+    expect(join.params).toEqual([userAId]);
+
+    const where = render(chain.whereMock.mock.calls[0][0]);
+    expect(where.sql).toContain('"messages"."conversation_id" =');
+    expect(where.sql).toContain('"messages"."deleted_at" is null');
+    expect(where.sql).toContain('"messages"."sender_id" <>');
+    expect(where.sql).toContain('"conversation_participants"."last_read_message_id" is null');
+    expect(where.sql).toContain(
+      '"messages"."id" > "conversation_participants"."last_read_message_id"',
+    );
+    expect(where.params).toEqual([convRow.id, userAId]);
+  });
+
+  it("returns 0 when the aggregate row reports zero", async () => {
+    const chain = makeCountUnreadChain();
+    chain.whereMock.mockResolvedValue([{ count: 0 }]);
+    const db = { select: chain.selectMock } as unknown as DrizzleDb;
+    const repo = new ConversationPgRepository(db);
+
+    await expect(repo.countUnread(convRow.id, userAId)).resolves.toBe(0);
+  });
+
+  it("falls back to 0 when the database returns no aggregate row", async () => {
+    const chain = makeCountUnreadChain();
+    chain.whereMock.mockResolvedValue([]);
+    const db = { select: chain.selectMock } as unknown as DrizzleDb;
+    const repo = new ConversationPgRepository(db);
+
+    await expect(repo.countUnread(convRow.id, userAId)).resolves.toBe(0);
   });
 });

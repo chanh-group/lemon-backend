@@ -8,6 +8,7 @@ import { RealtimeService } from "../realtime/realtime.service.js";
 import { MESSAGE_REPOSITORY, type MessageRepository } from "./repository.js";
 import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
+import { UNREAD_TTL_SECONDS } from "../../utils/cache/constants.js";
 import { unreadCountKey } from "../../utils/cache/keys.js";
 import type { SendMessageDto } from "./dto/request.js";
 import type { MessageResponse, MessageTimelineResponse } from "./dto/response.js";
@@ -63,7 +64,9 @@ export class MessageService {
         try {
           const pipeline = this.redis.pipeline();
           for (const recipientId of recipientIds) {
-            pipeline.incr(unreadCountKey(recipientId, conversationId));
+            const key = unreadCountKey(recipientId, conversationId);
+            pipeline.incr(key);
+            pipeline.expire(key, UNREAD_TTL_SECONDS);
           }
           await pipeline.exec();
         } catch {

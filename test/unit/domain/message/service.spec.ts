@@ -5,6 +5,7 @@ import type { ConversationRepository } from "../../../../src/domain/conversation
 import type { RealtimeService } from "../../../../src/domain/realtime/realtime.service.js";
 import type { Redis } from "ioredis";
 import type { Message } from "../../../../src/domain/message/schema.js";
+import { unreadCountKey } from "../../../../src/utils/cache/keys.js";
 
 describe("MessageService", () => {
   let service: MessageService;
@@ -21,6 +22,8 @@ describe("MessageService", () => {
   let emitMessageRevokedMock: Mock;
 
   let redisPipelineMock: Mock;
+  let redisIncrMock: Mock;
+  let redisExpireMock: Mock;
 
   const userA = "0193a2b1-0000-7000-8000-000000000001";
   const userB = "0193a2b1-0000-7000-8000-000000000002";
@@ -71,9 +74,15 @@ describe("MessageService", () => {
       emitMessageRevoked: emitMessageRevokedMock,
     } as unknown as RealtimeService;
 
+    redisIncrMock = vi.fn().mockReturnThis();
+    redisExpireMock = vi.fn().mockReturnThis();
     redisPipelineMock = vi.fn().mockReturnValue({
-      incr: vi.fn().mockReturnThis(),
-      exec: vi.fn().mockResolvedValue([[null, 1]]),
+      incr: redisIncrMock,
+      expire: redisExpireMock,
+      exec: vi.fn().mockResolvedValue([
+        [null, 1],
+        [null, 1],
+      ]),
     });
 
     const mockRedis = {
@@ -112,6 +121,10 @@ describe("MessageService", () => {
       expect(res.body).toBe("Hello");
       expect(res).not.toHaveProperty("clientMsgId");
       expect(redisPipelineMock).toHaveBeenCalled();
+      expect(redisIncrMock).toHaveBeenCalledTimes(1);
+      expect(redisIncrMock).toHaveBeenCalledWith(unreadCountKey(userB, convId));
+      expect(redisExpireMock).toHaveBeenCalledTimes(1);
+      expect(redisExpireMock).toHaveBeenCalledWith(unreadCountKey(userB, convId), 604800);
       expect(emitNewMessageMock).toHaveBeenCalledWith(convId, res);
     });
 
@@ -123,6 +136,8 @@ describe("MessageService", () => {
       expect(res.id).toBe(msgId);
       expect(res).not.toHaveProperty("clientMsgId");
       expect(redisPipelineMock).not.toHaveBeenCalled();
+      expect(redisIncrMock).not.toHaveBeenCalled();
+      expect(redisExpireMock).not.toHaveBeenCalled();
       expect(emitNewMessageMock).not.toHaveBeenCalled();
     });
   });
