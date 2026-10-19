@@ -1,4 +1,4 @@
-import { Inject, Logger, Optional } from "@nestjs/common";
+import { Inject, Logger, Optional, type OnApplicationShutdown } from "@nestjs/common";
 import {
   ConnectedSocket,
   MessageBody,
@@ -37,7 +37,9 @@ export interface SocketUser {
     credentials: true,
   },
 })
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway
+  implements OnGatewayConnection, OnGatewayDisconnect, OnApplicationShutdown
+{
   @WebSocketServer()
   server!: Server;
 
@@ -122,6 +124,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     logger.log(
       `User disconnected: ${userId} (socket ${client.id}, remaining: ${Math.max(0, currentConns)})`,
     );
+  }
+
+  onApplicationShutdown(): void {
+    for (const timer of this.graceTimers.values()) {
+      clearTimeout(timer);
+    }
+
+    this.graceTimers.clear();
+    this.userConnections.clear();
+
+    logger.log("ChatGateway shutdown: cleared presence grace timers and connection state");
   }
 
   @SubscribeMessage("conv:join")

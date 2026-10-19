@@ -338,6 +338,50 @@ describe("ChatGateway", () => {
     });
   });
 
+  describe("onApplicationShutdown", () => {
+    it("cancels grace timers so no offline presence or DB write happens after shutdown", async () => {
+      vi.useFakeTimers();
+      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
+
+      await gateway.handleConnection(client);
+      await gateway.handleDisconnect(client);
+      expect(vi.getTimerCount()).toBe(1);
+
+      gateway.onApplicationShutdown();
+
+      expect(vi.getTimerCount()).toBe(0);
+      const internal = gateway as unknown as {
+        graceTimers: Map<string, unknown>;
+        userConnections: Map<string, number>;
+      };
+      expect(internal.graceTimers.size).toBe(0);
+      expect(internal.userConnections.size).toBe(0);
+
+      redisTtlMock.mockResolvedValue(-1);
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(redisTtlMock).not.toHaveBeenCalled();
+      expect(pipelineZremMock).not.toHaveBeenCalled();
+      expect(dbUpdateMock).not.toHaveBeenCalled();
+    });
+
+    it("clears tracked connections for users who are still online", async () => {
+      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
+
+      await gateway.handleConnection(client);
+      const internal = gateway as unknown as {
+        userConnections: Map<string, number>;
+      };
+      expect(internal.userConnections.size).toBe(1);
+
+      gateway.onApplicationShutdown();
+
+      expect(internal.userConnections.size).toBe(0);
+    });
+  });
+
   describe("handleJoinConversation", () => {
     it("allows active participant to join conversation room", async () => {
       const { client, joinMock } = createMockSocket({});
