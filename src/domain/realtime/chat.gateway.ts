@@ -22,6 +22,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { conversationParticipants } from "../conversation/schema.js";
 import { users } from "../user/schema.js";
+import { convRoom, userRoom } from "./rooms.js";
 import { JWT_CONFIG } from "../auth/constants.js";
 import type { JwtConfig } from "../auth/jwt.js";
 
@@ -67,8 +68,7 @@ export class ChatGateway
     }
 
     client.data = { userId };
-    const userRoom = `user:${userId}`;
-    await client.join(userRoom);
+    await client.join(userRoom(userId));
 
     // Auto-join every conversation the user is an active participant of
     const convRows = await this.db
@@ -78,7 +78,7 @@ export class ChatGateway
         and(eq(conversationParticipants.userId, userId), isNull(conversationParticipants.leftAt)),
       );
     for (const row of convRows) {
-      await client.join(`conv:${row.conversationId}`);
+      await client.join(convRoom(row.conversationId));
     }
 
     // Cancel grace period timer if reconnecting
@@ -170,7 +170,7 @@ export class ChatGateway
       return { success: false, conversationId: data.conversationId };
     }
 
-    const room = `conv:${data.conversationId}`;
+    const room = convRoom(data.conversationId);
     await client.join(room);
     logger.debug(`Socket ${client.id} (user ${userId}) joined ${room}`);
     return { success: true, conversationId: data.conversationId };
@@ -182,7 +182,7 @@ export class ChatGateway
     @MessageBody() data: { conversationId: string },
   ): Promise<{ success: boolean; conversationId: string } | void> {
     if (!data?.conversationId) return;
-    const room = `conv:${data.conversationId}`;
+    const room = convRoom(data.conversationId);
     await client.leave(room);
     logger.debug(`Socket ${client.id} left ${room}`);
     return { success: true, conversationId: data.conversationId };
@@ -196,7 +196,7 @@ export class ChatGateway
     const userId = client.data?.userId as string;
     if (!userId || !data?.conversationId) return;
 
-    const room = `conv:${data.conversationId}`;
+    const room = convRoom(data.conversationId);
     if (!client.rooms.has(room)) {
       return;
     }
@@ -226,7 +226,7 @@ export class ChatGateway
     const userId = client.data?.userId as string;
     if (!userId || !data?.conversationId) return;
 
-    const room = `conv:${data.conversationId}`;
+    const room = convRoom(data.conversationId);
     if (!client.rooms.has(room)) {
       return;
     }

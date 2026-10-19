@@ -36,13 +36,23 @@ export class ConversationService {
     }
 
     const existing = await this.convRepo.findDirectByParticipants(userId, targetUserId);
-    if (existing) {
-      return toConversationResponse(existing);
-    }
+    const conversation =
+      existing ?? (await this.convRepo.createDirectConversation(userId, targetUserId));
 
-    return toConversationResponse(
-      await this.convRepo.createDirectConversation(userId, targetUserId),
-    );
+    this.joinParticipantsBestEffort(conversation.id, [userId, targetUserId]);
+
+    return toConversationResponse(conversation);
+  }
+
+  private joinParticipantsBestEffort(conversationId: string, participantIds: string[]): void {
+    try {
+      this.realtimeService.joinConversation(participantIds, conversationId);
+    } catch (err) {
+      this.logger.warn("Failed to join participants to the conversation room", {
+        conversationId,
+        err,
+      });
+    }
   }
 
   async listConversations(userId: string, limit = 20): Promise<ConversationResponse[]> {

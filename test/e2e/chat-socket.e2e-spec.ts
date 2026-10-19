@@ -53,6 +53,7 @@ interface MessageRevokedPayload {
 
 const CONNECT_TIMEOUT_MS = 5000;
 const EVENT_TIMEOUT_MS = 5000;
+const HANDSHAKE_SETTLE_MS = 100;
 const MESSAGE_FANOUT_WINDOW_MS = 300;
 const TYPING_SETTLE_MS = 200;
 const TEST_TIMEOUT_MS = 15000;
@@ -149,6 +150,7 @@ describe("Realtime chat gateway over socket.io (E2E)", () => {
   let tokenB: string;
   let tokenC: string;
   let conversationId: string;
+  let lateConversationId: string | null = null;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -213,6 +215,9 @@ describe("Realtime chat gateway over socket.io (E2E)", () => {
       if (db) {
         if (conversationId) {
           await db.delete(conversations).where(eq(conversations.id, conversationId));
+        }
+        if (lateConversationId) {
+          await db.delete(conversations).where(eq(conversations.id, lateConversationId));
         }
         await db.delete(users).where(inArray(users.id, [userA, userB, userC]));
       }
@@ -394,6 +399,55 @@ describe("Realtime chat gateway over socket.io (E2E)", () => {
       } finally {
         clientA.disconnect();
         clientB.disconnect();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "delivers the first message:new to a socket connected before its conversation was created",
+    async () => {
+      const clientC = await connectSocket(url, tokenC);
+      await delay(HANDSHAKE_SETTLE_MS);
+
+      let clientA: Socket | undefined;
+      const collector = collectEvents<MessageNewPayload>(clientC, "message:new");
+
+      try {
+        const createRes = await request(app.getHttpServer())
+          .post("/api/conversations/direct")
+          .set("Authorization", `Bearer ${tokenA}`)
+          .send({ targetUserId: userC })
+          .expect(201);
+
+        const createdConversationId: string = createRes.body.data.id;
+        lateConversationId = createdConversationId;
+
+        clientA = await connectSocket(url, tokenA);
+        const ack = await joinConversation(clientA, createdConversationId);
+        expect(ack).toEqual({ success: true, conversationId: createdConversationId });
+
+        const body = `first message ${Date.now()}`;
+        const sendRes = await request(app.getHttpServer())
+          .post(`/api/conversations/${createdConversationId}/messages`)
+          .set("Authorization", `Bearer ${tokenA}`)
+          .send({ body })
+          .expect(201);
+
+        await delay(MESSAGE_FANOUT_WINDOW_MS);
+        collector.stop();
+
+        expect(collector.events).toHaveLength(1);
+        expect(collector.events[0]).toEqual({
+          id: sendRes.body.data.id,
+          conversationId: createdConversationId,
+          senderId: userA,
+          body,
+        });
+      } finally {
+        collector.stop();
+        clientA?.disconnect();
+        clientC.disconnect();
       }
     },
     TEST_TIMEOUT_MS,

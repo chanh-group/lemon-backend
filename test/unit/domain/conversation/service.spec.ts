@@ -24,6 +24,7 @@ describe("ConversationService", () => {
 
   let findUserByIdMock: Mock;
   let emitReadUpdatedMock: Mock;
+  let joinConversationMock: Mock;
   let redisPipelineMock: Mock;
   let redisPipelineExecMock: Mock;
   let redisDelMock: Mock;
@@ -67,6 +68,7 @@ describe("ConversationService", () => {
 
     findUserByIdMock = vi.fn();
     emitReadUpdatedMock = vi.fn();
+    joinConversationMock = vi.fn();
 
     const mockConvRepo = {
       findDirectByParticipants: findDirectByParticipantsMock,
@@ -85,6 +87,7 @@ describe("ConversationService", () => {
 
     const mockRealtimeService = {
       emitReadUpdated: emitReadUpdatedMock,
+      joinConversation: joinConversationMock,
     } as unknown as RealtimeService;
 
     redisPipelineExecMock = vi
@@ -138,6 +141,7 @@ describe("ConversationService", () => {
       expect(result).not.toHaveProperty("directKey");
       expect(result).not.toHaveProperty("lastReadMessageId");
       expect(createDirectConversationMock).not.toHaveBeenCalled();
+      expect(joinConversationMock).toHaveBeenCalledWith([userA, userB], convId);
     });
 
     it("creates and returns a new conversation if none exists", async () => {
@@ -150,6 +154,35 @@ describe("ConversationService", () => {
       expect(result.id).toBe(convId);
       expect(result).not.toHaveProperty("directKey");
       expect(createDirectConversationMock).toHaveBeenCalledWith(userA, userB);
+      expect(joinConversationMock).toHaveBeenCalledWith([userA, userB], convId);
+    });
+
+    it("joins both participants when a concurrent insert falls back to the existing conversation", async () => {
+      findUserByIdMock.mockResolvedValue({ id: userB });
+      findDirectByParticipantsMock.mockResolvedValue(null);
+      createDirectConversationMock.mockResolvedValue(mockConvWithPartner);
+
+      await service.getOrCreateDirect(userA, userB);
+
+      expect(createDirectConversationMock).toHaveBeenCalledWith(userA, userB);
+      expect(joinConversationMock).toHaveBeenCalledWith([userA, userB], convId);
+    });
+
+    it("still returns the new conversation when the realtime join throws", async () => {
+      findUserByIdMock.mockResolvedValue({ id: userB });
+      findDirectByParticipantsMock.mockResolvedValue(null);
+      createDirectConversationMock.mockResolvedValue(mockConvWithPartner);
+      joinConversationMock.mockImplementation(() => {
+        throw new Error("realtime down");
+      });
+      const warn = vi.spyOn(Logger.prototype, "warn").mockReturnValue(undefined);
+
+      const result = await service.getOrCreateDirect(userA, userB);
+
+      expect(result.id).toBe(convId);
+      expect(createDirectConversationMock).toHaveBeenCalledWith(userA, userB);
+      expect(warn).toHaveBeenCalled();
+      warn.mockRestore();
     });
   });
 

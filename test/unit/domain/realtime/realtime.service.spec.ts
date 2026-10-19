@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { RealtimeService } from "../../../../src/domain/realtime/realtime.service.js";
+import { convRoom, userRoom } from "../../../../src/domain/realtime/rooms.js";
 import type { ChatGateway } from "../../../../src/domain/realtime/chat.gateway.js";
 
 describe("RealtimeService", () => {
@@ -50,6 +51,38 @@ describe("RealtimeService", () => {
       const service = createService(to);
 
       expect(() => service.emitNewMessage("c1", { id: "m1" })).not.toThrow();
+    });
+  });
+
+  describe("joinConversation", () => {
+    it("makes every socket of each participant join the conversation room", () => {
+      const socketsJoin = vi.fn();
+      const inRoom = vi.fn().mockReturnValue({ socketsJoin });
+      const service = new RealtimeService({ server: { in: inRoom } } as unknown as ChatGateway);
+
+      service.joinConversation(["u1", "u2"], "c1");
+
+      expect(inRoom).toHaveBeenCalledTimes(2);
+      expect(inRoom).toHaveBeenNthCalledWith(1, userRoom("u1"));
+      expect(inRoom).toHaveBeenNthCalledWith(2, userRoom("u2"));
+      expect(socketsJoin).toHaveBeenCalledTimes(2);
+      expect(socketsJoin).toHaveBeenNthCalledWith(1, convRoom("c1"));
+      expect(socketsJoin).toHaveBeenNthCalledWith(2, convRoom("c1"));
+    });
+
+    it("does nothing when the gateway server is not initialized", () => {
+      const service = new RealtimeService({ server: undefined } as unknown as ChatGateway);
+
+      expect(() => service.joinConversation(["u1", "u2"], "c1")).not.toThrow();
+    });
+
+    it("swallows socket join failures", () => {
+      const inRoom = vi.fn().mockImplementation(() => {
+        throw new Error("socket down");
+      });
+      const service = new RealtimeService({ server: { in: inRoom } } as unknown as ChatGateway);
+
+      expect(() => service.joinConversation(["u1"], "c1")).not.toThrow();
     });
   });
 });
