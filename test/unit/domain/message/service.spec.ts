@@ -140,6 +140,52 @@ describe("MessageService", () => {
       expect(redisExpireMock).not.toHaveBeenCalled();
       expect(emitNewMessageMock).not.toHaveBeenCalled();
     });
+
+    it("rejects replyToId that points to a message in another conversation", async () => {
+      const otherMsgId = "0193a2b1-0000-7000-8000-000000000021";
+      findByIdMock.mockResolvedValue({
+        ...mockMessage,
+        id: otherMsgId,
+        conversationId: "0193a2b1-0000-7000-8000-000000000099",
+      });
+
+      await expect(
+        service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT", replyToId: otherMsgId }),
+      ).rejects.toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
+      expect(createMessageMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects replyToId that does not exist", async () => {
+      findByIdMock.mockResolvedValue(null);
+
+      await expect(
+        service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT", replyToId: msgId }),
+      ).rejects.toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
+      expect(createMessageMock).not.toHaveBeenCalled();
+    });
+
+    it("accepts replyToId that belongs to the same conversation", async () => {
+      findByIdMock.mockResolvedValue(mockMessage);
+      createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
+
+      const res = await service.sendMessage(userA, convId, {
+        body: "Hello",
+        kind: "TEXT",
+        replyToId: msgId,
+      });
+
+      expect(res.id).toBe(msgId);
+      expect(findByIdMock).toHaveBeenCalledWith(msgId);
+      expect(createMessageMock).toHaveBeenCalledWith(expect.objectContaining({ replyToId: msgId }));
+    });
+
+    it("does not look up a reply message when replyToId is absent", async () => {
+      createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
+
+      await service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" });
+
+      expect(findByIdMock).not.toHaveBeenCalled();
+    });
   });
 
   describe("getTimeline", () => {

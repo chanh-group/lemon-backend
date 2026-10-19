@@ -26,6 +26,7 @@ export interface ConversationRepository {
   findById(conversationId: string, userId: string): Promise<ConversationWithPartner | null>;
   existsById(conversationId: string): Promise<boolean>;
   isParticipant(conversationId: string, userId: string): Promise<boolean>;
+  isMessageInConversation(conversationId: string, messageId: string): Promise<boolean>;
   getParticipantUserIds(conversationId: string): Promise<string[]>;
   updateLastRead(conversationId: string, userId: string, messageId: string): Promise<void>;
   countUnread(conversationId: string, userId: string): Promise<number>;

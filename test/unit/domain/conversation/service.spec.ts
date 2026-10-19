@@ -18,6 +18,7 @@ describe("ConversationService", () => {
   let findUserConversationsMock: Mock;
   let existsByIdMock: Mock;
   let findByIdMock: Mock;
+  let isMessageInConversationMock: Mock;
   let updateLastReadMock: Mock;
   let countUnreadMock: Mock;
 
@@ -60,6 +61,7 @@ describe("ConversationService", () => {
     findUserConversationsMock = vi.fn();
     existsByIdMock = vi.fn();
     findByIdMock = vi.fn();
+    isMessageInConversationMock = vi.fn().mockResolvedValue(true);
     updateLastReadMock = vi.fn();
     countUnreadMock = vi.fn();
 
@@ -72,6 +74,7 @@ describe("ConversationService", () => {
       findUserConversations: findUserConversationsMock,
       existsById: existsByIdMock,
       findById: findByIdMock,
+      isMessageInConversation: isMessageInConversationMock,
       updateLastRead: updateLastReadMock,
       countUnread: countUnreadMock,
     } as unknown as ConversationRepository;
@@ -323,12 +326,56 @@ describe("ConversationService", () => {
 
       await service.markAsRead(convId, userA, "msg-123");
 
+      expect(isMessageInConversationMock).toHaveBeenCalledWith(convId, "msg-123");
       expect(updateLastReadMock).toHaveBeenCalledWith(convId, userA, "msg-123");
       expect(redisDelMock).toHaveBeenCalled();
       expect(emitReadUpdatedMock).toHaveBeenCalledWith(
         convId,
         expect.objectContaining({ userId: userA, lastReadMessageId: "msg-123" }),
       );
+    });
+
+    it("rejects a lastReadMessageId that does not belong to the conversation", async () => {
+      existsByIdMock.mockResolvedValue(true);
+      findByIdMock.mockResolvedValue({ ...mockConvWithPartner });
+      isMessageInConversationMock.mockResolvedValue(false);
+
+      await expect(service.markAsRead(convId, userA, "msg-other")).rejects.toThrow(
+        expect.objectContaining({ code: "BAD_REQUEST" }),
+      );
+      expect(isMessageInConversationMock).toHaveBeenCalledWith(convId, "msg-other");
+      expect(updateLastReadMock).not.toHaveBeenCalled();
+      expect(redisDelMock).not.toHaveBeenCalled();
+      expect(emitReadUpdatedMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects NOT_PARTICIPANT before checking message membership when the user is not in the conversation", async () => {
+      existsByIdMock.mockResolvedValue(true);
+      findByIdMock.mockResolvedValue(null);
+
+      await expect(service.markAsRead(convId, userA, "msg-123")).rejects.toThrow(
+        expect.objectContaining({ code: "NOT_PARTICIPANT" }),
+      );
+      expect(isMessageInConversationMock).not.toHaveBeenCalled();
+      expect(updateLastReadMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects CONVERSATION_NOT_FOUND before checking message membership when the conversation does not exist", async () => {
+      existsByIdMock.mockResolvedValue(false);
+
+      await expect(service.markAsRead(convId, userA, "msg-123")).rejects.toThrow(
+        expect.objectContaining({ code: "CONVERSATION_NOT_FOUND" }),
+      );
+      expect(isMessageInConversationMock).not.toHaveBeenCalled();
+      expect(updateLastReadMock).not.toHaveBeenCalled();
+    });
+
+    it("still rejects an empty lastReadMessageId with BAD_REQUEST before any repository lookup", async () => {
+      await expect(service.markAsRead(convId, userA, "   ")).rejects.toThrow(
+        expect.objectContaining({ code: "BAD_REQUEST" }),
+      );
+      expect(existsByIdMock).not.toHaveBeenCalled();
+      expect(isMessageInConversationMock).not.toHaveBeenCalled();
     });
   });
 });

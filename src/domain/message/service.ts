@@ -44,6 +44,13 @@ export class MessageService {
       throw new BusinessError("BAD_REQUEST");
     }
 
+    if (dto.replyToId) {
+      const reply = await this.messageRepo.findById(dto.replyToId);
+      if (!reply || reply.conversationId !== conversationId) {
+        throw new BusinessError("BAD_REQUEST");
+      }
+    }
+
     // 2. Persist message in PostgreSQL with transaction
     const { message, isNew } = await this.messageRepo.createMessageWithConversationUpdate({
       conversationId,

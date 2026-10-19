@@ -14,10 +14,11 @@ import { BusinessError } from "../../../../src/utils/errors/business.js";
 function makeSelectChain() {
   const limitMock = vi.fn<(limit: number) => Promise<unknown[]>>();
   const whereMock = vi.fn<(condition: SQL) => unknown>(() => ({ limit: limitMock }));
-  const fromMock = vi.fn(() => ({ where: whereMock }));
+  const innerJoinMock = vi.fn(() => ({ where: whereMock }));
+  const fromMock = vi.fn(() => ({ where: whereMock, innerJoin: innerJoinMock }));
   const selectMock = vi.fn(() => ({ from: fromMock }));
 
-  return { selectMock, fromMock, whereMock, limitMock };
+  return { selectMock, fromMock, whereMock, innerJoinMock, limitMock };
 }
 
 function makeDb() {
@@ -254,5 +255,65 @@ describe("ConversationPgRepository.countUnread", () => {
     const repo = new ConversationPgRepository(db);
 
     await expect(repo.countUnread(convRow.id, userAId)).resolves.toBe(0);
+  });
+});
+
+describe("ConversationPgRepository.isMessageInConversation", () => {
+  it("looks up the message by id and conversation without filtering deleted messages", async () => {
+    const chain = makeSelectChain();
+    chain.limitMock.mockResolvedValueOnce([{ id: "msg-1" }]);
+    const db = { select: chain.selectMock } as unknown as DrizzleDb;
+    const repo = new ConversationPgRepository(db);
+
+    const result = await repo.isMessageInConversation(convRow.id, "msg-1");
+
+    expect(result).toBe(true);
+    expect(chain.fromMock).toHaveBeenCalledWith(messages);
+    expect(chain.limitMock).toHaveBeenCalledWith(1);
+
+    const where = render(chain.whereMock.mock.calls[0][0]);
+    expect(where.sql).toContain('"messages"."id" =');
+    expect(where.sql).toContain('"messages"."conversation_id" =');
+    expect(where.sql).not.toContain("deleted_at");
+    expect(where.params).toEqual(["msg-1", convRow.id]);
+  });
+
+  it("returns false when the message does not belong to the conversation", async () => {
+    const chain = makeSelectChain();
+    chain.limitMock.mockResolvedValueOnce([]);
+    const db = { select: chain.selectMock } as unknown as DrizzleDb;
+    const repo = new ConversationPgRepository(db);
+
+    await expect(repo.isMessageInConversation(convRow.id, "missing")).resolves.toBe(false);
+  });
+});
+
+describe("ConversationPgRepository.findById", () => {
+  it("restricts membership to active participants", async () => {
+    const { db, dbSelect } = makeDb();
+    dbSelect.limitMock
+      .mockResolvedValueOnce([
+        { conversationId: convRow.id, userId: userAId, lastReadMessageId: null },
+      ])
+      .mockResolvedValueOnce([convRow])
+      .mockResolvedValueOnce([partnerRow]);
+    const repo = new ConversationPgRepository(db);
+
+    const result = await repo.findById(convRow.id, userAId);
+
+    expect(result).not.toBeNull();
+    const membership = render(dbSelect.whereMock.mock.calls[0][0]);
+    expect(membership.sql).toContain('"conversation_participants"."conversation_id" =');
+    expect(membership.sql).toContain('"conversation_participants"."user_id" =');
+    expect(membership.sql).toContain('"conversation_participants"."left_at" is null');
+    expect(membership.params).toEqual([convRow.id, userAId]);
+  });
+
+  it("returns null when the participant has left the conversation", async () => {
+    const { db, dbSelect } = makeDb();
+    dbSelect.limitMock.mockResolvedValueOnce([]);
+    const repo = new ConversationPgRepository(db);
+
+    await expect(repo.findById(convRow.id, userAId)).resolves.toBeNull();
   });
 });

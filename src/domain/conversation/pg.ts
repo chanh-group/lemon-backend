@@ -204,6 +204,7 @@ export class ConversationPgRepository implements ConversationRepository {
         and(
           eq(conversationParticipants.conversationId, conversationId),
           eq(conversationParticipants.userId, userId),
+          isNull(conversationParticipants.leftAt),
         ),
       )
       .limit(1);
@@ -252,6 +253,15 @@ export class ConversationPgRepository implements ConversationRepository {
       .select({ id: conversations.id })
       .from(conversations)
       .where(and(eq(conversations.id, conversationId), isNull(conversations.deletedAt)))
+      .limit(1);
+    return Boolean(row);
+  }
+
+  async isMessageInConversation(conversationId: string, messageId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(and(eq(messages.id, messageId), eq(messages.conversationId, conversationId)))
       .limit(1);
     return Boolean(row);
   }

@@ -202,6 +202,14 @@ export class ConversationService {
 
     await this.getById(conversationId, userId);
 
+    const messageBelongsToConversation = await this.convRepo.isMessageInConversation(
+      conversationId,
+      lastReadMessageId,
+    );
+    if (!messageBelongsToConversation) {
+      throw new BusinessError("BAD_REQUEST");
+    }
+
     await this.convRepo.updateLastRead(conversationId, userId, lastReadMessageId);
 
     // Reset unread counter in Redis
