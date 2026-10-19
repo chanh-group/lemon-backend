@@ -1,11 +1,4 @@
-import {
-  Inject,
-  Injectable,
-  Logger,
-  NotFoundException,
-  UnprocessableEntityException,
-} from "@nestjs/common";
-import { ZodError } from "zod";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import {
   CreateUserInput,
   createUserSchema,
@@ -19,6 +12,7 @@ import type { UserRepository } from "./repository.js";
 import type { User } from "./schema.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { mapUniqueViolation } from "../../utils/errors/pg.js";
+import { parseSchemaIssues } from "../../utils/validation.js";
 
 @Injectable()
 export class UserService {
@@ -46,7 +40,11 @@ export class UserService {
   }
 
   async create(input: CreateUserInput): Promise<User> {
-    const data = this.validate(createUserSchema, input);
+    const parsed = createUserSchema.safeParse(input);
+    if (!parsed.success) {
+      throw BusinessError.validation(parseSchemaIssues(parsed.error.issues));
+    }
+    const data = parsed.data;
 
     const existingEmail = await this.userRepo.findByEmail(data.email);
     if (existingEmail) {
@@ -77,23 +75,20 @@ export class UserService {
   async getProfile(id: string): Promise<UserResponseDto> {
     const user = await this.userRepo.findById(id);
     if (!user) {
-      throw new NotFoundException({
-        code: "USER_NOT_FOUND",
-        message: "Không tìm thấy user",
-      });
+      throw new BusinessError("USER_NOT_FOUND");
     }
     return toUserResponse(user);
   }
 
   async updateProfile(id: string, input: UpdateUserInput): Promise<UserResponseDto> {
-    const data = this.validate(updateUserSchema, input);
+    const parsed = updateUserSchema.safeParse(input);
+    if (!parsed.success) {
+      throw BusinessError.validation(parseSchemaIssues(parsed.error.issues));
+    }
 
-    const updated = await this.userRepo.updateProfile(id, data);
+    const updated = await this.userRepo.updateProfile(id, parsed.data);
     if (!updated) {
-      throw new NotFoundException({
-        code: "USER_NOT_FOUND",
-        message: "Không tìm thấy user",
-      });
+      throw new BusinessError("USER_NOT_FOUND");
     }
 
     this.logger.log("User profile updated", { userId: id });
@@ -112,21 +107,5 @@ export class UserService {
   async softDelete(id: string): Promise<void> {
     await this.userRepo.softDelete(id);
     this.logger.log("User soft deleted", { userId: id });
-  }
-
-  private validate<T>(schema: { parse: (val: unknown) => T }, input: unknown): T {
-    try {
-      return schema.parse(input);
-    } catch (err: unknown) {
-      if (err instanceof ZodError) {
-        const firstIssue = err.issues[0];
-        const message = firstIssue?.message ?? "Dữ liệu không hợp lệ";
-        throw new UnprocessableEntityException({
-          code: "VALIDATION_ERROR",
-          message,
-        });
-      }
-      throw err;
-    }
   }
 }

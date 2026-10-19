@@ -1,3 +1,8 @@
+import type { INestApplication } from "@nestjs/common";
+import { Test } from "@nestjs/testing";
+import type { Request, Response } from "express";
+import request from "supertest";
+import type { App } from "supertest/types.js";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { StoryController } from "../../../../src/domain/story/controller.js";
 import { StoryService } from "../../../../src/domain/story/service.js";
@@ -7,6 +12,7 @@ import type {
   StoryViewerResponse,
   UserStoryFeedResponse,
 } from "../../../../src/domain/story/dto/response.js";
+import { standardSchemaPipe } from "../../../../src/utils/validation.js";
 
 describe("StoryController", () => {
   let controller: StoryController;
@@ -85,16 +91,26 @@ describe("StoryController", () => {
   });
 
   describe("createStory", () => {
-    it("delegates to storyService.createStory and wraps in response envelope", async () => {
-      const dto: CreateStoryDto = {
-        kind: "IMAGE",
-        objectKey: "stories/user-1/photo.jpg",
-        caption: "A sunny day",
-      };
+    const dto: CreateStoryDto = {
+      kind: "IMAGE",
+      objectKey: "stories/user-1/photo.jpg",
+      caption: "A sunny day",
+    };
 
-      const result = await controller.createStory({ user: { id: "user-1" } }, dto);
+    it("delegates to storyService.createStory and wraps in response envelope (vi)", async () => {
+      const result = await controller.createStory({ user: { id: "user-1" } }, dto, "vi");
 
       expect(createStoryMock).toHaveBeenCalledWith("user-1", dto);
+      expect(result).toEqual({
+        success: true,
+        message: "Tạo story thành công",
+        data: mockStoryItem,
+      });
+    });
+
+    it("localizes the created message to en", async () => {
+      const result = await controller.createStory({ user: { id: "user-1" } }, dto, "en");
+
       expect(result).toEqual({
         success: true,
         message: "Story created successfully",
@@ -128,10 +144,27 @@ describe("StoryController", () => {
   });
 
   describe("viewStory", () => {
-    it("delegates to storyService.viewStory and returns confirmation envelope", async () => {
-      const result = await controller.viewStory({ user: { id: "viewer-1" } }, mockStoryItem.id);
+    it("delegates to storyService.viewStory and returns the vi confirmation envelope", async () => {
+      const result = await controller.viewStory(
+        { user: { id: "viewer-1" } },
+        mockStoryItem.id,
+        "vi",
+      );
 
       expect(viewStoryMock).toHaveBeenCalledWith("viewer-1", mockStoryItem.id);
+      expect(result).toEqual({
+        success: true,
+        message: "Đã đánh dấu story là đã xem",
+      });
+    });
+
+    it("localizes the view confirmation to en", async () => {
+      const result = await controller.viewStory(
+        { user: { id: "viewer-1" } },
+        mockStoryItem.id,
+        "en",
+      );
+
       expect(result).toEqual({
         success: true,
         message: "Story marked as viewed",
@@ -151,10 +184,27 @@ describe("StoryController", () => {
   });
 
   describe("deleteStory", () => {
-    it("delegates to storyService.deleteStory and returns deletion message", async () => {
-      const result = await controller.deleteStory({ user: { id: "user-1" } }, mockStoryItem.id);
+    it("delegates to storyService.deleteStory and returns the vi deletion message", async () => {
+      const result = await controller.deleteStory(
+        { user: { id: "user-1" } },
+        mockStoryItem.id,
+        "vi",
+      );
 
       expect(deleteStoryMock).toHaveBeenCalledWith("user-1", mockStoryItem.id);
+      expect(result).toEqual({
+        success: true,
+        message: "Xoá story thành công",
+      });
+    });
+
+    it("localizes the deletion message to en", async () => {
+      const result = await controller.deleteStory(
+        { user: { id: "user-1" } },
+        mockStoryItem.id,
+        "en",
+      );
+
       expect(result).toEqual({
         success: true,
         message: "Story deleted successfully",
@@ -170,6 +220,84 @@ describe("StoryController", () => {
     it("passes the injected id to the service", async () => {
       await controller.getFeed({ user: { id: "injected-user" } });
       expect(getFeedMock).toHaveBeenCalledWith("injected-user");
+    });
+  });
+
+  describe("HTTP request path (@Lang wiring)", () => {
+    let app: INestApplication<App>;
+    let httpCreateStory: ReturnType<typeof vi.fn>;
+    let httpGetFeed: ReturnType<typeof vi.fn>;
+    let httpViewStory: ReturnType<typeof vi.fn>;
+
+    beforeAll(async () => {
+      httpCreateStory = vi.fn();
+      httpGetFeed = vi.fn();
+      httpViewStory = vi.fn();
+
+      const mockService = {
+        createStory: httpCreateStory,
+        getFeed: httpGetFeed,
+        getStoryById: vi.fn(),
+        viewStory: httpViewStory,
+        getViewers: vi.fn(),
+        deleteStory: vi.fn(),
+      } as unknown as StoryService;
+
+      const moduleRef = await Test.createTestingModule({
+        controllers: [StoryController],
+        providers: [{ provide: StoryService, useValue: mockService }],
+      }).compile();
+
+      app = moduleRef.createNestApplication();
+      app.use((req: Request, _res: Response, next: () => void) => {
+        (req as Request & { user?: { id: string } }).user = { id: "user-1" };
+        next();
+      });
+      app.useGlobalPipes(standardSchemaPipe());
+      await app.init();
+    });
+
+    afterAll(async () => {
+      await app.close();
+    });
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("returns the vi STORY_CREATED message when no accept-language header is sent", async () => {
+      httpCreateStory.mockResolvedValueOnce(mockStoryItem);
+
+      const response = await request(app.getHttpServer())
+        .post("/stories")
+        .send({ kind: "IMAGE", objectKey: "stories/user-1/photo.jpg", caption: "A sunny day" })
+        .expect(201);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.message).toBe("Tạo story thành công");
+      expect(response.body.data.id).toBe(mockStoryItem.id);
+    });
+
+    it("resolves @Lang() from accept-language: en for the view confirmation", async () => {
+      httpViewStory.mockResolvedValueOnce(undefined);
+
+      const response = await request(app.getHttpServer())
+        .post(`/stories/${mockStoryItem.id}/view`)
+        .set("accept-language", "en")
+        .expect(200);
+
+      expect(response.body).toEqual({ success: true, message: "Story marked as viewed" });
+    });
+
+    it("keeps the OK message for the feed even with accept-language: en", async () => {
+      httpGetFeed.mockResolvedValueOnce([]);
+
+      const response = await request(app.getHttpServer())
+        .get("/stories/feed")
+        .set("accept-language", "en")
+        .expect(200);
+
+      expect(response.body).toEqual({ success: true, message: "OK", data: [] });
     });
   });
 });

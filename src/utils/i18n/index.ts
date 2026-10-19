@@ -1,6 +1,8 @@
 import en from "./locales/en.json" with { type: "json" };
 import vi from "./locales/vi.json" with { type: "json" };
 
+export type TranslationKey = keyof typeof en;
+
 const locales: Record<string, Record<string, string>> = {
   en,
   vi,
@@ -31,7 +33,9 @@ export const getLanguageFromHeader = (acceptLanguage: string | null | undefined)
   return "vi";
 };
 
-export const t = (key: string, lang: string, params?: Record<string, string>): string => {
+export const hasTranslation = (key: string): key is TranslationKey => Object.hasOwn(en, key);
+
+export const t = (key: TranslationKey, lang: string, params?: Record<string, string>): string => {
   const dictionary = locales[lang] || locales["vi"];
   let text = dictionary[key] || key;
 

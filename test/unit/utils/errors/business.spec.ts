@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { BusinessError, BUSINESS_STATUS } from "../../../../src/utils/errors/business.js";
+import {
+  BusinessError,
+  BUSINESS_STATUS,
+  type ValidationIssue,
+} from "../../../../src/utils/errors/business.js";
 import { ERROR_CODES } from "../../../../src/utils/errors/codes.js";
 import { errorStatus } from "../../../../src/utils/errors/app.js";
 
@@ -44,12 +48,22 @@ describe("BusinessError", () => {
     expect(err.code).toBe("FILE_TOO_LARGE");
     expect(err.params).toEqual({ maxMb: "10" });
     expect(err.rawMessage).toBeUndefined();
+    expect(err.issues).toBeUndefined();
   });
 
-  it("validation() is a 422 VALIDATION_ERROR with raw details", () => {
-    const err = BusinessError.validation("content: too_small");
+  it("carries structured issues as the fourth constructor argument", () => {
+    const issues: ValidationIssue[] = [{ path: "email", message: "VALIDATION_EMAIL" }];
+    const err = new BusinessError("VALIDATION_ERROR", undefined, undefined, issues);
+    expect(err.issues).toEqual(issues);
+  });
+
+  it("validation() is a 422 VALIDATION_ERROR carrying structured issues", () => {
+    const issues: ValidationIssue[] = [
+      { path: "content", message: "VALIDATION_MIN", params: { min: "1" } },
+    ];
+    const err = BusinessError.validation(issues);
     expect(err.code).toBe("VALIDATION_ERROR");
-    expect(err.rawMessage).toBe("content: too_small");
+    expect(err.issues).toEqual(issues);
     expect(errorStatus(err)).toBe(422);
   });
 });
