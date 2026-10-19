@@ -7,10 +7,11 @@ import {
   toAppError,
   type ErrorResponse,
 } from "../utils/errors/app.js";
-import { BusinessError } from "../utils/errors/business.js";
+import { BusinessError, type ValidationIssue } from "../utils/errors/business.js";
 import { SystemError } from "../utils/errors/system.js";
 import type { ErrorCode } from "../utils/errors/codes.js";
-import { getLanguageFromHeader, t } from "../utils/i18n/index.js";
+import { getLanguageFromHeader, hasTranslation, t } from "../utils/i18n/index.js";
+import { isEncodedKey } from "../utils/validation.js";
 import { Logger } from "../utils/logger.js";
 
 /**
@@ -58,6 +59,10 @@ export class ErrorFilter implements ExceptionFilter {
     status: number,
     lang: string,
   ): string {
+    if (error instanceof BusinessError && error.issues?.length) {
+      return error.issues.map((issue) => this.formatIssue(issue, lang)).join("; ");
+    }
+
     if (error instanceof BusinessError && error.rawMessage !== undefined) {
       return error.rawMessage;
     }
@@ -68,5 +73,20 @@ export class ErrorFilter implements ExceptionFilter {
     }
 
     return t(codeForStatus(status), lang);
+  }
+
+  private formatIssue(issue: ValidationIssue, lang: string): string {
+    const message = this.translateIssue(issue, lang);
+    return issue.path ? `${issue.path}: ${message}` : message;
+  }
+
+  private translateIssue(issue: ValidationIssue, lang: string): string {
+    if (hasTranslation(issue.message)) {
+      return t(issue.message, lang, issue.params);
+    }
+    if (isEncodedKey(issue.message)) {
+      return t("VALIDATION_INVALID", lang);
+    }
+    return issue.message;
   }
 }

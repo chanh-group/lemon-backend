@@ -32,17 +32,24 @@ export const BUSINESS_STATUS: Record<BusinessCode, HttpStatus> = {
   NOTE_EMPTY_CONTENT: HttpStatus.BAD_REQUEST,
 };
 
+export interface ValidationIssue {
+  path: string;
+  message: string;
+  params?: Record<string, string>;
+}
+
 export class BusinessError extends Error {
   constructor(
     readonly code: BusinessCode,
     readonly params?: Record<string, string>,
     readonly rawMessage?: string,
+    readonly issues?: ValidationIssue[],
   ) {
     super(code);
     this.name = "BusinessError";
   }
 
-  static validation(details: string): BusinessError {
-    return new BusinessError("VALIDATION_ERROR", undefined, details);
+  static validation(issues: ValidationIssue[]): BusinessError {
+    return new BusinessError("VALIDATION_ERROR", undefined, undefined, issues);
   }
 }
