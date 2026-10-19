@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, desc, eq, gt, isNull, lt } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lt } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { isUniqueViolation } from "../../utils/errors/pg.js";
@@ -124,7 +124,7 @@ export class MessagePgRepository implements MessageRepository {
       .select()
       .from(messages)
       .where(and(...conditions))
-      .orderBy(desc(messages.id))
+      .orderBy(after ? asc(messages.id) : desc(messages.id))
       .limit(queryLimit + 1);
 
     const hasMore = rows.length > queryLimit;

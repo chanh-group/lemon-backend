@@ -35,6 +35,11 @@ export const BUSINESS_STATUS: Record<BusinessCode, HttpStatus> = {
   MESSAGE_NOT_FOUND: HttpStatus.NOT_FOUND,
   MESSAGE_REVOKED: HttpStatus.BAD_REQUEST,
   CANNOT_CHAT_WITH_SELF: HttpStatus.BAD_REQUEST,
+  FRIEND_REQUEST_NOT_FOUND: HttpStatus.NOT_FOUND,
+  FRIEND_REQUEST_EXISTS: HttpStatus.CONFLICT,
+  ALREADY_FRIENDS: HttpStatus.CONFLICT,
+  FRIENDSHIP_REQUIRED: HttpStatus.FORBIDDEN,
+  USER_BLOCKED: HttpStatus.FORBIDDEN,
 };
 
 export interface ValidationIssue {

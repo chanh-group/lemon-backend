@@ -38,7 +38,10 @@ export class RealtimeService {
   emitMessageRevoked(conversationId: string, payload: { id: string; deletedAt: Date }): void {
     if (!this.gateway?.server) return;
     try {
-      this.gateway.server.to(convRoom(conversationId)).emit("message:revoked", payload);
+      this.gateway.server.to(convRoom(conversationId)).emit("message:revoked", {
+        ...payload,
+        conversationId,
+      });
     } catch (err) {
       logger.warn(`Failed to emit message:revoked: ${String(err)}`);
     }
@@ -53,9 +56,24 @@ export class RealtimeService {
   ): void {
     if (!this.gateway?.server) return;
     try {
-      this.gateway.server.to(convRoom(conversationId)).emit("read:updated", payload);
+      this.gateway.server.to(convRoom(conversationId)).emit("read:updated", {
+        ...payload,
+        conversationId,
+      });
     } catch (err) {
       logger.warn(`Failed to emit read:updated: ${String(err)}`);
+    }
+  }
+
+  emitFriendRequestReceived(
+    userId: string,
+    payload: { id: string; user: { id: string; name: string; username: string } },
+  ): void {
+    if (!this.gateway?.server) return;
+    try {
+      this.gateway.server.to(userRoom(userId)).emit("friend:request:new", payload);
+    } catch (err) {
+      logger.warn(`Failed to emit friend:request:new for user ${userId}: ${String(err)}`);
     }
   }
 

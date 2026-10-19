@@ -9,6 +9,8 @@ import type { UserRepository } from "../../../../src/domain/user/repository.js";
 import type { RealtimeService } from "../../../../src/domain/realtime/realtime.service.js";
 import { unreadCountKey } from "../../../../src/utils/cache/keys.js";
 import type { Redis } from "ioredis";
+import type { FriendService } from "../../../../src/domain/friend/service.js";
+import { BusinessError } from "../../../../src/utils/errors/business.js";
 
 describe("ConversationService", () => {
   let service: ConversationService;
@@ -23,6 +25,7 @@ describe("ConversationService", () => {
   let countUnreadMock: Mock;
 
   let findUserByIdMock: Mock;
+  let assertCanChatMock: Mock;
   let emitReadUpdatedMock: Mock;
   let joinConversationMock: Mock;
   let redisPipelineMock: Mock;
@@ -67,6 +70,7 @@ describe("ConversationService", () => {
     countUnreadMock = vi.fn();
 
     findUserByIdMock = vi.fn();
+    assertCanChatMock = vi.fn().mockResolvedValue(undefined);
     emitReadUpdatedMock = vi.fn();
     joinConversationMock = vi.fn();
 
@@ -89,6 +93,10 @@ describe("ConversationService", () => {
       emitReadUpdated: emitReadUpdatedMock,
       joinConversation: joinConversationMock,
     } as unknown as RealtimeService;
+    const mockFriendService = {
+      assertCanChat: assertCanChatMock,
+      listFriends: vi.fn().mockResolvedValue([{ id: userB }]),
+    } as unknown as FriendService;
 
     redisPipelineExecMock = vi
       .fn()
@@ -106,7 +114,13 @@ describe("ConversationService", () => {
       set: redisSetMock,
     } as unknown as Redis;
 
-    service = new ConversationService(mockConvRepo, mockUserRepo, mockRealtimeService, mockRedis);
+    service = new ConversationService(
+      mockConvRepo,
+      mockUserRepo,
+      mockFriendService,
+      mockRealtimeService,
+      mockRedis,
+    );
   });
 
   describe("getOrCreateDirect", () => {
@@ -128,6 +142,17 @@ describe("ConversationService", () => {
       await expect(service.getOrCreateDirect(userA, userB)).rejects.toThrow(
         expect.objectContaining({ code: "USER_NOT_FOUND" }),
       );
+    });
+
+    it("does not create a direct conversation before friendship is accepted", async () => {
+      findUserByIdMock.mockResolvedValue({ id: userB });
+      assertCanChatMock.mockRejectedValue(new BusinessError("FRIENDSHIP_REQUIRED"));
+
+      await expect(service.getOrCreateDirect(userA, userB)).rejects.toMatchObject({
+        code: "FRIENDSHIP_REQUIRED",
+      });
+      expect(findDirectByParticipantsMock).not.toHaveBeenCalled();
+      expect(createDirectConversationMock).not.toHaveBeenCalled();
     });
 
     it("returns existing conversation if one is already established", async () => {

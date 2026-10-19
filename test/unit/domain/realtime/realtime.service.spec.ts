@@ -54,6 +54,56 @@ describe("RealtimeService", () => {
     });
   });
 
+  describe("emitMessageRevoked", () => {
+    it("includes the conversation id in the event payload", () => {
+      const emit = vi.fn();
+      const service = createService(vi.fn().mockReturnValue({ emit }));
+      const deletedAt = new Date();
+
+      service.emitMessageRevoked("c1", { id: "m1", deletedAt });
+
+      expect(emit).toHaveBeenCalledWith("message:revoked", {
+        id: "m1",
+        deletedAt,
+        conversationId: "c1",
+      });
+    });
+  });
+
+  describe("emitReadUpdated", () => {
+    it("includes the conversation id in the event payload", () => {
+      const emit = vi.fn();
+      const service = createService(vi.fn().mockReturnValue({ emit }));
+      const readAt = new Date();
+
+      service.emitReadUpdated("c1", { userId: "u1", lastReadMessageId: "m1", readAt });
+
+      expect(emit).toHaveBeenCalledWith("read:updated", {
+        userId: "u1",
+        lastReadMessageId: "m1",
+        readAt,
+        conversationId: "c1",
+      });
+    });
+  });
+
+  describe("emitFriendRequestReceived", () => {
+    it("emits the request to only the recipient's user room", () => {
+      const emit = vi.fn();
+      const to = vi.fn().mockReturnValue({ emit });
+      const service = createService(to);
+      const payload = {
+        id: "request-id",
+        user: { id: "requester-id", name: "Requester", username: "requester" },
+      };
+
+      service.emitFriendRequestReceived("recipient-id", payload);
+
+      expect(to).toHaveBeenCalledWith(userRoom("recipient-id"));
+      expect(emit).toHaveBeenCalledWith("friend:request:new", payload);
+    });
+  });
+
   describe("joinConversation", () => {
     it("makes every socket of each participant join the conversation room", () => {
       const socketsJoin = vi.fn();

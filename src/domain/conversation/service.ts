@@ -9,6 +9,7 @@ import { presenceUserKey, unreadCountKey } from "../../utils/cache/keys.js";
 import { RealtimeService } from "../realtime/realtime.service.js";
 import type { ConversationResponse } from "./dto/response.js";
 import { toConversationResponse } from "./dto/mapper.js";
+import { FriendService } from "../friend/service.js";
 
 @Injectable()
 export class ConversationService {
@@ -17,6 +18,7 @@ export class ConversationService {
   constructor(
     @Inject(CONVERSATION_REPOSITORY) private readonly convRepo: ConversationRepository,
     @Inject(USER_REPOSITORY) private readonly userRepo: UserRepository,
+    private readonly friendService: FriendService,
     private readonly realtimeService: RealtimeService,
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
   ) {}
@@ -34,6 +36,8 @@ export class ConversationService {
     if (!targetUser) {
       throw new BusinessError("USER_NOT_FOUND");
     }
+
+    await this.friendService.assertCanChat(userId, targetUserId);
 
     const existing = await this.convRepo.findDirectByParticipants(userId, targetUserId);
     const conversation =
@@ -56,7 +60,13 @@ export class ConversationService {
   }
 
   async listConversations(userId: string, limit = 20): Promise<ConversationResponse[]> {
-    const list = await this.convRepo.findUserConversations(userId, limit);
+    const conversations = await this.convRepo.findUserConversations(userId, limit);
+    const friendIds = new Set((await this.friendService.listFriends(userId)).map((friend) => friend.id));
+    const list = conversations.filter(
+      (conversation) =>
+        conversation.kind !== "DIRECT" ||
+        Boolean(conversation.partner && friendIds.has(conversation.partner.id)),
+    );
 
     // Enrich with unread counts and presence from Redis
     if (this.redis && list.length > 0) {
@@ -131,6 +141,9 @@ export class ConversationService {
     const conv = await this.convRepo.findById(conversationId, userId);
     if (!conv) {
       throw new BusinessError("NOT_PARTICIPANT");
+    }
+    if (conv.kind === "DIRECT" && conv.partner) {
+      await this.friendService.assertCanChat(userId, conv.partner.id);
     }
 
     // Enrich with unreadCount and presence from Redis
