@@ -13,6 +13,26 @@ describe("ChatGateway", () => {
 
   const mockUserId = "0193a2b1-0000-7000-8000-000000000001";
   const mockConvId = "0193a2b1-0000-7000-8000-000000000010";
+  const mockConvId2 = "0193a2b1-0000-7000-8000-000000000011";
+
+  function makeDb(
+    convRows: Array<{ conversationId: string }> = [
+      { conversationId: mockConvId },
+      { conversationId: mockConvId2 },
+    ],
+  ) {
+    // handleConnection awaits the query directly; conv:join calls .limit(1).
+    // A real Promise with an attached .limit serves both shapes.
+    const whereResult = Object.assign(Promise.resolve(convRows), {
+      limit: vi.fn().mockResolvedValue([{ conversationId: mockConvId }]),
+    });
+
+    return {
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue(whereResult),
+      }),
+    };
+  }
 
   beforeEach(() => {
     verifyAccessTokenMock = vi.fn();
@@ -20,13 +40,7 @@ describe("ChatGateway", () => {
       verifyAccessToken: verifyAccessTokenMock,
     } as unknown as JwtConfig;
 
-    dbSelectMock = vi.fn().mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([{ conversationId: mockConvId }]),
-        }),
-      }),
-    });
+    dbSelectMock = vi.fn().mockImplementation(() => makeDb());
 
     redisPipelineMock = vi.fn().mockReturnValue({
       set: vi.fn().mockReturnThis(),
@@ -108,6 +122,17 @@ describe("ChatGateway", () => {
       expect(joinMock).toHaveBeenCalledWith(`user:${mockUserId}`);
       expect(client.data.userId).toBe(mockUserId);
       expect(disconnectMock).not.toHaveBeenCalled();
+    });
+
+    it("joins all active conversation rooms on connect", async () => {
+      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      const { client, joinMock } = createMockSocket({ auth: { token: "valid-jwt" } });
+
+      await gateway.handleConnection(client);
+
+      expect(joinMock).toHaveBeenCalledWith(`user:${mockUserId}`);
+      expect(joinMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
+      expect(joinMock).toHaveBeenCalledWith(`conv:${mockConvId2}`);
     });
 
     it("accepts connection with valid JWT in Authorization header", async () => {

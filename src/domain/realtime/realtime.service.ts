@@ -8,18 +8,12 @@ export class RealtimeService {
   constructor(private readonly gateway: ChatGateway) {}
 
   /**
-   * Broadcast a newly created message to the conversation room and recipients
+   * Broadcast a newly created message to the conversation room
    */
-  emitNewMessage(conversationId: string, message: unknown, recipientUserIds: string[]): void {
+  emitNewMessage(conversationId: string, message: unknown): void {
     if (!this.gateway?.server) return;
     try {
-      // 1. Emit to conversation room (for users currently viewing the chat)
       this.gateway.server.to(`conv:${conversationId}`).emit("message:new", message);
-
-      // 2. Also emit to user rooms (for notifications / inbox updates even if chat not open)
-      for (const userId of recipientUserIds) {
-        this.gateway.server.to(`user:${userId}`).emit("message:new", message);
-      }
     } catch (err) {
       logger.warn(`Failed to emit message:new for conv ${conversationId}: ${String(err)}`);
     }

@@ -62,6 +62,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const userRoom = `user:${userId}`;
     await client.join(userRoom);
 
+    // Auto-join every conversation the user is an active participant of
+    const convRows = await this.db
+      .select({ conversationId: conversationParticipants.conversationId })
+      .from(conversationParticipants)
+      .where(
+        and(eq(conversationParticipants.userId, userId), isNull(conversationParticipants.leftAt)),
+      );
+    for (const row of convRows) {
+      await client.join(`conv:${row.conversationId}`);
+    }
+
     // Cancel grace period timer if reconnecting
     const existingTimer = this.graceTimers.get(userId);
     if (existingTimer) {

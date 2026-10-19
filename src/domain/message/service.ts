@@ -72,8 +72,8 @@ export class MessageService {
         }
       }
 
-      // 4. Emit realtime event to conversation room and recipients
-      this.realtimeService.emitNewMessage(conversationId, message, recipientIds);
+      // 4. Emit realtime event to the conversation room
+      this.realtimeService.emitNewMessage(conversationId, message);
     }
 
     return message;

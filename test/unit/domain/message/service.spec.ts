@@ -109,7 +109,7 @@ describe("MessageService", () => {
 
       expect(res).toBe(mockMessage);
       expect(redisPipelineMock).toHaveBeenCalled();
-      expect(emitNewMessageMock).toHaveBeenCalledWith(convId, mockMessage, [userB]);
+      expect(emitNewMessageMock).toHaveBeenCalledWith(convId, mockMessage);
     });
   });
 
