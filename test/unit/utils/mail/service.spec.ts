@@ -19,6 +19,7 @@ describe("MailService", () => {
     delete process.env.SMTP_HOST;
     delete process.env.SMTP_USERNAME;
     delete process.env.SMTP_PASSWORD;
+    delete process.env.SMTP_FROM;
 
     const log = vi.spyOn(Logger.prototype, "log");
     const service = new MailService();
