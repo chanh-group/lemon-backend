@@ -66,5 +66,21 @@
   "VALIDATION_PASSWORD_HASH_REQUIRED": "Password hash is required",
   "VALIDATION_URL": "Invalid URL",
   "VALIDATION_BIO_MAX": "Bio must be at most {max} characters",
-  "VALIDATION_ACCOUNT_CREDENTIALS_REQUIRED": "Account must have passwordHash or googleId"
+  "VALIDATION_ACCOUNT_CREDENTIALS_REQUIRED": "Account must have passwordHash or googleId",
+  "VALIDATION_UUID_TARGET_USER": "targetUserId must be a valid UUID",
+  "VALIDATION_UUID_CLIENT_MSG": "clientMsgId must be a valid UUID",
+  "VALIDATION_UUID_REPLY_TO": "replyToId must be a valid UUID",
+  "VALIDATION_UUID_LAST_READ": "lastReadMessageId must be a valid UUID",
+  "VALIDATION_MESSAGE_BODY_REQUIRED": "Text message body is required",
+  "VALIDATION_BODY_MAX": "Message body must be at most {max} characters",
+  "CONVERSATION_NOT_FOUND": "Conversation not found",
+  "NOT_PARTICIPANT": "Not a participant in this conversation",
+  "MESSAGE_NOT_FOUND": "Message not found",
+  "MESSAGE_REVOKED": "Message has been revoked",
+  "CANNOT_CHAT_WITH_SELF": "Cannot start conversation with yourself",
+  "CONVERSATION_READY": "Conversation ready",
+  "MESSAGE_SENT": "Message sent",
+  "MESSAGE_EDITED": "Message edited",
+  "MESSAGE_DELETED": "Message revoked",
+  "MESSAGES_READ": "Messages marked as read"
 }

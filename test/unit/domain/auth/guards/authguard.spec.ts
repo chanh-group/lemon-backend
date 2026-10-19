@@ -38,6 +38,7 @@ describe("AuthGuard", () => {
   } {
     const request = { headers, user: undefined };
     const context = {
+      getType: () => "http",
       switchToHttp: () => ({
         getRequest: () => request,
       }),
@@ -53,6 +54,19 @@ describe("AuthGuard", () => {
 
     const result = await guard.canActivate(context);
     expect(result).toBe(true);
+  });
+
+  it("allows WebSocket contexts through (handshake JWT is the auth)", async () => {
+    const context = {
+      getType: () => "ws",
+      getHandler: () => undefined,
+      getClass: () => undefined,
+      switchToHttp: () => {
+        throw new Error("must not touch HTTP context");
+      },
+    } as unknown as ExecutionContext;
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
   });
 
   it("throws BusinessError UNAUTHORIZED when authorization header is missing", async () => {

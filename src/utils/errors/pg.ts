@@ -10,6 +10,14 @@ function isPostgresError(error: unknown): error is PostgresError {
   return typeof error === "object" && error !== null && "code" in error;
 }
 
+export function isUniqueViolation(error: unknown, constraintPattern: string): boolean {
+  if (!isPostgresError(error) || error.code !== "23505") {
+    return false;
+  }
+
+  return typeof error.constraint === "string" && error.constraint.includes(constraintPattern);
+}
+
 export function mapUniqueViolation(
   error: unknown,
   mappings: ReadonlyArray<readonly [pattern: string, value: string]>,

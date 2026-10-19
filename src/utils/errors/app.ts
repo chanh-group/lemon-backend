@@ -1,5 +1,5 @@
 import { HttpException, HttpStatus } from "@nestjs/common";
-import type { BusinessCode, ErrorCode } from "./codes.js";
+import { ERROR_CODES, type BusinessCode, type ErrorCode } from "./codes.js";
 import { BUSINESS_STATUS, BusinessError } from "./business.js";
 import { SYSTEM_STATUS, SystemError } from "./system.js";
 
@@ -21,6 +21,12 @@ const BUSINESS_CODE_BY_STATUS: Partial<Record<number, BusinessCode>> = {
   [HttpStatus.TOO_MANY_REQUESTS]: "TOO_MANY_REQUESTS",
 };
 
+const ERROR_STATUS_BY_CODE: Record<ErrorCode, number> = {
+  ...BUSINESS_STATUS,
+  [ERROR_CODES.INTERNAL_SERVER_ERROR]: SYSTEM_STATUS.internal,
+  [ERROR_CODES.SERVICE_UNAVAILABLE]: SYSTEM_STATUS.unavailable,
+};
+
 export function isAppError(error: unknown): error is AppError {
   return error instanceof BusinessError || error instanceof SystemError;
 }
@@ -40,6 +46,14 @@ export function toAppError(error: unknown): AppError {
   if (isAppError(error)) {
     return error;
   }
+  const pgCode = (error as any)?.code || (error as any)?.cause?.code;
+  if (pgCode === "22P02") {
+    return new BusinessError(
+      "BAD_REQUEST",
+      undefined,
+      "Định dạng ID không hợp lệ (yêu cầu định dạng UUID)",
+    );
+  }
   if (error instanceof HttpException) {
     const status = error.getStatus();
     if (status === HttpStatus.SERVICE_UNAVAILABLE) {
@@ -54,7 +68,19 @@ export function toAppError(error: unknown): AppError {
 }
 
 export function errorStatus(error: AppError): number {
-  return error instanceof BusinessError ? BUSINESS_STATUS[error.code] : SYSTEM_STATUS[error.kind];
+  const exact =
+    error instanceof BusinessError ? BUSINESS_STATUS[error.code] : SYSTEM_STATUS[error.kind];
+  if (exact !== undefined) {
+    return exact;
+  }
+
+  for (const [code, status] of Object.entries(ERROR_STATUS_BY_CODE)) {
+    if (code === error.message) {
+      return status;
+    }
+  }
+
+  return HttpStatus.INTERNAL_SERVER_ERROR;
 }
 
 export function errorCode(error: AppError): ErrorCode {

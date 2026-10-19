@@ -32,6 +32,22 @@ export function resetOtpKey(email: string): string {
   return `${FORGOT_OTP_KEY_PREFIX}${email.toLowerCase()}`;
 }
 
+export function unreadCountKey(userId: string, conversationId: string): string {
+  return `unread:${userId}:${conversationId}`;
+}
+
+export function typingKey(conversationId: string, userId: string): string {
+  return `typing:${conversationId}:${userId}`;
+}
+
+export function presenceUserKey(userId: string): string {
+  return `presence:${userId}`;
+}
+
+export function presenceOnlineKey(): string {
+  return `presence:online`;
+}
+
 export function storyFeedKey(userId: string): string {
   return `${STORY_FEED_KEY_PREFIX}${userId}`;
 }
