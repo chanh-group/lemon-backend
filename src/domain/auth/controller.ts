@@ -3,7 +3,6 @@ import {
   Controller,
   Inject,
   Get,
-  Headers,
   HttpCode,
   HttpStatus,
   Post,
@@ -60,6 +59,7 @@ import type {
 } from "./dto/request.js";
 import { AuthService } from "./service.js";
 
+/** Refresh chỉ lấy từ cookie httpOnly — không nhận header (tránh XSS đọc/gửi token). */
 function extractRefreshToken(req: Request): string | undefined {
   const cookies = req.cookies as unknown;
   if (cookies && typeof cookies === "object" && REFRESH_COOKIE_NAME in cookies) {
@@ -67,11 +67,6 @@ function extractRefreshToken(req: Request): string | undefined {
     if (typeof val === "string" && val.trim().length > 0) {
       return val.trim();
     }
-  }
-
-  const header = req.headers["x-refresh-token"];
-  if (typeof header === "string" && header.trim().length > 0) {
-    return header.trim();
   }
 
   return undefined;
@@ -104,7 +99,6 @@ export class AuthController {
   async requestOtp(
     @Body({ schema: requestOtpSchema }) body: RequestOtpDto,
     @Lang() lang: string,
-    @Headers("x-request-id") requestId?: string,
     @Req() req?: Request,
   ) {
     const ip = extractClientIp(req);
@@ -128,7 +122,7 @@ export class AuthController {
     ) {
       throw new BusinessError("TOO_MANY_REQUESTS");
     }
-    await this.authService.requestOtp(body, requestId);
+    await this.authService.requestOtp(body);
     return messageOnly(t("OTP_SENT", lang));
   }
 
@@ -231,7 +225,6 @@ export class AuthController {
   async forgotPasswordOtp(
     @Body({ schema: forgotPasswordOtpSchema }) body: ForgotPasswordOtpDto,
     @Lang() lang: string,
-    @Headers("x-request-id") requestId?: string,
     @Req() req?: Request,
   ) {
     const ip = extractClientIp(req);
@@ -255,7 +248,7 @@ export class AuthController {
     ) {
       throw new BusinessError("TOO_MANY_REQUESTS");
     }
-    await this.authService.forgotPasswordOtp(body, requestId);
+    await this.authService.forgotPasswordOtp(body);
     return messageOnly(t("OTP_SENT", lang));
   }
 

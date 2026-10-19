@@ -59,7 +59,6 @@ describe("MailService", () => {
       to: "recipient@example.com",
       code: "999888",
       purpose: "signup",
-      requestId: "req-1",
     });
 
     await service.onModuleDestroy();

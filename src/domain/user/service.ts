@@ -39,6 +39,11 @@ export class UserService {
     return this.userRepo.findByIdentifier(identifier);
   }
 
+  async search(query: string, field: "email" | "username", excludeId?: string): Promise<UserResponseDto[]> {
+    const users = await this.userRepo.search(query, field, excludeId);
+    return users.map(toUserResponse);
+  }
+
   async create(input: CreateUserInput): Promise<User> {
     const parsed = createUserSchema.safeParse(input);
     if (!parsed.success) {

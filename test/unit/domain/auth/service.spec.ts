@@ -133,7 +133,7 @@ describe("AuthService", () => {
     it("stores OTP in cache and enqueues mail when email does not exist", async () => {
       mockUserRepo.findByEmail.mockResolvedValueOnce(null);
 
-      await authService.requestOtp({ email: "newuser@example.com" }, "req-1");
+      await authService.requestOtp({ email: "newuser@example.com" });
 
       const raw = await cacheStore.getRaw(`${OTP_KEY_PREFIX}newuser@example.com`);
       expect(raw).toBeDefined();
@@ -143,7 +143,6 @@ describe("AuthService", () => {
         expect.objectContaining({
           to: "newuser@example.com",
           purpose: "signup",
-          requestId: "req-1",
         }),
       );
     });

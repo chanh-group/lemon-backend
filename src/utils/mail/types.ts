@@ -4,7 +4,6 @@ export interface SendOtpMailOptions {
   to: string;
   code: string;
   purpose: OtpPurpose;
-  requestId?: string;
 }
 
 export interface MailJob {
@@ -12,5 +11,4 @@ export interface MailJob {
   subject: string;
   text: string;
   html: string;
-  requestId?: string;
 }

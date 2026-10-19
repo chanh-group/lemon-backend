@@ -5,6 +5,7 @@ export interface UserRepository {
   findByEmail(email: string): Promise<User | null>;
   findByUsername(username: string): Promise<User | null>;
   findByIdentifier(identifier: string): Promise<User | null>;
+  search(query: string, field: "email" | "username", excludeId?: string, limit?: number): Promise<User[]>;
   create(data: NewUser): Promise<User>;
   updatePasswordHash(id: string, hash: string): Promise<void>;
   updateProfile(

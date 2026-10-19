@@ -55,7 +55,7 @@ describe("refreshCookieOptions", () => {
       httpOnly: true,
       secure: true,
       sameSite: "lax",
-      path: "/auth",
+      path: "/",
       maxAge: 604800000,
     });
   });
@@ -67,7 +67,7 @@ describe("clearRefreshCookieOptions", () => {
       httpOnly: true,
       secure: true,
       sameSite: "none",
-      path: "/auth",
+      path: "/",
       maxAge: 0,
     });
   });

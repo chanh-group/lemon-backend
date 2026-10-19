@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, ilike, isNull, ne, or } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import type { UserRepository } from "./repository.js";
 import type { NewUser, User } from "./schema.js";
@@ -41,6 +41,25 @@ export class UserPgRepository implements UserRepository {
       .from(users)
       .where(and(or(eq(users.email, clean), eq(users.username, clean)), isNull(users.deletedAt)));
     return result ?? null;
+  }
+
+  async search(
+    query: string,
+    field: "email" | "username",
+    excludeId?: string,
+    limit = 20,
+  ): Promise<User[]> {
+    const pattern = `%${query.trim().replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+    const column = field === "email" ? users.email : users.username;
+    const filters = [ilike(column, pattern), isNull(users.deletedAt)];
+    if (excludeId) {
+      filters.push(ne(users.id, excludeId));
+    }
+    return this.db
+      .select()
+      .from(users)
+      .where(and(...filters))
+      .limit(limit);
   }
 
   async create(data: NewUser): Promise<User> {

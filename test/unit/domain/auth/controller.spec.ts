@@ -89,9 +89,9 @@ describe("AuthController", () => {
   describe("requestOtp", () => {
     it("calls authService.requestOtp and returns the default vi success message", async () => {
       authService.requestOtp.mockResolvedValueOnce(undefined);
-      const res = await controller.requestOtp({ email: "lemon@example.com" }, "vi", "req-1");
+      const res = await controller.requestOtp({ email: "lemon@example.com" }, "vi");
 
-      expect(authService.requestOtp).toHaveBeenCalledWith({ email: "lemon@example.com" }, "req-1");
+      expect(authService.requestOtp).toHaveBeenCalledWith({ email: "lemon@example.com" });
       expect(res).toEqual({ success: true, message: "Đã gửi mã OTP" });
     });
   });
@@ -168,7 +168,7 @@ describe("AuthController", () => {
         expect.objectContaining({
           httpOnly: true,
           sameSite: "strict",
-          path: "/auth",
+          path: "/",
         }),
       );
       expect(res).toEqual({
@@ -183,7 +183,7 @@ describe("AuthController", () => {
   });
 
   describe("refresh", () => {
-    it("throws BusinessError UNAUTHORIZED if no refresh token in cookie or header", async () => {
+    it("throws BusinessError UNAUTHORIZED if no refresh cookie", async () => {
       const mockReq = { cookies: {}, headers: {} } as unknown as Request;
 
       await expectBusinessError(
@@ -212,7 +212,7 @@ describe("AuthController", () => {
         expect.objectContaining({
           httpOnly: true,
           sameSite: "strict",
-          path: "/auth",
+          path: "/",
         }),
       );
       expect(res).toEqual({
@@ -222,25 +222,16 @@ describe("AuthController", () => {
       });
     });
 
-    it("falls back to x-refresh-token header if cookie is missing", async () => {
+    it("rejects when refresh cookie is missing (no header fallback)", async () => {
       const mockReq = {
         cookies: {},
         headers: { "x-refresh-token": "header-refresh-token" },
       } as unknown as Request;
 
-      authService.refreshToken.mockResolvedValueOnce({
-        accessToken: "new-access-token-header",
-        refreshToken: "new-refresh-token-header",
-      });
-
-      const res = await controller.refresh(mockReq, mockRes as unknown as Response, "vi");
-
-      expect(authService.refreshToken).toHaveBeenCalledWith("header-refresh-token");
-      expect(res).toEqual({
-        success: true,
-        message: "Đã cấp token mới",
-        data: { accessToken: "new-access-token-header" },
-      });
+      await expect(
+        controller.refresh(mockReq, mockRes as unknown as Response, "vi"),
+      ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+      expect(authService.refreshToken).not.toHaveBeenCalled();
     });
   });
 
@@ -258,7 +249,7 @@ describe("AuthController", () => {
         "refreshCookie",
         expect.objectContaining({
           httpOnly: true,
-          path: "/auth",
+          path: "/",
         }),
       );
       expect(res).toEqual({ success: true, message: "Đăng xuất thành công" });
@@ -267,15 +258,8 @@ describe("AuthController", () => {
 
   describe("forgot-password", () => {
     it("forgotPasswordOtp calls authService and returns the vi message", async () => {
-      const res = await controller.forgotPasswordOtp(
-        { email: "lemon@example.com" },
-        "vi",
-        "req-forgot-1",
-      );
-      expect(authService.forgotPasswordOtp).toHaveBeenCalledWith(
-        { email: "lemon@example.com" },
-        "req-forgot-1",
-      );
+      const res = await controller.forgotPasswordOtp({ email: "lemon@example.com" }, "vi");
+      expect(authService.forgotPasswordOtp).toHaveBeenCalledWith({ email: "lemon@example.com" });
       expect(res).toEqual({
         success: true,
         message: "Đã gửi mã OTP",
@@ -317,7 +301,7 @@ describe("AuthController", () => {
         "refreshCookie",
         expect.objectContaining({
           httpOnly: true,
-          path: "/auth",
+          path: "/",
         }),
       );
       expect(res).toEqual({

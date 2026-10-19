@@ -47,7 +47,7 @@ export class AuthService {
     private readonly jwt: JwtConfig,
   ) {}
 
-  async requestOtp(input: RequestOtpDto, requestId?: string): Promise<void> {
+  async requestOtp(input: RequestOtpDto): Promise<void> {
     const existingUser = await this.userRepo.findByEmail(input.email);
     if (existingUser) {
       throw new BusinessError("USER_ALREADY_EXISTS");
@@ -70,7 +70,6 @@ export class AuthService {
       to: input.email,
       code,
       purpose: "signup",
-      requestId,
     });
 
     this.logger.log("Registration OTP requested", {
@@ -311,7 +310,7 @@ export class AuthService {
     }
   }
 
-  async forgotPasswordOtp(input: ForgotPasswordOtpDto, requestId?: string): Promise<void> {
+  async forgotPasswordOtp(input: ForgotPasswordOtpDto): Promise<void> {
     const user = await this.userRepo.findByEmail(input.email);
     if (!user) {
       this.logger.log("Forgot password OTP requested for non-existent email (anti-enumeration)", {
@@ -337,7 +336,6 @@ export class AuthService {
       to: input.email,
       code,
       purpose: "reset",
-      requestId,
     });
 
     this.logger.log("Forgot password OTP sent", {

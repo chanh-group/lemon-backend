@@ -67,7 +67,6 @@ export class MailService implements OnModuleDestroy {
       this.logger.warn("Mail queue is full, dropping email", {
         action: "mail.queue_full",
         to: options.to,
-        requestId: options.requestId,
       });
       return;
     }
@@ -79,7 +78,6 @@ export class MailService implements OnModuleDestroy {
       subject,
       text,
       html,
-      requestId: options.requestId,
     };
 
     void this.queue.add(() => this.deliverWithRetry(job));
@@ -90,7 +88,6 @@ export class MailService implements OnModuleDestroy {
       this.logger.warn("Mail queue is full, dropping raw email", {
         action: "mail.queue_full",
         to: job.to,
-        requestId: job.requestId,
       });
       return;
     }
@@ -123,7 +120,6 @@ export class MailService implements OnModuleDestroy {
         action: "mail.send_dev",
         to: job.to,
         subject: job.subject.replace(/:\s*\d{6}\s*$/, ""),
-        requestId: job.requestId,
       });
       return;
     }
@@ -142,7 +138,6 @@ export class MailService implements OnModuleDestroy {
         this.logger.log("Mail sent successfully", {
           action: "mail.sent",
           to: job.to,
-          requestId: job.requestId,
           attempt: attempt + 1,
         });
         return;
@@ -153,7 +148,6 @@ export class MailService implements OnModuleDestroy {
           to: job.to,
           attempt,
           err: String(err),
-          requestId: job.requestId,
         });
 
         if (attempt <= MAIL_RETRY_COUNT) {
@@ -166,7 +160,6 @@ export class MailService implements OnModuleDestroy {
     this.logger.warn("Mail permanently failed after all retries", {
       action: "mail.send_failed",
       to: job.to,
-      requestId: job.requestId,
     });
   }
 }

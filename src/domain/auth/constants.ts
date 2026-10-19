@@ -9,7 +9,7 @@ export const MIN_JWT_SECRET_LEN = 32; // bytes — boot fails below this (HS256 
 export const JWT_CONFIG: unique symbol = Symbol("JWT_CONFIG");
 
 export const REFRESH_COOKIE_NAME = "refreshCookie";
-export const REFRESH_COOKIE_PATH = "/auth";
+export const REFRESH_COOKIE_PATH = "/";
 
 export const RATE_LIMIT_WINDOW_SECS = 60;
 export const RATE_LIMIT_EMAIL_WINDOW_SECS = 3600;
