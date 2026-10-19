@@ -2,6 +2,8 @@ import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
 import { and, desc, eq, gt, isNull, lt } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
+import { BusinessError } from "../../utils/errors/business.js";
+import { isUniqueViolation } from "../../utils/errors/pg.js";
 import { conversations } from "../conversation/schema.js";
 import type {
   CreatedMessageResult,
@@ -41,50 +43,63 @@ export class MessagePgRepository implements MessageRepository {
     clientMsgId?: string | null;
     replyToId?: string | null;
   }): Promise<CreatedMessageResult> {
-    return await this.db.transaction(async (tx) => {
-      // 1. Idempotency check with clientMsgId
-      if (messageData.clientMsgId) {
-        const [existing] = await tx
-          .select()
-          .from(messages)
-          .where(
-            and(
-              eq(messages.conversationId, messageData.conversationId),
-              eq(messages.senderId, messageData.senderId),
-              eq(messages.clientMsgId, messageData.clientMsgId),
-            ),
-          )
-          .limit(1);
+    try {
+      return await this.db.transaction(async (tx) => {
+        // 1. Idempotency check with clientMsgId
+        if (messageData.clientMsgId) {
+          const [existing] = await tx
+            .select()
+            .from(messages)
+            .where(
+              and(
+                eq(messages.conversationId, messageData.conversationId),
+                eq(messages.senderId, messageData.senderId),
+                eq(messages.clientMsgId, messageData.clientMsgId),
+              ),
+            )
+            .limit(1);
+          if (existing) return { message: existing, isNew: false };
+        }
+
+        // 2. Insert new message
+        const [newMsg] = await tx
+          .insert(messages)
+          .values({
+            conversationId: messageData.conversationId,
+            senderId: messageData.senderId,
+            body: messageData.body ?? null,
+            kind: messageData.kind ?? "TEXT",
+            clientMsgId: messageData.clientMsgId ?? null,
+            replyToId: messageData.replyToId ?? null,
+          })
+          .returning();
+
+        // 3. Atomically update parent conversation inbox fields
+        const preview = newMsg.body ? newMsg.body.slice(0, 80) : "[Tệp đính kèm]";
+        await tx
+          .update(conversations)
+          .set({
+            lastMessageId: newMsg.id,
+            lastMessageAt: newMsg.createdAt,
+            lastMessagePreview: preview,
+            updatedAt: new Date(),
+          })
+          .where(eq(conversations.id, messageData.conversationId));
+
+        return { message: newMsg, isNew: true };
+      });
+    } catch (err: unknown) {
+      if (messageData.clientMsgId && isUniqueViolation(err, "messages_client_msg_uq")) {
+        const existing = await this.findByClientMsgId(
+          messageData.conversationId,
+          messageData.senderId,
+          messageData.clientMsgId,
+        );
         if (existing) return { message: existing, isNew: false };
+        throw new BusinessError("CONFLICT");
       }
-
-      // 2. Insert new message
-      const [newMsg] = await tx
-        .insert(messages)
-        .values({
-          conversationId: messageData.conversationId,
-          senderId: messageData.senderId,
-          body: messageData.body ?? null,
-          kind: messageData.kind ?? "TEXT",
-          clientMsgId: messageData.clientMsgId ?? null,
-          replyToId: messageData.replyToId ?? null,
-        })
-        .returning();
-
-      // 3. Atomically update parent conversation inbox fields
-      const preview = newMsg.body ? newMsg.body.slice(0, 80) : "[Tệp đính kèm]";
-      await tx
-        .update(conversations)
-        .set({
-          lastMessageId: newMsg.id,
-          lastMessageAt: newMsg.createdAt,
-          lastMessagePreview: preview,
-          updatedAt: new Date(),
-        })
-        .where(eq(conversations.id, messageData.conversationId));
-
-      return { message: newMsg, isNew: true };
-    });
+      throw err;
+    }
   }
 
   async findTimeline(
