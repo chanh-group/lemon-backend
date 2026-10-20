@@ -99,7 +99,7 @@ describe("ConversationService", () => {
     } as unknown as RealtimeService;
     const mockFriendService = {
       assertCanChat: assertCanChatMock,
-      listFriends: vi.fn().mockResolvedValue([{ id: userB }]),
+      findAcceptedFriendIds: vi.fn().mockResolvedValue(new Set([userB])),
     } as unknown as FriendService;
 
     redisPipelineExecMock = vi
@@ -224,31 +224,40 @@ describe("ConversationService", () => {
 
   describe("listConversations", () => {
     it("returns mapped DTOs without directKey or lastReadMessageId", async () => {
-      findUserConversationsMock.mockResolvedValue([{ ...mockConvWithPartner }]);
+      findUserConversationsMock.mockResolvedValue({
+        items: [{ ...mockConvWithPartner }],
+        hasMore: false,
+      });
 
       const result = await service.listConversations(userA, 20);
 
-      expect(findUserConversationsMock).toHaveBeenCalledWith(userA, 20);
-      expect(result).toHaveLength(1);
-      expect(result[0].id).toBe(convId);
-      expect(result[0].partner?.isOnline).toBe(true);
-      expect(result[0]).not.toHaveProperty("directKey");
-      expect(result[0]).not.toHaveProperty("lastReadMessageId");
+      expect(findUserConversationsMock).toHaveBeenCalledWith(userA, 20, undefined);
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].id).toBe(convId);
+      expect(result.items[0].partner?.isOnline).toBe(true);
+      expect(result.items[0]).not.toHaveProperty("directKey");
+      expect(result.items[0]).not.toHaveProperty("lastReadMessageId");
     });
 
     it("maps unreadCount and presence enriched from Redis", async () => {
-      findUserConversationsMock.mockResolvedValue([{ ...mockConvWithPartner }]);
+      findUserConversationsMock.mockResolvedValue({
+        items: [{ ...mockConvWithPartner }],
+        hasMore: false,
+      });
 
       const result = await service.listConversations(userA);
 
-      expect(result[0].unreadCount).toBe(3);
-      expect(result[0].partner?.isOnline).toBe(true);
+      expect(result.items[0].unreadCount).toBe(3);
+      expect(result.items[0].partner?.isOnline).toBe(true);
       expect(countUnreadMock).not.toHaveBeenCalled();
       expect(redisSetMock).not.toHaveBeenCalled();
     });
 
     it("rebuilds unreadCount from the database and caches it when Redis has no value", async () => {
-      findUserConversationsMock.mockResolvedValue([{ ...mockConvWithPartner }]);
+      findUserConversationsMock.mockResolvedValue({
+        items: [{ ...mockConvWithPartner }],
+        hasMore: false,
+      });
       redisPipelineExecMock
         .mockResolvedValueOnce([[null, null], presenceOnline])
         .mockResolvedValueOnce([[null, "OK"]]);
@@ -257,7 +266,7 @@ describe("ConversationService", () => {
       const result = await service.listConversations(userA);
 
       expect(countUnreadBatchMock).toHaveBeenCalledWith([convId], userA);
-      expect(result[0].unreadCount).toBe(3);
+      expect(result.items[0].unreadCount).toBe(3);
       expect(redisPipelineSetMock).toHaveBeenCalledWith(
         unreadCountKey(userA, convId),
         "3",
@@ -267,7 +276,10 @@ describe("ConversationService", () => {
     });
 
     it("fails when Redis returns a pipeline command error instead of treating it as a cache miss", async () => {
-      findUserConversationsMock.mockResolvedValue([{ ...mockConvWithPartner }]);
+      findUserConversationsMock.mockResolvedValue({
+        items: [{ ...mockConvWithPartner }],
+        hasMore: false,
+      });
       redisPipelineExecMock.mockResolvedValue([[new Error("READONLY"), null], presenceOnline]);
 
       await expect(service.listConversations(userA)).rejects.toMatchObject({ kind: "unavailable" });
@@ -277,10 +289,10 @@ describe("ConversationService", () => {
 
     it("rebuilds all missing counters in one batch across conversations", async () => {
       const otherConvId = "0193a2b1-0000-7000-8000-000000000011";
-      findUserConversationsMock.mockResolvedValue([
-        { ...mockConvWithPartner },
-        { ...mockConvWithPartner, id: otherConvId },
-      ]);
+      findUserConversationsMock.mockResolvedValue({
+        items: [{ ...mockConvWithPartner }, { ...mockConvWithPartner, id: otherConvId }],
+        hasMore: false,
+      });
       redisPipelineExecMock
         .mockResolvedValueOnce([[null, null], [null, null], presenceOnline, presenceOnline])
         .mockResolvedValueOnce([
@@ -297,12 +309,15 @@ describe("ConversationService", () => {
       const result = await service.listConversations(userA);
 
       expect(countUnreadBatchMock).toHaveBeenCalledWith([convId, otherConvId], userA);
-      expect(result[0].unreadCount).toBe(1);
-      expect(result[1].unreadCount).toBe(1);
+      expect(result.items[0].unreadCount).toBe(1);
+      expect(result.items[1].unreadCount).toBe(1);
     });
 
     it("returns a server error when rebuilding unread counts fails", async () => {
-      findUserConversationsMock.mockResolvedValue([{ ...mockConvWithPartner }]);
+      findUserConversationsMock.mockResolvedValue({
+        items: [{ ...mockConvWithPartner }],
+        hasMore: false,
+      });
       redisPipelineExecMock.mockResolvedValue([[null, null], presenceOnline]);
       countUnreadBatchMock.mockRejectedValue(new Error("db down"));
       const warn = vi.spyOn(Logger.prototype, "warn").mockReturnValue(undefined);

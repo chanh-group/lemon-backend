@@ -15,6 +15,7 @@ import {
 import { created, uuidV7 } from "../../utils/database.js";
 import { conversations } from "../conversation/schema.js";
 import { users } from "../user/schema.js";
+import { MESSAGE_MAX_BODY_LENGTH } from "./constants.js";
 
 export const messageKindEnum = pgEnum("message_kind", [
   "TEXT",
@@ -54,7 +55,7 @@ export const messages = pgTable(
     ),
     check(
       "messages_body_len_chk",
-      sql`${table.body} IS NULL OR char_length(${table.body}) <= 4000`,
+      sql`${table.body} IS NULL OR char_length(${table.body}) <= ${sql.raw(String(MESSAGE_MAX_BODY_LENGTH))}`,
     ),
     uniqueIndex("messages_client_msg_uq")
       .on(table.conversationId, table.senderId, table.clientMsgId)

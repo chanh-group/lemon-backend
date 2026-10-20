@@ -13,6 +13,8 @@ import { FriendService } from "../friend/service.js";
 import { SystemError } from "../../utils/errors/system.js";
 import { RedisHealthService } from "../../configs/redis-health.js";
 import { RedisMetricsService } from "../../configs/redis-metrics.js";
+import type { CursorPage } from "../shared.js";
+import { DEFAULT_PAGE_SIZE } from "../pagination.constants.js";
 
 function requireRedisPipelineResults(
   results: [Error | null, unknown][] | null,
@@ -89,17 +91,24 @@ export class ConversationService {
     }
   }
 
-  async listConversations(userId: string, limit = 20): Promise<ConversationResponse[]> {
-    const [conversations, friends] = await Promise.all([
-      this.convRepo.findUserConversations(userId, limit),
-      this.friendService.listFriends(userId),
-    ]);
-    const friendIds = new Set(friends.map((friend) => friend.id));
+  async listConversations(
+    userId: string,
+    limit = DEFAULT_PAGE_SIZE,
+    cursor?: string,
+  ): Promise<CursorPage<ConversationResponse>> {
+    const page = await this.convRepo.findUserConversations(userId, limit, cursor);
+    const conversations = page.items;
+    const candidateFriendIds = conversations.flatMap((conversation) =>
+      conversation.kind === "DIRECT" && conversation.partner ? [conversation.partner.id] : [],
+    );
+    const friendIds = await this.friendService.findAcceptedFriendIds(userId, candidateFriendIds);
     const list = conversations.filter(
       (conversation) =>
         conversation.kind !== "DIRECT" ||
         Boolean(conversation.partner && friendIds.has(conversation.partner.id)),
     );
+
+    if (list.length === 0) return { ...page, items: [] };
 
     // Enrich with unread counts and presence from Redis
     if (list.length > 0) {
@@ -109,7 +118,7 @@ export class ConversationService {
           userId,
         );
         for (const conv of list) conv.unreadCount = counts.get(conv.id) ?? 0;
-        return list.map(toConversationResponse);
+        return { ...page, items: list.map(toConversationResponse) };
       }
 
       let results: [Error | null, unknown][] | null;
@@ -189,7 +198,7 @@ export class ConversationService {
       }
     }
 
-    return list.map(toConversationResponse);
+    return { ...page, items: list.map(toConversationResponse) };
   }
 
   async getById(conversationId: string, userId: string): Promise<ConversationResponse> {

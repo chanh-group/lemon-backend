@@ -9,6 +9,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Req,
 } from "@nestjs/common";
 import {
@@ -24,6 +25,7 @@ import { Lang } from "../../utils/decorators.js";
 import { t } from "../../utils/i18n/index.js";
 import { created, messageOnly, ok } from "../../utils/response.js";
 import { getAuthUser, type AuthUser } from "../shared.js";
+import { parseCursorPage } from "../shared.js";
 import { friendRequestSchema } from "./dto/request.js";
 import { FriendService } from "./service.js";
 
@@ -60,9 +62,21 @@ export class FriendController {
   }
 
   @Get("requests")
-  async listRequests(@Req() req: { user?: unknown }) {
+  async listRequests(
+    @Req() req: { user?: unknown },
+    @Query("incomingCursor") incomingCursor?: string,
+    @Query("outgoingCursor") outgoingCursor?: string,
+    @Query("limit") limit?: string,
+  ) {
     const { id: userId }: AuthUser = getAuthUser(req);
-    const data = await this.service.listRequests(userId);
+    const incomingPage = parseCursorPage(incomingCursor, limit);
+    const outgoingPage = parseCursorPage(outgoingCursor, limit);
+    const data = await this.service.listRequestsPage(
+      userId,
+      incomingPage.cursor,
+      outgoingPage.cursor,
+      incomingPage.size,
+    );
     return ok(data);
   }
 
@@ -103,9 +117,14 @@ export class FriendController {
   }
 
   @Get()
-  async listFriends(@Req() req: { user?: unknown }) {
+  async listFriends(
+    @Req() req: { user?: unknown },
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ) {
     const { id: userId }: AuthUser = getAuthUser(req);
-    return ok(await this.service.listFriends(userId));
+    const page = parseCursorPage(cursor, limit);
+    return ok(await this.service.listFriendsPage(userId, page.cursor, page.size));
   }
 
   @Delete(":friendId")

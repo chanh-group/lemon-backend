@@ -11,6 +11,7 @@ import {
 import type { Server, Socket } from "socket.io";
 import { presenceOnlineKey, presenceUserKey, typingKey } from "../../utils/cache/keys.js";
 import {
+  OFFLINE_PRESENCE_TTL_SECONDS,
   PRESENCE_GRACE_MS,
   PRESENCE_OTHER_NODE_TTL_SECONDS,
   PRESENCE_TTL_SECONDS,
@@ -358,7 +359,7 @@ export class ChatGateway
           presenceUserKey(userId),
           JSON.stringify({ state: "offline", lastSeen: now }),
           "EX",
-          86400 * 7,
+          OFFLINE_PRESENCE_TTL_SECONDS,
         )
         .zrem(presenceOnlineKey(), userId)
         .exec();

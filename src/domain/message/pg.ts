@@ -6,6 +6,7 @@ import { BusinessError } from "../../utils/errors/business.js";
 import { isUniqueViolation } from "../../utils/errors/pg.js";
 import { conversations } from "../conversation/schema.js";
 import { friendships } from "../friend/schema.js";
+import { DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE } from "../pagination.constants.js";
 import { ATTACHMENT_PREVIEW_TOKEN } from "./constants.js";
 import type {
   CreatedMessageResult,
@@ -136,10 +137,10 @@ export class MessagePgRepository implements MessageRepository {
   async findTimeline(
     conversationId: string,
     cursor?: string,
-    limit = 30,
+    limit = DEFAULT_MESSAGE_PAGE_SIZE,
     after?: string,
   ): Promise<MessageTimelineResult> {
-    const queryLimit = Math.min(Math.max(limit, 1), 50);
+    const queryLimit = Math.min(Math.max(limit, 1), MAX_MESSAGE_PAGE_SIZE);
 
     const conditions = [eq(messages.conversationId, conversationId), isNull(messages.deletedAt)];
 

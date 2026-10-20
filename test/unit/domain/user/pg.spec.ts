@@ -112,21 +112,23 @@ describe("UserPgRepository", () => {
   describe("search", () => {
     it("casts citext to text for the trigram email index and escapes wildcard input", async () => {
       const limitMock = vi.fn().mockResolvedValue([mockUser]);
-      const whereMock = vi.fn().mockReturnValue({ limit: limitMock });
+      const orderByMock = vi.fn().mockReturnValue({ limit: limitMock });
+      const whereMock = vi.fn().mockReturnValue({ orderBy: orderByMock });
       const fromMock = vi.fn().mockReturnValue({ where: whereMock });
       vi.mocked((mockDb as { select: ReturnType<typeof vi.fn> }).select).mockReturnValueOnce({
         from: fromMock,
       });
 
-      const result = await repository.search("  foo%_  ", "email", mockUser.id, 10);
+      const result = await repository.search("  foo%_  ", "email", mockUser.id, undefined, 10);
       const condition = whereMock.mock.calls[0][0] as SQL;
       const query = new PgDialect().sqlToQuery(condition);
 
-      expect(result).toEqual([mockUser]);
+      expect(result).toEqual({ items: [mockUser], hasMore: false });
       expect(query.sql).toContain('"users"."email"::text ilike');
       expect(query.params).toContain("%foo\\%\\_%");
       expect(query.params).toContain(mockUser.id);
-      expect(limitMock).toHaveBeenCalledWith(10);
+      expect(orderByMock).toHaveBeenCalledOnce();
+      expect(limitMock).toHaveBeenCalledWith(11);
     });
   });
 

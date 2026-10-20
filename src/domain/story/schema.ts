@@ -12,6 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { created, uuidV7 } from "../../utils/database.js";
 import { users } from "../user/schema.js";
+import { STORY_MAX_CAPTION_LENGTH } from "./constants.js";
 
 export const storyKindEnum = pgEnum("story_kind", ["IMAGE", "VIDEO", "TEXT"]);
 
@@ -39,7 +40,7 @@ export const stories = pgTable(
     check("stories_media_chk", sql`${table.kind} = 'TEXT' OR ${table.objectKey} IS NOT NULL`),
     check(
       "stories_caption_len_chk",
-      sql`${table.caption} IS NULL OR char_length(${table.caption}) <= 500`,
+      sql`${table.caption} IS NULL OR char_length(${table.caption}) <= ${sql.raw(String(STORY_MAX_CAPTION_LENGTH))}`,
     ),
     check(
       "stories_media_dims_chk",
@@ -68,6 +69,11 @@ export const storyViews = pgTable(
   (table) => [
     primaryKey({ columns: [table.storyId, table.userId] }),
     index("story_views_viewer_idx").on(table.userId),
+    index("story_views_story_cursor_idx").on(
+      table.storyId,
+      table.viewedAt.desc(),
+      table.userId.desc(),
+    ),
   ],
 );
 

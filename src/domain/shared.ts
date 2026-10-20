@@ -1,14 +1,48 @@
 import { BusinessError } from "../utils/errors/business.js";
+import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "./pagination.constants.js";
 
-export interface Pageable {
+export interface CursorPage<T> {
+  items: T[];
+  nextCursor?: string;
+  hasMore: boolean;
+}
+
+export interface CursorPageInput {
   cursor?: string;
   size: number;
 }
 
-export interface Page<T> {
-  content: T[];
-  cursor?: string;
-  size: number;
+export function toCursorPage<T>(
+  rows: T[],
+  size: number,
+  getCursor: (row: T) => string,
+): CursorPage<T> {
+  const hasMore = rows.length > size;
+  const items = hasMore ? rows.slice(0, size) : rows;
+  return {
+    items,
+    ...(hasMore && items.length > 0 ? { nextCursor: getCursor(items[items.length - 1]!) } : {}),
+    hasMore,
+  };
+}
+
+export function parseCursorPage(
+  cursor: string | undefined,
+  size: string | undefined,
+  defaultSize = DEFAULT_PAGE_SIZE,
+  maxSize = MAX_PAGE_SIZE,
+): CursorPageInput {
+  if (
+    cursor !== undefined &&
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cursor)
+  ) {
+    throw new BusinessError("BAD_REQUEST");
+  }
+  if (size === undefined) return { cursor, size: defaultSize };
+  if (!/^[1-9]\d*$/.test(size)) throw new BusinessError("BAD_REQUEST");
+  const parsedSize = Number(size);
+  if (!Number.isSafeInteger(parsedSize)) throw new BusinessError("BAD_REQUEST");
+  return { cursor, size: Math.min(parsedSize, maxSize) };
 }
 
 /**

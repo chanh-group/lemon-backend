@@ -1,17 +1,10 @@
 import { Controller, Get, Param, Query } from "@nestjs/common";
 import { CurrentUser, type AuthUser } from "../../utils/decorators.js";
 import { ok } from "../../utils/response.js";
+import { parseCursorPage } from "../shared.js";
+import { USER_SEARCH_MAX_LENGTH, USER_SEARCH_MIN_LENGTH } from "./constants.js";
 import { toUserResponse } from "./dto/mapper.js";
 import { UserService } from "./service.js";
-
-interface UserSearchResponse {
-  id: string;
-  name: string;
-  username: string;
-  email: string;
-}
-
-const MAX_SEARCH_LENGTH = 64;
 
 @Controller("users")
 export class UserController {
@@ -22,22 +15,34 @@ export class UserController {
     @Query("q") query: string | undefined,
     @Query("field") field: string | undefined,
     @CurrentUser() currentUser: AuthUser,
-  ): Promise<UserSearchResponse[]> {
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ) {
+    const page = parseCursorPage(cursor, limit);
     const value = query?.trim() ?? "";
-    if (value.length < 2 || value.length > MAX_SEARCH_LENGTH) {
-      return [];
+    if (value.length < USER_SEARCH_MIN_LENGTH || value.length > USER_SEARCH_MAX_LENGTH) {
+      return { items: [], hasMore: false };
     }
     const searchField = field === "email" ? "email" : field === "username" ? "username" : null;
     if (!searchField) {
-      return [];
+      return { items: [], hasMore: false };
     }
-    const users = await this.userService.search(value, searchField, currentUser.id);
-    return users.map((user) => ({
-      id: user.id,
-      name: user.fullName,
-      username: user.username,
-      email: user.email,
-    }));
+    const users = await this.userService.search(
+      value,
+      searchField,
+      currentUser.id,
+      page.cursor,
+      page.size,
+    );
+    return {
+      ...users,
+      items: users.items.map((user) => ({
+        id: user.id,
+        name: user.fullName,
+        username: user.username,
+        email: user.email,
+      })),
+    };
   }
 
   @Get("by-username/:username")

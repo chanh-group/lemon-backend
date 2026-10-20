@@ -26,7 +26,9 @@ import { Lang } from "../../utils/decorators.js";
 import { t } from "../../utils/i18n/index.js";
 import { created, ok, withMessage } from "../../utils/response.js";
 import { getAuthUser, type AuthUser } from "../shared.js";
+import { parseCursorPage } from "../shared.js";
 import { MessageService } from "./service.js";
+import { DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE } from "../pagination.constants.js";
 import {
   editMessageSchema,
   type EditMessageDto,
@@ -76,13 +78,18 @@ export class MessageController {
     @Query("after") after?: string,
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
-    const requestedLimit = limit === undefined ? 30 : Number(limit);
-    const parsedLimit = Number.isInteger(requestedLimit) ? requestedLimit : 30;
+    if (cursor !== undefined && after !== undefined) throw new BusinessError("BAD_REQUEST");
+    const page = parseCursorPage(
+      cursor ?? after,
+      limit,
+      DEFAULT_MESSAGE_PAGE_SIZE,
+      MAX_MESSAGE_PAGE_SIZE,
+    );
     const data = await this.messageService.getTimeline(
       userId,
       conversationId,
-      cursor,
-      parsedLimit,
+      cursor ? page.cursor : undefined,
+      page.size,
       after,
     );
     return ok(data);

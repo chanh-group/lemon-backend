@@ -1,0 +1,2 @@
+export const NOTE_MAX_CONTENT_LENGTH = 200;
+export const NOTE_MAX_BACKGROUND_LENGTH = 200;

@@ -1,4 +1,5 @@
 import type { Friendship } from "./schema.js";
+import type { CursorPage } from "../shared.js";
 
 export interface FriendUser {
   id: string;
@@ -21,10 +22,21 @@ export interface FriendRepository {
     requesterId: string,
     addresseeId: string,
   ): Promise<{ friendship: Friendship; created: boolean }>;
-  listRequests(
+  listFriendsPage(
     userId: string,
-  ): Promise<{ incoming: FriendRequestRecord[]; outgoing: FriendRequestRecord[] }>;
-  listFriends(userId: string): Promise<FriendUser[]>;
+    cursor: string | undefined,
+    limit: number,
+  ): Promise<CursorPage<FriendUser>>;
+  findAcceptedFriendIds(userId: string, candidates: string[]): Promise<Set<string>>;
+  listRequestsPage(
+    userId: string,
+    incomingCursor: string | undefined,
+    outgoingCursor: string | undefined,
+    limit: number,
+  ): Promise<{
+    incoming: CursorPage<FriendRequestRecord>;
+    outgoing: CursorPage<FriendRequestRecord>;
+  }>;
   acceptRequest(
     requestId: string,
     addresseeId: string,

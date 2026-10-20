@@ -14,11 +14,7 @@ import { BusinessError } from "../../utils/errors/business.js";
 import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.js";
 import { groupStoriesByUser, reviveUserStoryFeed, toStoryItemResponse } from "./dto/mapper.js";
 import type { CreateStoryDto } from "./dto/request.js";
-import type {
-  StoryItemResponse,
-  StoryViewerResponse,
-  UserStoryFeedResponse,
-} from "./dto/response.js";
+import type { StoryItemResponse, UserStoryFeedResponse } from "./dto/response.js";
 import { STORY_REPOSITORY, type StoryRepository } from "./repository.js";
 import type { NewStory } from "./schema.js";
 
@@ -176,7 +172,7 @@ export class StoryService {
     await this.cache.deleteBestEffort(storyFeedKey(userId));
   }
 
-  async getViewers(userId: string, storyId: string): Promise<StoryViewerResponse[]> {
+  async getViewers(userId: string, storyId: string, cursor: string | undefined, limit: number) {
     const story = await this.storyRepo.findById(storyId);
     if (!story) {
       throw new BusinessError("STORY_NOT_FOUND");
@@ -186,7 +182,7 @@ export class StoryService {
       throw new BusinessError("STORY_VIEWERS_FORBIDDEN");
     }
 
-    return this.storyRepo.findViewersByStoryId(storyId);
+    return this.storyRepo.findViewersByStoryId(storyId, cursor, limit);
   }
 
   async deleteStory(userId: string, storyId: string): Promise<void> {

@@ -44,7 +44,7 @@ export const conversations = pgTable(
       .on(table.directKey)
       .where(sql`${table.directKey} IS NOT NULL`),
     index("conversations_inbox_order_idx")
-      .on(sql`coalesce(${table.lastMessageAt}, ${table.createdAt}) DESC`)
+      .on(sql`coalesce(${table.lastMessageAt}, ${table.createdAt}) DESC`, table.id.desc())
       .where(sql`${table.deletedAt} IS NULL`),
   ],
 );

@@ -7,8 +7,6 @@ describe("FriendService", () => {
   let friendRepo: {
     findByPair: ReturnType<typeof vi.fn>;
     createRequest: ReturnType<typeof vi.fn>;
-    listRequests: ReturnType<typeof vi.fn>;
-    listFriends: ReturnType<typeof vi.fn>;
     acceptRequest: ReturnType<typeof vi.fn>;
     deleteIncomingRequest: ReturnType<typeof vi.fn>;
     deleteOutgoingRequest: ReturnType<typeof vi.fn>;
@@ -26,8 +24,6 @@ describe("FriendService", () => {
         friendship: { id: "request-id", requesterId: userId, status: "PENDING" },
         created: true,
       }),
-      listRequests: vi.fn(),
-      listFriends: vi.fn(),
       acceptRequest: vi.fn(),
       deleteIncomingRequest: vi.fn(),
       deleteOutgoingRequest: vi.fn(),

@@ -4,6 +4,7 @@ import PQueue from "p-queue";
 import {
   MAIL_QUEUE_CONCURRENCY,
   MAIL_QUEUE_MAX_SIZE,
+  MAIL_QUEUE_DRAIN_TIMEOUT_MS,
   MAIL_RETRY_BACKOFFS_MS,
   MAIL_RETRY_COUNT,
 } from "./constants.js";
@@ -104,7 +105,7 @@ export class MailService implements OnModuleDestroy {
       this.logger.log("Draining mail queue on shutdown...", { action: "mail.drain" });
       await Promise.race([
         this.queue.onIdle(),
-        new Promise((resolve) => setTimeout(resolve, 5000)),
+        new Promise((resolve) => setTimeout(resolve, MAIL_QUEUE_DRAIN_TIMEOUT_MS)),
       ]);
       if (this.transporter) {
         this.transporter.close();
@@ -151,7 +152,7 @@ export class MailService implements OnModuleDestroy {
         });
 
         if (attempt <= MAIL_RETRY_COUNT) {
-          const delay = MAIL_RETRY_BACKOFFS_MS[attempt - 1] ?? 1000;
+          const delay = MAIL_RETRY_BACKOFFS_MS[attempt - 1] ?? MAIL_RETRY_BACKOFFS_MS.at(-1)!;
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
       }

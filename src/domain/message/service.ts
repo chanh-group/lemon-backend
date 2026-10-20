@@ -17,6 +17,7 @@ import { FriendService } from "../friend/service.js";
 import { SystemError } from "../../utils/errors/system.js";
 import { RedisHealthService } from "../../configs/redis-health.js";
 import { RedisMetricsService } from "../../configs/redis-metrics.js";
+import { MESSAGE_MAX_BODY_LENGTH } from "./constants.js";
 
 export type { SendMessageDto };
 
@@ -56,7 +57,7 @@ export class MessageService {
       throw new BusinessError("BAD_REQUEST");
     }
 
-    if (dto.body && dto.body.length > 4000) {
+    if (dto.body && dto.body.length > MESSAGE_MAX_BODY_LENGTH) {
       throw new BusinessError("BAD_REQUEST");
     }
 
@@ -177,7 +178,7 @@ export class MessageService {
       throw new BusinessError("BAD_REQUEST");
     }
 
-    if (body.length > 4000) {
+    if (body.length > MESSAGE_MAX_BODY_LENGTH) {
       throw new BusinessError("BAD_REQUEST");
     }
 

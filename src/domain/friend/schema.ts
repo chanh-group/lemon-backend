@@ -30,8 +30,8 @@ export const friendships = pgTable(
     check("friendships_no_self_chk", sql`${table.requesterId} <> ${table.addresseeId}`),
     check("friendships_pair_chk", sql`${table.userLow} < ${table.userHigh}`),
     unique("friendships_pair_uq").on(table.userLow, table.userHigh),
-    index("friendships_addressee_idx").on(table.addresseeId, table.status),
-    index("friendships_requester_idx").on(table.requesterId, table.status),
+    index("friendships_addressee_idx").on(table.addresseeId, table.status, table.requesterId),
+    index("friendships_requester_idx").on(table.requesterId, table.status, table.addresseeId),
     index("friendships_low_idx")
       .on(table.userLow)
       .where(sql`${table.status} = 'ACCEPTED'`),

@@ -55,12 +55,21 @@ export class FriendService {
     });
   }
 
-  listRequests(userId: string) {
-    return this.friendRepo.listRequests(userId);
+  listRequestsPage(
+    userId: string,
+    incomingCursor: string | undefined,
+    outgoingCursor: string | undefined,
+    limit: number,
+  ) {
+    return this.friendRepo.listRequestsPage(userId, incomingCursor, outgoingCursor, limit);
   }
 
-  listFriends(userId: string) {
-    return this.friendRepo.listFriends(userId);
+  listFriendsPage(userId: string, cursor: string | undefined, limit: number) {
+    return this.friendRepo.listFriendsPage(userId, cursor, limit);
+  }
+
+  findAcceptedFriendIds(userId: string, candidates: string[]) {
+    return this.friendRepo.findAcceptedFriendIds(userId, candidates);
   }
 
   async acceptRequest(requestId: string, userId: string): Promise<void> {

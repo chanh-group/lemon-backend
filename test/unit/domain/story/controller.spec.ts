@@ -21,7 +21,14 @@ describe("StoryController", () => {
   let getFeedMock: Mock<(userId: string) => Promise<UserStoryFeedResponse[]>>;
   let getStoryByIdMock: Mock<(userId: string, storyId: string) => Promise<StoryItemResponse>>;
   let viewStoryMock: Mock<(userId: string, storyId: string) => Promise<void>>;
-  let getViewersMock: Mock<(userId: string, storyId: string) => Promise<StoryViewerResponse[]>>;
+  let getViewersMock: Mock<
+    (
+      userId: string,
+      storyId: string,
+      cursor: string | undefined,
+      limit: number,
+    ) => Promise<{ items: StoryViewerResponse[]; nextCursor?: string; hasMore: boolean }>
+  >;
   let deleteStoryMock: Mock<(userId: string, storyId: string) => Promise<void>>;
 
   const mockStoryItem: StoryItemResponse = {
@@ -62,18 +69,28 @@ describe("StoryController", () => {
       .fn<(userId: string, storyId: string) => Promise<void>>()
       .mockResolvedValue(undefined);
     getViewersMock = vi
-      .fn<(userId: string, storyId: string) => Promise<StoryViewerResponse[]>>()
-      .mockResolvedValue([
-        {
-          user: {
-            id: "viewer-1",
-            username: "friend1",
-            fullName: "Friend One",
-            avatarUrl: null,
+      .fn<
+        (
+          userId: string,
+          storyId: string,
+          cursor: string | undefined,
+          limit: number,
+        ) => Promise<{ items: StoryViewerResponse[]; nextCursor?: string; hasMore: boolean }>
+      >()
+      .mockResolvedValue({
+        items: [
+          {
+            user: {
+              id: "viewer-1",
+              username: "friend1",
+              fullName: "Friend One",
+              avatarUrl: null,
+            },
+            viewedAt: new Date(),
           },
-          viewedAt: new Date(),
-        },
-      ]);
+        ],
+        hasMore: false,
+      });
     deleteStoryMock = vi
       .fn<(userId: string, storyId: string) => Promise<void>>()
       .mockResolvedValue(undefined);
@@ -176,10 +193,10 @@ describe("StoryController", () => {
     it("delegates to storyService.getViewers and wraps viewers in response envelope", async () => {
       const result = await controller.getViewers({ user: { id: "user-1" } }, mockStoryItem.id);
 
-      expect(getViewersMock).toHaveBeenCalledWith("user-1", mockStoryItem.id);
+      expect(getViewersMock).toHaveBeenCalledWith("user-1", mockStoryItem.id, undefined, 20);
       expect(result.success).toBe(true);
       expect(result.message).toBe("OK");
-      expect(result.data).toHaveLength(1);
+      expect(result.data?.items).toHaveLength(1);
     });
   });
 

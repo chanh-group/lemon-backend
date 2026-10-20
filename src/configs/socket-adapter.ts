@@ -4,6 +4,11 @@ import { createAdapter } from "@socket.io/redis-adapter";
 import { Redis } from "ioredis";
 import type { Server, ServerOptions } from "socket.io";
 import { get_env } from "../helpers/index.js";
+import {
+  DEFAULT_REDIS_URL,
+  REDIS_RECONNECT_DELAY_BASE_MS,
+  REDIS_RECONNECT_DELAY_MAX_MS,
+} from "../utils/cache/constants.js";
 
 const logger = new Logger("RedisIoAdapter");
 
@@ -13,14 +18,15 @@ export class RedisIoAdapter extends IoAdapter {
   private subClient: Redis | null = null;
 
   async connectToRedis(): Promise<void> {
-    const redisUrl = get_env("REDIS_URL", "redis://localhost:6379");
+    const redisUrl = get_env("REDIS_URL", DEFAULT_REDIS_URL);
 
     let pubClient: Redis | null = null;
     let subClient: Redis | null = null;
     try {
       pubClient = new Redis(redisUrl, {
         maxRetriesPerRequest: 3,
-        retryStrategy: (times: number) => Math.min(times * 100, 3000),
+        retryStrategy: (times: number) =>
+          Math.min(times * REDIS_RECONNECT_DELAY_BASE_MS, REDIS_RECONNECT_DELAY_MAX_MS),
       });
       subClient = pubClient.duplicate();
 

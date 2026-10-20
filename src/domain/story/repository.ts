@@ -1,6 +1,7 @@
 import type { NewStory, Story } from "./schema.js";
 import type { StoryViewerResponse } from "./dto/response.js";
 import type { UserSummary } from "../user/dto/response.js";
+import type { CursorPage } from "../shared.js";
 
 export type PurgeableStory = { id: string; objectKey: string | null };
 
@@ -10,7 +11,11 @@ export interface StoryRepository {
   findActiveById(id: string): Promise<Story | null>;
   findActiveByUserIds(userIds: string[]): Promise<Story[]>;
   findUsersByIds(userIds: string[]): Promise<Map<string, UserSummary>>;
-  findViewersByStoryId(storyId: string): Promise<StoryViewerResponse[]>;
+  findViewersByStoryId(
+    storyId: string,
+    cursor: string | undefined,
+    limit: number,
+  ): Promise<CursorPage<StoryViewerResponse>>;
   findViewedStoryIds(userId: string, storyIds: string[]): Promise<Set<string>>;
   markAsViewed(storyId: string, userId: string): Promise<void>;
   markDeleted(id: string): Promise<boolean>;

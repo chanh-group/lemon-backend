@@ -149,6 +149,40 @@ describe("MessageController", () => {
         },
       });
     });
+
+    it("rejects malformed cursors before they reach PostgreSQL", async () => {
+      await expect(
+        controller.getMessages({ user: { id: mockUserId } }, mockConvId, "not-a-uuid", undefined),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      expect(getTimelineMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects requests that combine backward and forward cursors", async () => {
+      await expect(
+        controller.getMessages(
+          { user: { id: mockUserId } },
+          mockConvId,
+          mockMsgId,
+          undefined,
+          mockMsgId,
+        ),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      expect(getTimelineMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects invalid limits and caps valid limits at the server maximum", async () => {
+      await expect(
+        controller.getMessages({ user: { id: mockUserId } }, mockConvId, undefined, "0"),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      await controller.getMessages({ user: { id: mockUserId } }, mockConvId, undefined, "500");
+      expect(getTimelineMock).toHaveBeenCalledWith(
+        mockUserId,
+        mockConvId,
+        undefined,
+        50,
+        undefined,
+      );
+    });
   });
 
   describe("editMessage", () => {

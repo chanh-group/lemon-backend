@@ -39,9 +39,15 @@ export class UserService {
     return this.userRepo.findByIdentifier(identifier);
   }
 
-  async search(query: string, field: "email" | "username", excludeId?: string): Promise<UserResponseDto[]> {
-    const users = await this.userRepo.search(query, field, excludeId);
-    return users.map(toUserResponse);
+  async search(
+    query: string,
+    field: "email" | "username",
+    excludeId: string | undefined,
+    cursor: string | undefined,
+    limit: number,
+  ) {
+    const page = await this.userRepo.search(query, field, excludeId, cursor, limit);
+    return { ...page, items: page.items.map(toUserResponse) };
   }
 
   async create(input: CreateUserInput): Promise<User> {

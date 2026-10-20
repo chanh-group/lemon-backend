@@ -14,6 +14,7 @@ import { Lang } from "../../utils/decorators.js";
 import { t } from "../../utils/i18n/index.js";
 import { created, messageOnly, ok } from "../../utils/response.js";
 import { getAuthUser, type AuthUser } from "../shared.js";
+import { parseCursorPage } from "../shared.js";
 import { ConversationService } from "./service.js";
 import { DEFAULT_CONVERSATION_PAGE_SIZE, MAX_CONVERSATION_PAGE_SIZE } from "./constants.js";
 import {
@@ -40,13 +41,19 @@ export class ConversationController {
   }
 
   @Get()
-  async listConversations(@Req() req: { user?: unknown }, @Query("limit") limit?: string) {
+  async listConversations(
+    @Req() req: { user?: unknown },
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ) {
     const { id: userId }: AuthUser = getAuthUser(req);
-    const requestedLimit = limit === undefined ? DEFAULT_CONVERSATION_PAGE_SIZE : Number(limit);
-    const parsedLimit = Number.isInteger(requestedLimit)
-      ? Math.min(Math.max(requestedLimit, 1), MAX_CONVERSATION_PAGE_SIZE)
-      : DEFAULT_CONVERSATION_PAGE_SIZE;
-    const data = await this.service.listConversations(userId, parsedLimit);
+    const page = parseCursorPage(
+      cursor,
+      limit,
+      DEFAULT_CONVERSATION_PAGE_SIZE,
+      MAX_CONVERSATION_PAGE_SIZE,
+    );
+    const data = await this.service.listConversations(userId, page.size, page.cursor);
     return ok(data);
   }
 

@@ -6,6 +6,9 @@ import { get_env } from "../helpers/index.js";
 import {
   REDIS_COMMAND_TIMEOUT_MS,
   REDIS_MAX_RETRIES_PER_REQUEST,
+  REDIS_RECONNECT_DELAY_BASE_MS,
+  REDIS_RECONNECT_DELAY_MAX_MS,
+  DEFAULT_REDIS_URL,
 } from "../utils/cache/constants.js";
 import { CACHE_STORE, REDIS_CLIENT } from "../utils/cache/store.js";
 import { RedisHealthService } from "./redis-health.js";
@@ -23,12 +26,13 @@ async function createRedisClient(): Promise<RedisWithCacheCommands> {
   // NOTE: named `Redis` — the package is CJS, so namespace `.default` has no
   // construct signature under nodenext; the named re-export does.
   const { Redis } = await import("ioredis");
-  const redis = new Redis(get_env("REDIS_URL", "redis://localhost:6379"), {
+  const redis = new Redis(get_env("REDIS_URL", DEFAULT_REDIS_URL), {
     lazyConnect: false,
     maxRetriesPerRequest: REDIS_MAX_RETRIES_PER_REQUEST,
     commandTimeout: REDIS_COMMAND_TIMEOUT_MS,
     enableReadyCheck: true,
-    retryStrategy: (times: number) => Math.min(times * 100, 3000),
+    retryStrategy: (times: number) =>
+      Math.min(times * REDIS_RECONNECT_DELAY_BASE_MS, REDIS_RECONNECT_DELAY_MAX_MS),
   }) as unknown as RedisWithCacheCommands;
   redis.on("error", (err: Error) => {
     logger.warn(`Redis connection error: ${err.message}`);
