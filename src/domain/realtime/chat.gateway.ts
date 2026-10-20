@@ -47,7 +47,7 @@ export class ChatGateway
 
   // Track active connection counts per user: userId -> socket count
   private readonly userConnections = new Map<string, number>();
-  // Track disconnect timers for 60s grace period: userId -> timer
+  // Track disconnect/offline recheck timers: userId -> timer
   private readonly graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
@@ -309,8 +309,14 @@ export class ChatGateway
         const ttl = await this.redis.ttl(presenceUserKey(userId));
         if (ttl > PRESENCE_OTHER_NODE_TTL_SECONDS) {
           logger.log(
-            `Presence grace skipped for ${userId}: another node still heartbeats (ttl ${ttl}s)`,
+            `Presence offline deferred for ${userId}: another node may still heartbeat (ttl ${ttl}s)`,
           );
+          const retryDelayMs =
+            (ttl - PRESENCE_OTHER_NODE_TTL_SECONDS) * 1000 + 1000;
+          const timer = setTimeout(() => {
+            void this.finalizeOffline(userId);
+          }, retryDelayMs);
+          this.graceTimers.set(userId, timer);
           return;
         }
       } catch (err) {
