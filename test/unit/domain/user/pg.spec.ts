@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import type { DrizzleDb } from "../../../../src/configs/database.js";
 import { UserPgRepository } from "../../../../src/domain/user/pg.js";
 import type { User } from "../../../../src/domain/user/schema.js";
@@ -104,6 +106,27 @@ describe("UserPgRepository", () => {
 
       const result = await repository.findByIdentifier("lemon@example.com");
       expect(result).toEqual(mockUser);
+    });
+  });
+
+  describe("search", () => {
+    it("casts citext to text for the trigram email index and escapes wildcard input", async () => {
+      const limitMock = vi.fn().mockResolvedValue([mockUser]);
+      const whereMock = vi.fn().mockReturnValue({ limit: limitMock });
+      const fromMock = vi.fn().mockReturnValue({ where: whereMock });
+      vi.mocked((mockDb as { select: ReturnType<typeof vi.fn> }).select).mockReturnValueOnce({
+        from: fromMock,
+      });
+
+      const result = await repository.search("  foo%_  ", "email", mockUser.id, 10);
+      const condition = whereMock.mock.calls[0][0] as SQL;
+      const query = new PgDialect().sqlToQuery(condition);
+
+      expect(result).toEqual([mockUser]);
+      expect(query.sql).toContain('"users"."email"::text ilike');
+      expect(query.params).toContain("%foo\\%\\_%");
+      expect(query.params).toContain(mockUser.id);
+      expect(limitMock).toHaveBeenCalledWith(10);
     });
   });
 

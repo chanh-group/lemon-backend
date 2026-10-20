@@ -21,11 +21,13 @@ export class FriendService {
         requesterId === addresseeId ? "CANNOT_CHAT_WITH_SELF" : "BAD_REQUEST",
       );
     }
-    const addressee = await this.userRepo.findById(addresseeId);
+    const [addressee, requester] = await Promise.all([
+      this.userRepo.findById(addresseeId),
+      this.userRepo.findById(requesterId),
+    ]);
     if (!addressee) {
       throw new BusinessError("USER_NOT_FOUND");
     }
-    const requester = await this.userRepo.findById(requesterId);
     if (!requester) throw new BusinessError("USER_NOT_FOUND");
 
     const existing = await this.friendRepo.findByPair(requesterId, addresseeId);

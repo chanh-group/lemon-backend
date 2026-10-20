@@ -90,10 +90,11 @@ export class ConversationService {
   }
 
   async listConversations(userId: string, limit = 20): Promise<ConversationResponse[]> {
-    const conversations = await this.convRepo.findUserConversations(userId, limit);
-    const friendIds = new Set(
-      (await this.friendService.listFriends(userId)).map((friend) => friend.id),
-    );
+    const [conversations, friends] = await Promise.all([
+      this.convRepo.findUserConversations(userId, limit),
+      this.friendService.listFriends(userId),
+    ]);
+    const friendIds = new Set(friends.map((friend) => friend.id));
     const list = conversations.filter(
       (conversation) =>
         conversation.kind !== "DIRECT" ||
@@ -192,12 +193,13 @@ export class ConversationService {
   }
 
   async getById(conversationId: string, userId: string): Promise<ConversationResponse> {
-    const exists = await this.convRepo.existsById(conversationId);
+    const [exists, conv] = await Promise.all([
+      this.convRepo.existsById(conversationId),
+      this.convRepo.findById(conversationId, userId),
+    ]);
     if (!exists) {
       throw new BusinessError("CONVERSATION_NOT_FOUND");
     }
-
-    const conv = await this.convRepo.findById(conversationId, userId);
     if (!conv) {
       throw new BusinessError("NOT_PARTICIPANT");
     }

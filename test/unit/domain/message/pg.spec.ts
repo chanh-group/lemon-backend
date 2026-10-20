@@ -183,7 +183,14 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
     );
     const update = render(updateWhereMock.mock.calls[0][0]);
     expect(update.sql).toContain('"conversations"."id" =');
-    expect(update.params).toEqual([conversationId]);
+    expect(update.sql).toContain('"conversations"."last_message_at"');
+    expect(update.sql).toContain('"conversations"."last_message_id"');
+    expect(update.params).toEqual([
+      conversationId,
+      existingRow.createdAt.toISOString(),
+      existingRow.createdAt.toISOString(),
+      existingRow.id,
+    ]);
   });
 
   it("uses the attachment preview when the message has no body", async () => {

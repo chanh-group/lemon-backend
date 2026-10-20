@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, asc, desc, eq, gt, isNull, lt } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lt, or } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { isUniqueViolation } from "../../utils/errors/pg.js";
@@ -85,7 +85,19 @@ export class MessagePgRepository implements MessageRepository {
             lastMessagePreview: preview,
             updatedAt: new Date(),
           })
-          .where(eq(conversations.id, messageData.conversationId));
+          .where(
+            and(
+              eq(conversations.id, messageData.conversationId),
+              or(
+                isNull(conversations.lastMessageAt),
+                lt(conversations.lastMessageAt, newMsg.createdAt),
+                and(
+                  eq(conversations.lastMessageAt, newMsg.createdAt),
+                  lt(conversations.lastMessageId, newMsg.id),
+                ),
+              ),
+            ),
+          );
 
         return { message: newMsg, isNew: true };
       });

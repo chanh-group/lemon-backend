@@ -36,6 +36,12 @@ export const users = pgTable(
     uniqueIndex("users_phone_uq")
       .on(table.phone)
       .where(sql`${table.phone} IS NOT NULL AND ${table.deletedAt} IS NULL`),
+    index("users_username_trgm_idx")
+      .using("gin", sql`${table.username} gin_trgm_ops`)
+      .where(sql`${table.deletedAt} IS NULL`),
+    index("users_email_trgm_idx")
+      .using("gin", sql`(${table.email}::text) gin_trgm_ops`)
+      .where(sql`${table.deletedAt} IS NULL`),
     index("users_last_seen").on(table.lastSeenAt),
   ],
 );

@@ -44,49 +44,51 @@ export class FriendPgRepository implements FriendRepository {
   async listRequests(
     userId: string,
   ): Promise<{ incoming: FriendRequestRecord[]; outgoing: FriendRequestRecord[] }> {
-    const incomingRows = await this.db
-      .select({
-        id: friendships.id,
-        createdAt: friendships.createdAt,
-        user: {
-          id: users.id,
-          name: users.fullName,
-          username: users.username,
-          email: users.email,
-          avatarUrl: users.avatarUrl,
-        },
-      })
-      .from(friendships)
-      .innerJoin(users, eq(friendships.requesterId, users.id))
-      .where(
-        and(
-          eq(friendships.addresseeId, userId),
-          eq(friendships.status, "PENDING"),
-          isNull(users.deletedAt),
+    const [incomingRows, outgoingRows] = await Promise.all([
+      this.db
+        .select({
+          id: friendships.id,
+          createdAt: friendships.createdAt,
+          user: {
+            id: users.id,
+            name: users.fullName,
+            username: users.username,
+            email: users.email,
+            avatarUrl: users.avatarUrl,
+          },
+        })
+        .from(friendships)
+        .innerJoin(users, eq(friendships.requesterId, users.id))
+        .where(
+          and(
+            eq(friendships.addresseeId, userId),
+            eq(friendships.status, "PENDING"),
+            isNull(users.deletedAt),
+          ),
         ),
-      );
 
-    const outgoingRows = await this.db
-      .select({
-        id: friendships.id,
-        createdAt: friendships.createdAt,
-        user: {
-          id: users.id,
-          name: users.fullName,
-          username: users.username,
-          email: users.email,
-          avatarUrl: users.avatarUrl,
-        },
-      })
-      .from(friendships)
-      .innerJoin(users, eq(friendships.addresseeId, users.id))
-      .where(
-        and(
-          eq(friendships.requesterId, userId),
-          eq(friendships.status, "PENDING"),
-          isNull(users.deletedAt),
+      this.db
+        .select({
+          id: friendships.id,
+          createdAt: friendships.createdAt,
+          user: {
+            id: users.id,
+            name: users.fullName,
+            username: users.username,
+            email: users.email,
+            avatarUrl: users.avatarUrl,
+          },
+        })
+        .from(friendships)
+        .innerJoin(users, eq(friendships.addresseeId, users.id))
+        .where(
+          and(
+            eq(friendships.requesterId, userId),
+            eq(friendships.status, "PENDING"),
+            isNull(users.deletedAt),
+          ),
         ),
-      );
+    ]);
 
     return {
       incoming: incomingRows.map((row) => ({ ...row, direction: "incoming" })),
