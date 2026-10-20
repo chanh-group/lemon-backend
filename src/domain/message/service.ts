@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { BusinessError } from "../../utils/errors/business.js";
 import {
   CONVERSATION_REPOSITORY,
@@ -14,17 +14,22 @@ import type { SendMessageDto } from "./dto/request.js";
 import type { MessageResponse, MessageTimelineResponse } from "./dto/response.js";
 import { toMessageResponse, toMessageTimeline } from "./dto/mapper.js";
 import { FriendService } from "../friend/service.js";
+import { SystemError } from "../../utils/errors/system.js";
+import { RedisHealthService } from "../../configs/redis-health.js";
 
 export type { SendMessageDto };
 
 @Injectable()
 export class MessageService {
+  private readonly logger = new Logger(MessageService.name);
+
   constructor(
     @Inject(MESSAGE_REPOSITORY) private readonly messageRepo: MessageRepository,
     @Inject(CONVERSATION_REPOSITORY) private readonly convRepo: ConversationRepository,
     private readonly friendService: FriendService,
     private readonly realtimeService: RealtimeService,
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
+    @Optional() @Inject(RedisHealthService) private readonly redisHealth?: RedisHealthService,
   ) {}
 
   async sendMessage(
@@ -78,9 +83,21 @@ export class MessageService {
             pipeline.incr(key);
             pipeline.expire(key, UNREAD_TTL_SECONDS);
           }
-          await pipeline.exec();
-        } catch {
-          // Best-effort cache
+          const results = await pipeline.exec();
+          if (!results || results.some(([err]) => err)) {
+            throw new SystemError("unavailable", "Redis unread counter pipeline failed", {
+              cause: results?.find(([err]) => err)?.[0],
+            });
+          }
+        } catch (err) {
+          this.redisHealth?.markUnavailable(err);
+          this.logger.error("Message persisted but Redis unread counter update failed", {
+            conversationId,
+            messageId: response.id,
+            err,
+          });
+          // The PostgreSQL insert already committed; still deliver the durable message.
+          this.realtimeService.emitNewMessage(conversationId, response);
         }
       }
 
@@ -109,7 +126,10 @@ export class MessageService {
     );
   }
 
-  private async assertDirectConversationAllowed(conversationId: string, userId: string): Promise<void> {
+  private async assertDirectConversationAllowed(
+    conversationId: string,
+    userId: string,
+  ): Promise<void> {
     const conversation = await this.convRepo.findById(conversationId, userId);
     if (!conversation) throw new BusinessError("NOT_PARTICIPANT");
     if (conversation.kind === "DIRECT" && conversation.partner) {

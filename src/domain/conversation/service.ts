@@ -10,6 +10,26 @@ import { RealtimeService } from "../realtime/realtime.service.js";
 import type { ConversationResponse } from "./dto/response.js";
 import { toConversationResponse } from "./dto/mapper.js";
 import { FriendService } from "../friend/service.js";
+import { SystemError } from "../../utils/errors/system.js";
+
+function requireRedisPipelineResults(
+  results: [Error | null, unknown][] | null,
+  operation: string,
+  expectedLength?: number,
+): [Error | null, unknown][] {
+  if (
+    !results ||
+    (expectedLength !== undefined && results.length !== expectedLength) ||
+    results.some((row) => !Array.isArray(row) || row.length < 2)
+  ) {
+    throw new SystemError("unavailable", `Redis ${operation} returned no result`);
+  }
+  const commandError = results.find(([err]) => err)?.[0];
+  if (commandError) {
+    throw new SystemError("unavailable", `Redis ${operation} failed`, { cause: commandError });
+  }
+  return results;
+}
 
 @Injectable()
 export class ConversationService {
@@ -81,7 +101,7 @@ export class ConversationService {
         return list.map(toConversationResponse);
       }
 
-      let results: [Error | null, unknown][] | null = null;
+      let results: [Error | null, unknown][] | null;
       try {
         const pipeline = this.redis.pipeline();
         for (const conv of list) {
@@ -93,9 +113,16 @@ export class ConversationService {
           }
         }
         results = await pipeline.exec();
-      } catch {
-        results = null;
+      } catch (err) {
+        throw new SystemError("unavailable", "Redis conversation list query failed", {
+          cause: err,
+        });
       }
+      results = requireRedisPipelineResults(
+        results,
+        "conversation list query",
+        list.length + list.filter((conversation) => conversation.partner).length,
+      );
 
       const missing: number[] = [];
       if (results) {
@@ -162,7 +189,7 @@ export class ConversationService {
       conv.unreadCount = await this.rebuildUnread(userId, conversationId);
     }
     if (this.redis) {
-      let results: [Error | null, unknown][] | null = null;
+      let results: [Error | null, unknown][] | null;
       try {
         const pipeline = this.redis.pipeline();
         pipeline.get(unreadCountKey(userId, conversationId));
@@ -170,9 +197,10 @@ export class ConversationService {
           pipeline.get(presenceUserKey(conv.partner.id));
         }
         results = await pipeline.exec();
-      } catch {
-        results = null;
+      } catch (err) {
+        throw new SystemError("unavailable", "Redis conversation query failed", { cause: err });
       }
+      results = requireRedisPipelineResults(results, "conversation query", conv.partner ? 2 : 1);
 
       const [errCount, valCount] = results?.[0] ?? [null, null];
       if (!errCount && valCount !== null && valCount !== undefined) {
@@ -210,8 +238,10 @@ export class ConversationService {
             "EX",
             UNREAD_TTL_SECONDS,
           );
-        } catch {
-          // Best-effort cache write — the DB count is still returned to the caller.
+        } catch (err) {
+          throw new SystemError("unavailable", "Redis unread cache write failed", {
+            cause: err,
+          });
         }
       }
       return count;
@@ -236,9 +266,9 @@ export class ConversationService {
           UNREAD_TTL_SECONDS,
         );
       }
-      await pipeline.exec();
-    } catch {
-      // The database counts are still returned when the cache write fails.
+      requireRedisPipelineResults(await pipeline.exec(), "unread cache pipeline", counts.size);
+    } catch (err) {
+      throw new SystemError("unavailable", "Redis unread cache pipeline failed", { cause: err });
     }
   }
 
@@ -250,7 +280,7 @@ export class ConversationService {
       return await this.convRepo.countUnreadByConversationIds(conversationIds, userId);
     } catch (err) {
       this.logger.warn("Failed to rebuild unread counts from the database", { err });
-      return new Map(conversationIds.map((conversationId) => [conversationId, 0]));
+      return new Map();
     }
   }
 
@@ -283,8 +313,8 @@ export class ConversationService {
     if (this.redis) {
       try {
         await this.redis.del(unreadCountKey(userId, conversationId));
-      } catch {
-        // Best-effort
+      } catch (err) {
+        throw new SystemError("unavailable", "Redis unread reset failed", { cause: err });
       }
     }
 

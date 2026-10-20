@@ -53,9 +53,21 @@ export class ChatGateway
     @InjectDrizzle() private readonly db: DrizzleDb,
     @Inject(JWT_CONFIG) private readonly jwt: JwtConfig,
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
-  ) {}
+  ) {
+    if (this.redis && typeof this.redis.on === "function") {
+      const disconnectSockets = () => this.server?.disconnectSockets(true);
+      for (const event of ["close", "end", "reconnecting", "error"]) {
+        this.redis.on(event, disconnectSockets);
+      }
+    }
+  }
 
   async handleConnection(client: Socket): Promise<void> {
+    if (this.redis && this.redis.status !== "ready") {
+      client.disconnect(true);
+      return;
+    }
+
     const userId = await this.extractUserId(client);
     if (!userId) {
       logger.warn(`Unauthorized socket connection rejected: ${client.id}`);

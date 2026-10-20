@@ -49,6 +49,7 @@ bun run start:dev
 > Không sửa file SQL sinh tự động trong `drizzle/`.
 
 App mặc định nghe ở `http://localhost:3000` (đổi qua `PORT`).
+Readiness endpoint `GET /api/health/ready` trả `200` khi Redis sẵn sàng và `503` khi Redis lỗi; các HTTP request khác cũng trả `503` trong lúc instance chưa sẵn sàng.
 
 | Lệnh                                               | Để làm gì                              |
 | -------------------------------------------------- | -------------------------------------- |

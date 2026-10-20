@@ -8,6 +8,7 @@ import {
   REDIS_MAX_RETRIES_PER_REQUEST,
 } from "../utils/cache/constants.js";
 import { CACHE_STORE, REDIS_CLIENT } from "../utils/cache/store.js";
+import { RedisHealthService } from "./redis-health.js";
 import {
   RedisCacheService,
   registerCacheCommands,
@@ -44,6 +45,7 @@ async function createRedisClient(): Promise<RedisWithCacheCommands> {
 @Global()
 @Module({
   providers: [
+    RedisHealthService,
     {
       provide: REDIS_CLIENT,
       useFactory: async (): Promise<RedisWithCacheCommands> => {
@@ -56,7 +58,7 @@ async function createRedisClient(): Promise<RedisWithCacheCommands> {
       inject: [REDIS_CLIENT],
     },
   ],
-  exports: [CACHE_STORE, REDIS_CLIENT],
+  exports: [CACHE_STORE, REDIS_CLIENT, RedisHealthService],
 })
 export class CacheModule implements OnModuleDestroy {
   constructor(@Inject(REDIS_CLIENT) private readonly redis: RedisWithCacheCommands) {}

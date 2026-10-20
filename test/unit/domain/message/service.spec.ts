@@ -8,6 +8,7 @@ import type { Message } from "../../../../src/domain/message/schema.js";
 import { unreadCountKey } from "../../../../src/utils/cache/keys.js";
 import type { FriendService } from "../../../../src/domain/friend/service.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
+import type { RedisHealthService } from "../../../../src/configs/redis-health.js";
 
 describe("MessageService", () => {
   let service: MessageService;
@@ -27,8 +28,10 @@ describe("MessageService", () => {
   let emitMessageRevokedMock: Mock;
 
   let redisPipelineMock: Mock;
+  let redisPipelineExecMock: Mock;
   let redisIncrMock: Mock;
   let redisExpireMock: Mock;
+  let redisMarkUnavailableMock: Mock;
 
   const userA = "0193a2b1-0000-7000-8000-000000000001";
   const userB = "0193a2b1-0000-7000-8000-000000000002";
@@ -89,20 +92,29 @@ describe("MessageService", () => {
 
     redisIncrMock = vi.fn().mockReturnThis();
     redisExpireMock = vi.fn().mockReturnThis();
+    redisMarkUnavailableMock = vi.fn();
+    redisPipelineExecMock = vi.fn().mockResolvedValue([
+      [null, 1],
+      [null, 1],
+    ]);
     redisPipelineMock = vi.fn().mockReturnValue({
       incr: redisIncrMock,
       expire: redisExpireMock,
-      exec: vi.fn().mockResolvedValue([
-        [null, 1],
-        [null, 1],
-      ]),
+      exec: redisPipelineExecMock,
     });
 
     const mockRedis = {
       pipeline: redisPipelineMock,
     } as unknown as Redis;
 
-    service = new MessageService(mockMessageRepo, mockConvRepo, mockFriendService, mockRealtime, mockRedis);
+    service = new MessageService(
+      mockMessageRepo,
+      mockConvRepo,
+      mockFriendService,
+      mockRealtime,
+      mockRedis,
+      { markUnavailable: redisMarkUnavailableMock } as unknown as RedisHealthService,
+    );
   });
 
   describe("sendMessage", () => {
@@ -165,6 +177,20 @@ describe("MessageService", () => {
       expect(redisIncrMock).not.toHaveBeenCalled();
       expect(redisExpireMock).not.toHaveBeenCalled();
       expect(emitNewMessageMock).not.toHaveBeenCalled();
+    });
+
+    it("returns the persisted message and marks readiness unavailable when Redis counter update fails", async () => {
+      createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
+      redisPipelineExecMock.mockRejectedValue(new Error("Redis unavailable"));
+
+      const result = await service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" });
+
+      expect(result.id).toBe(msgId);
+      expect(redisMarkUnavailableMock).toHaveBeenCalledWith(expect.any(Error));
+      expect(emitNewMessageMock).toHaveBeenCalledWith(
+        convId,
+        expect.objectContaining({ id: msgId }),
+      );
     });
 
     it("rejects replyToId that points to a message in another conversation", async () => {
