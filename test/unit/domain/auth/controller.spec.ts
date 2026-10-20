@@ -6,6 +6,7 @@ import type { App } from "supertest/types.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthController } from "../../../../src/domain/auth/controller.js";
 import { RATE_LIMITER } from "../../../../src/domain/auth/constants.js";
+import { MemoryRateLimiter } from "../../../../src/middleware/ratelimit.js";
 import { AuthService } from "../../../../src/domain/auth/service.js";
 import { UserService } from "../../../../src/domain/user/service.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
@@ -83,6 +84,7 @@ describe("AuthController", () => {
     controller = new AuthController(
       authService as unknown as AuthService,
       userService as unknown as UserService,
+      new MemoryRateLimiter(),
     );
   });
 
@@ -321,6 +323,7 @@ describe("AuthController", () => {
             new AuthController(
               authService as unknown as AuthService,
               userService as unknown as UserService,
+              new MemoryRateLimiter(),
             ),
         ).toThrowError("COOKIE_SAMESITE=none requires COOKIE_SECURE=true");
       } finally {

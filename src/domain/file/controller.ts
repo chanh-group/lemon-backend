@@ -1,15 +1,5 @@
+import { Body, Controller, HttpCode, HttpStatus, Inject, Post, Req } from "@nestjs/common";
 import {
-  Body,
-  Controller,
-  HttpCode,
-  HttpStatus,
-  Inject,
-  Optional,
-  Post,
-  Req,
-} from "@nestjs/common";
-import {
-  MemoryRateLimiter,
   RATE_LIMITER,
   RATE_LIMIT_PRESIGN_IP_MAX,
   RATE_LIMIT_PRESIGN_USER_MAX,
@@ -27,9 +17,8 @@ import { FileService } from "./service.js";
 export class FileController {
   constructor(
     private readonly fileService: FileService,
-    @Optional()
     @Inject(RATE_LIMITER)
-    private readonly rateLimiter: RateLimiter = new MemoryRateLimiter(),
+    private readonly rateLimiter: RateLimiter,
   ) {}
 
   @Post("presign")

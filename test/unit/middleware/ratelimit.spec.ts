@@ -5,6 +5,7 @@ import {
   RedisRateLimiter,
   extractClientIp,
 } from "../../../src/middleware/ratelimit.js";
+import { RedisMetricsService } from "../../../src/configs/redis-metrics.js";
 
 describe("RedisRateLimiter", () => {
   let redis: { eval: ReturnType<typeof vi.fn> };
@@ -33,6 +34,13 @@ describe("RedisRateLimiter", () => {
     await expect(limiter.checkIpLimit("login", "ip", 3, 60)).resolves.toBe(true);
     redis.eval.mockResolvedValueOnce(4);
     await expect(limiter.checkIpLimit("login", "ip", 3, 60)).resolves.toBe(false);
+  });
+
+  it("returns an infrastructure error for malformed single-counter results", async () => {
+    redis.eval.mockResolvedValue("not-a-counter");
+    await expect(limiter.checkIpLimit("login", "ip", 5, 60)).rejects.toMatchObject({
+      kind: "unavailable",
+    });
   });
 
   it("checkEmailLimit lowercases email in key", async () => {
@@ -67,6 +75,17 @@ describe("RedisRateLimiter", () => {
     await expect(limiter.checkMixedLimit("a", "u", "i", 3, 10, 60)).resolves.toBe(false);
   });
 
+  it("returns an infrastructure error for malformed mixed-counter results", async () => {
+    redis.eval.mockResolvedValueOnce([1, "bad"]);
+    await expect(limiter.checkMixedLimit("a", "u", "i", 3, 10, 60)).rejects.toMatchObject({
+      kind: "unavailable",
+    });
+    redis.eval.mockResolvedValueOnce([1]);
+    await expect(limiter.checkMixedLimit("a", "u", "i", 3, 10, 60)).rejects.toMatchObject({
+      kind: "unavailable",
+    });
+  });
+
   it("fails closed when Redis is unavailable", async () => {
     redis.eval.mockRejectedValue(new Error("boom"));
     await expect(limiter.checkIpLimit("login", "ip", 5, 60)).rejects.toMatchObject({
@@ -75,12 +94,42 @@ describe("RedisRateLimiter", () => {
     expect(logger.error).toHaveBeenCalled();
   });
 
+  it("marks Redis unhealthy when a rate-limit operation fails", async () => {
+    const markUnavailable = vi.fn();
+    limiter = new RedisRateLimiter(redis, logger, undefined, { markUnavailable } as never);
+    redis.eval.mockRejectedValue(new Error("timeout"));
+
+    await expect(limiter.checkIpLimit("login", "ip", 5, 60)).rejects.toMatchObject({
+      kind: "unavailable",
+    });
+    expect(markUnavailable).toHaveBeenCalledOnce();
+  });
+
   it("fails closed for mixed limits when Redis is unavailable", async () => {
     redis.eval.mockRejectedValue(new Error("boom"));
     await expect(limiter.checkMixedLimit("a", "u", "i", 3, 10, 60)).rejects.toMatchObject({
       kind: "unavailable",
     });
     expect(logger.error).toHaveBeenCalled();
+  });
+
+  it("records rate-limit outcomes without adding labels from the request", async () => {
+    const metrics = new RedisMetricsService();
+    limiter = new RedisRateLimiter(redis, logger, metrics);
+    redis.eval.mockResolvedValueOnce(1).mockRejectedValueOnce(new Error("down"));
+
+    await limiter.checkIpLimit("signin", "198.51.100.1", 5, 60);
+    await expect(
+      limiter.checkEmailLimit("otp", "private@example.com", 3, 60),
+    ).rejects.toMatchObject({
+      kind: "unavailable",
+    });
+
+    const output = metrics.toPrometheusText();
+    expect(output).toContain('operation="rate_limit",outcome="success"} 1');
+    expect(output).toContain('operation="rate_limit",outcome="error"} 1');
+    expect(output).not.toContain("198.51.100.1");
+    expect(output).not.toContain("private@example.com");
   });
 });
 

@@ -6,6 +6,7 @@ import type { App } from "supertest/types.js";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { FileController } from "../../../../src/domain/file/controller.js";
 import { FileService } from "../../../../src/domain/file/service.js";
+import { MemoryRateLimiter, RATE_LIMITER } from "../../../../src/middleware/ratelimit.js";
 import type { PresignFileDto } from "../../../../src/domain/file/dto/request.js";
 import type { PresignFileResponse } from "../../../../src/domain/file/dto/response.js";
 import { standardSchemaPipe } from "../../../../src/utils/validation.js";
@@ -27,7 +28,10 @@ describe("FileController", () => {
 
   beforeEach(() => {
     presignMock = vi.fn().mockResolvedValue(mockPresignResponse);
-    controller = new FileController({ presign: presignMock } as unknown as FileService);
+    controller = new FileController(
+      { presign: presignMock } as unknown as FileService,
+      new MemoryRateLimiter(),
+    );
   });
 
   it("returns the presign contract in the success envelope", async () => {
@@ -59,6 +63,7 @@ describe("FileController", () => {
             provide: FileService,
             useValue: { presign: httpPresign } as unknown as FileService,
           },
+          { provide: RATE_LIMITER, useValue: new MemoryRateLimiter() },
         ],
       }).compile();
 

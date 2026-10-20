@@ -6,14 +6,12 @@ import {
   HttpCode,
   HttpStatus,
   Inject,
-  Optional,
   Param,
   ParseUUIDPipe,
   Post,
   Req,
 } from "@nestjs/common";
 import {
-  MemoryRateLimiter,
   RATE_LIMITER,
   RATE_LIMIT_FRIEND_REQUEST_IP_MAX,
   RATE_LIMIT_FRIEND_REQUEST_USER_MAX,
@@ -33,9 +31,8 @@ import { FriendService } from "./service.js";
 export class FriendController {
   constructor(
     private readonly service: FriendService,
-    @Optional()
     @Inject(RATE_LIMITER)
-    private readonly rateLimiter: RateLimiter = new MemoryRateLimiter(),
+    private readonly rateLimiter: RateLimiter,
   ) {}
 
   @Post("requests")

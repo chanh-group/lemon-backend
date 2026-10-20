@@ -6,7 +6,6 @@ import {
   HttpCode,
   HttpStatus,
   Inject,
-  Optional,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -15,7 +14,6 @@ import {
   Req,
 } from "@nestjs/common";
 import {
-  MemoryRateLimiter,
   RATE_LIMITER,
   RATE_LIMIT_MESSAGE_IP_MAX,
   RATE_LIMIT_MESSAGE_USER_MAX,
@@ -40,9 +38,8 @@ import {
 export class MessageController {
   constructor(
     private readonly messageService: MessageService,
-    @Optional()
     @Inject(RATE_LIMITER)
-    private readonly rateLimiter: RateLimiter = new MemoryRateLimiter(),
+    private readonly rateLimiter: RateLimiter,
   ) {}
 
   @Post("conversations/:id/messages")

@@ -6,6 +6,7 @@ import type { App } from "supertest/types.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { MessageController } from "../../../../src/domain/message/controller.js";
 import { MessageService } from "../../../../src/domain/message/service.js";
+import { MemoryRateLimiter, RATE_LIMITER } from "../../../../src/middleware/ratelimit.js";
 import type {
   MessageResponse,
   MessageTimelineResponse,
@@ -94,7 +95,7 @@ describe("MessageController", () => {
       revokeMessage: revokeMessageMock,
     } as unknown as MessageService;
 
-    controller = new MessageController(mockService);
+    controller = new MessageController(mockService, new MemoryRateLimiter());
   });
 
   describe("sendMessage", () => {
@@ -265,7 +266,10 @@ describe("MessageController", () => {
 
       const moduleRef = await Test.createTestingModule({
         controllers: [MessageController],
-        providers: [{ provide: MessageService, useValue: mockService }],
+        providers: [
+          { provide: MessageService, useValue: mockService },
+          { provide: RATE_LIMITER, useValue: new MemoryRateLimiter() },
+        ],
       }).compile();
 
       app = moduleRef.createNestApplication();
