@@ -3,7 +3,8 @@ import { InjectDrizzle } from "@nestjs/drizzle";
 import { and, asc, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { users } from "../user/schema.js";
-import type { FriendRepository } from "./repository.js";
+import { conversationParticipants, conversations } from "../conversation/schema.js";
+import type { AcceptedFriendRequest, FriendRepository } from "./repository.js";
 import { friendships } from "./schema.js";
 import { toCursorPage } from "../shared.js";
 
@@ -182,19 +183,90 @@ export class FriendPgRepository implements FriendRepository {
   async acceptRequest(
     requestId: string,
     addresseeId: string,
-  ): Promise<{ requesterId: string; addresseeId: string } | null> {
-    const [row] = await this.db
-      .update(friendships)
-      .set({ status: "ACCEPTED", respondedAt: new Date(), updatedAt: new Date() })
-      .where(
-        and(
-          eq(friendships.id, requestId),
-          eq(friendships.addresseeId, addresseeId),
-          eq(friendships.status, "PENDING"),
-        ),
-      )
-      .returning({ requesterId: friendships.requesterId, addresseeId: friendships.addresseeId });
-    return row ?? null;
+  ): Promise<AcceptedFriendRequest | null> {
+    return this.db.transaction(async (tx) => {
+      const [accepted] = await tx
+        .update(friendships)
+        .set({ status: "ACCEPTED", respondedAt: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(friendships.id, requestId),
+            eq(friendships.addresseeId, addresseeId),
+            eq(friendships.status, "PENDING"),
+          ),
+        )
+        .returning({ requesterId: friendships.requesterId, addresseeId: friendships.addresseeId });
+      if (!accepted) return null;
+
+      const [userLow, userHigh] = this.pair(accepted.requesterId, accepted.addresseeId);
+      const directKey = `${userLow}:${userHigh}`;
+      let [conversation] = await tx
+        .select()
+        .from(conversations)
+        .where(eq(conversations.directKey, directKey))
+        .limit(1);
+
+      if (!conversation) {
+        [conversation] = await tx
+          .insert(conversations)
+          .values({ kind: "DIRECT", directKey })
+          .onConflictDoNothing()
+          .returning();
+        // Another request may have created the same pair concurrently.
+        if (!conversation) {
+          [conversation] = await tx
+            .select()
+            .from(conversations)
+            .where(eq(conversations.directKey, directKey))
+            .limit(1);
+        }
+      }
+      if (!conversation) throw new Error("Accepted friendship has no direct conversation");
+
+      if (conversation.deletedAt) {
+        [conversation] = await tx
+          .update(conversations)
+          .set({ deletedAt: null })
+          .where(eq(conversations.id, conversation.id))
+          .returning();
+      }
+
+      await tx
+        .insert(conversationParticipants)
+        .values([
+          { conversationId: conversation.id, userId: userLow, role: "MEMBER" },
+          { conversationId: conversation.id, userId: userHigh, role: "MEMBER" },
+        ])
+        .onConflictDoUpdate({
+          target: [conversationParticipants.conversationId, conversationParticipants.userId],
+          set: { leftAt: null },
+        });
+
+      const [partner] = await tx
+        .select({
+          id: users.id,
+          username: users.username,
+          fullName: users.fullName,
+          avatarUrl: users.avatarUrl,
+        })
+        .from(users)
+        .where(eq(users.id, accepted.requesterId))
+        .limit(1);
+      if (!partner) throw new Error("Accepted friend requester was not found");
+
+      return {
+        ...accepted,
+        conversation: {
+          id: conversation.id,
+          kind: "DIRECT",
+          partner: { ...partner, isOnline: false },
+          lastMessagePreview: conversation.lastMessagePreview,
+          lastMessageAt: conversation.lastMessageAt,
+          unreadCount: 0,
+          createdAt: conversation.createdAt,
+        },
+      };
+    });
   }
 
   async deleteIncomingRequest(requestId: string, addresseeId: string): Promise<boolean> {

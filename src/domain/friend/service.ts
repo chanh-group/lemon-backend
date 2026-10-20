@@ -5,6 +5,7 @@ import { BusinessError } from "../../utils/errors/business.js";
 import { USER_REPOSITORY, type UserRepository } from "../user/repository.js";
 import { RealtimeService } from "../realtime/realtime.service.js";
 import { FRIEND_REPOSITORY, type FriendRepository } from "./repository.js";
+import type { ConversationResponse } from "../conversation/dto/response.js";
 
 @Injectable()
 export class FriendService {
@@ -72,12 +73,17 @@ export class FriendService {
     return this.friendRepo.findAcceptedFriendIds(userId, candidates);
   }
 
-  async acceptRequest(requestId: string, userId: string): Promise<void> {
+  async acceptRequest(requestId: string, userId: string): Promise<ConversationResponse> {
     const accepted = await this.friendRepo.acceptRequest(requestId, userId);
     if (!accepted) {
       throw new BusinessError("FRIEND_REQUEST_NOT_FOUND");
     }
+    this.realtimeService.joinConversation(
+      [accepted.requesterId, accepted.addresseeId],
+      accepted.conversation.id,
+    );
     await this.invalidateSocialFeeds(accepted.requesterId, accepted.addresseeId);
+    return accepted.conversation;
   }
 
   async declineRequest(requestId: string, userId: string): Promise<void> {

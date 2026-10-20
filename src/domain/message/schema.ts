@@ -37,7 +37,7 @@ export const messages = pgTable(
       .references(() => conversations.id, { onDelete: "cascade" }),
     senderId: uuid("sender_id")
       .notNull()
-      .references(() => users.id, { onDelete: "restrict" }),
+      .references(() => users.id, { onDelete: "cascade" }),
     kind: messageKindEnum("kind").notNull().default("TEXT"),
     body: text("body"),
     replyToId: uuid("reply_to_id").references((): AnyPgColumn => messages.id, {

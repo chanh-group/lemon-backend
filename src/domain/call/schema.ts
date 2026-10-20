@@ -26,10 +26,10 @@ export const calls = pgTable(
       .references(() => conversations.id, { onDelete: "cascade" }),
     callerId: uuid("caller_id")
       .notNull()
-      .references(() => users.id, { onDelete: "restrict" }),
+      .references(() => users.id, { onDelete: "cascade" }),
     calleeId: uuid("callee_id")
       .notNull()
-      .references(() => users.id, { onDelete: "restrict" }),
+      .references(() => users.id, { onDelete: "cascade" }),
     media: callMediaEnum("media").notNull(),
     status: callStatusEnum("status").notNull().default("INITIATED"),
     startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),

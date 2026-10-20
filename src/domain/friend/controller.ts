@@ -23,7 +23,7 @@ import {
 import { BusinessError } from "../../utils/errors/business.js";
 import { Lang } from "../../utils/decorators.js";
 import { t } from "../../utils/i18n/index.js";
-import { created, messageOnly, ok } from "../../utils/response.js";
+import { created, messageOnly, ok, withMessage } from "../../utils/response.js";
 import { getAuthUser, type AuthUser } from "../shared.js";
 import { parseCursorPage } from "../shared.js";
 import { friendRequestSchema } from "./dto/request.js";
@@ -88,8 +88,8 @@ export class FriendController {
     @Lang() lang: string,
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
-    await this.service.acceptRequest(requestId, userId);
-    return messageOnly(t("FRIEND_REQUEST_ACCEPTED", lang));
+    const conversation = await this.service.acceptRequest(requestId, userId);
+    return withMessage(conversation, t("FRIEND_REQUEST_ACCEPTED", lang));
   }
 
   @Post("requests/:requestId/decline")
