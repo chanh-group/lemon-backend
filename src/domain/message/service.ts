@@ -50,7 +50,7 @@ export class MessageService {
     if (!participantIds.includes(senderId)) {
       throw new BusinessError("NOT_PARTICIPANT");
     }
-    await this.assertDirectConversationAllowed(conversationId, senderId);
+    const directPartnerId = await this.assertDirectConversationAllowed(conversationId, senderId);
 
     if ((!dto.kind || dto.kind === "TEXT") && (!dto.body || dto.body.trim().length === 0)) {
       throw new BusinessError("BAD_REQUEST");
@@ -75,6 +75,9 @@ export class MessageService {
       kind: dto.kind ?? "TEXT",
       clientMsgId: dto.clientMsgId,
       replyToId: dto.replyToId,
+      ...(directPartnerId
+        ? { requiredFriendship: { userAId: senderId, userBId: directPartnerId } }
+        : {}),
     });
 
     const response = toMessageResponse(message);
@@ -141,12 +144,14 @@ export class MessageService {
   private async assertDirectConversationAllowed(
     conversationId: string,
     userId: string,
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const conversation = await this.convRepo.findById(conversationId, userId);
     if (!conversation) throw new BusinessError("NOT_PARTICIPANT");
     if (conversation.kind === "DIRECT" && conversation.partner) {
       await this.friendService.assertCanChat(userId, conversation.partner.id);
+      return conversation.partner.id;
     }
+    return undefined;
   }
 
   async editMessage(userId: string, messageId: string, body: string): Promise<MessageResponse> {

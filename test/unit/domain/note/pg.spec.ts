@@ -107,6 +107,47 @@ describe("NotePgRepository.upsert", () => {
   });
 });
 
+describe("NotePgRepository.findActiveFeedByUserIds", () => {
+  it("joins note profiles in the active notes query", async () => {
+    const userId = "0193a2b1-0000-7000-8000-0000000000aa";
+    const note = {
+      id: "0193a2b1-0000-7000-8000-0000000000bb",
+      userId,
+      content: "Sunny day note",
+      background: null,
+      createdAt: new Date("2026-10-17T00:00:00Z"),
+      expiresAt: new Date("2026-10-18T00:00:00Z"),
+    };
+    const row = {
+      note,
+      user: { id: userId, username: "user1", fullName: "User One", avatarUrl: null },
+    };
+    const whereMock = vi.fn().mockResolvedValue([row]);
+    const innerJoinMock = vi.fn(() => ({ where: whereMock }));
+    const fromMock = vi.fn(() => ({ innerJoin: innerJoinMock }));
+    const selectMock = vi.fn(() => ({ from: fromMock }));
+    const repo = new NotePgRepository({ select: selectMock } as unknown as DrizzleDb);
+
+    await expect(repo.findActiveFeedByUserIds([userId])).resolves.toEqual([row]);
+    expect(selectMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        note: notes,
+        user: expect.objectContaining({ id: expect.anything() }),
+      }),
+    );
+    expect(innerJoinMock).toHaveBeenCalledTimes(1);
+    expect(render(whereMock.mock.calls[0][0])).toContain('"notes"."expires_at" >');
+  });
+
+  it("does not query for an empty user list", async () => {
+    const { db, selectMock } = makeDb();
+    const repo = new NotePgRepository(db);
+
+    await expect(repo.findActiveFeedByUserIds([])).resolves.toEqual([]);
+    expect(selectMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("NotePgRepository.findExpiredIds", () => {
   it("findExpiredIds selects ids with a DB-clock expiry predicate and batch limit", async () => {
     const { db, selectMock, whereMock, orderByMock, limitMock } = makeDb();

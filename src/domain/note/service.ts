@@ -61,23 +61,11 @@ export class NoteService {
     }
 
     const allUserIds = [userId, ...friendIds];
-    const notes = await this.noteRepo.findActiveByUserIds(allUserIds);
-
-    const noteUserIds = [...new Set(notes.map((n) => n.userId))];
-    const userMap = await this.noteRepo.findUsersByIds(noteUserIds);
-
-    const feed: UserNoteFeedResponse[] = notes.map((n) => {
-      const user = userMap.get(n.userId) ?? {
-        id: n.userId,
-        username: "unknown",
-        fullName: "Unknown User",
-        avatarUrl: null,
-      };
-      return {
-        user,
-        note: toNoteResponse(n),
-      };
-    });
+    const rows = await this.noteRepo.findActiveFeedByUserIds(allUserIds);
+    const feed: UserNoteFeedResponse[] = rows.map(({ note, user }) => ({
+      user,
+      note: toNoteResponse(note),
+    }));
 
     await this.cacheStore.setBestEffort(key, feed, NOTE_FEED_TTL_SECS);
     return feed;

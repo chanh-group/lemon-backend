@@ -5,6 +5,7 @@ import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { isUniqueViolation } from "../../utils/errors/pg.js";
 import { conversations } from "../conversation/schema.js";
+import { friendships } from "../friend/schema.js";
 import { ATTACHMENT_PREVIEW_TOKEN } from "./constants.js";
 import type {
   CreatedMessageResult,
@@ -43,9 +44,26 @@ export class MessagePgRepository implements MessageRepository {
     kind?: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "FILE" | "SYSTEM";
     clientMsgId?: string | null;
     replyToId?: string | null;
+    requiredFriendship?: { userAId: string; userBId: string };
   }): Promise<CreatedMessageResult> {
     try {
       return await this.db.transaction(async (tx) => {
+        if (messageData.requiredFriendship) {
+          const [userLow, userHigh] = [
+            messageData.requiredFriendship.userAId,
+            messageData.requiredFriendship.userBId,
+          ].sort();
+          const [relation] = await tx
+            .select({ status: friendships.status })
+            .from(friendships)
+            .where(and(eq(friendships.userLow, userLow), eq(friendships.userHigh, userHigh)))
+            .for("share")
+            .limit(1);
+
+          if (relation?.status === "BLOCKED") throw new BusinessError("USER_BLOCKED");
+          if (relation?.status !== "ACCEPTED") throw new BusinessError("FRIENDSHIP_REQUIRED");
+        }
+
         // 1. Idempotency check with clientMsgId
         if (messageData.clientMsgId) {
           const [existing] = await tx

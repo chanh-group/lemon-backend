@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
 import { and, desc, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { isUniqueViolation } from "../../utils/errors/pg.js";
@@ -8,6 +9,8 @@ import { messages } from "../message/schema.js";
 import { users } from "../user/schema.js";
 import type { ConversationRepository, ConversationWithPartner } from "./repository.js";
 import { conversationParticipants, conversations } from "./schema.js";
+
+const partnerParticipants = alias(conversationParticipants, "partner_participants");
 
 @Injectable()
 export class ConversationPgRepository implements ConversationRepository {
@@ -194,54 +197,60 @@ export class ConversationPgRepository implements ConversationRepository {
   }
 
   async findById(conversationId: string, userId: string): Promise<ConversationWithPartner | null> {
-    const [membership] = await this.db
-      .select()
-      .from(conversationParticipants)
-      .where(
+    const [row] = await this.db
+      .select({
+        id: conversations.id,
+        kind: conversations.kind,
+        directKey: conversations.directKey,
+        lastMessagePreview: conversations.lastMessagePreview,
+        lastMessageAt: conversations.lastMessageAt,
+        createdAt: conversations.createdAt,
+        lastReadMessageId: conversationParticipants.lastReadMessageId,
+        partnerId: users.id,
+        partnerUsername: users.username,
+        partnerFullName: users.fullName,
+        partnerAvatarUrl: users.avatarUrl,
+      })
+      .from(conversations)
+      .innerJoin(
+        conversationParticipants,
         and(
-          eq(conversationParticipants.conversationId, conversationId),
+          eq(conversationParticipants.conversationId, conversations.id),
           eq(conversationParticipants.userId, userId),
           isNull(conversationParticipants.leftAt),
         ),
       )
-      .limit(1);
-
-    if (!membership) return null;
-
-    const [conv] = await this.db
-      .select()
-      .from(conversations)
+      .leftJoin(
+        partnerParticipants,
+        and(
+          eq(partnerParticipants.conversationId, conversations.id),
+          ne(partnerParticipants.userId, userId),
+          isNull(partnerParticipants.leftAt),
+        ),
+      )
+      .leftJoin(users, eq(partnerParticipants.userId, users.id))
       .where(and(eq(conversations.id, conversationId), isNull(conversations.deletedAt)))
       .limit(1);
 
-    if (!conv) return null;
-
-    const [partnerRow] = await this.db
-      .select({
-        id: users.id,
-        username: users.username,
-        fullName: users.fullName,
-        avatarUrl: users.avatarUrl,
-      })
-      .from(conversationParticipants)
-      .innerJoin(users, eq(conversationParticipants.userId, users.id))
-      .where(
-        and(
-          eq(conversationParticipants.conversationId, conversationId),
-          ne(conversationParticipants.userId, userId),
-        ),
-      )
-      .limit(1);
+    if (!row) return null;
 
     return {
-      id: conv.id,
-      kind: conv.kind,
-      directKey: conv.directKey,
-      lastMessagePreview: conv.lastMessagePreview,
-      lastMessageAt: conv.lastMessageAt,
-      createdAt: conv.createdAt,
-      partner: partnerRow,
-      lastReadMessageId: membership.lastReadMessageId,
+      id: row.id,
+      kind: row.kind,
+      directKey: row.directKey,
+      lastMessagePreview: row.lastMessagePreview,
+      lastMessageAt: row.lastMessageAt,
+      createdAt: row.createdAt,
+      partner:
+        row.partnerId && row.partnerUsername && row.partnerFullName
+          ? {
+              id: row.partnerId,
+              username: row.partnerUsername,
+              fullName: row.partnerFullName,
+              avatarUrl: row.partnerAvatarUrl,
+            }
+          : undefined,
+      lastReadMessageId: row.lastReadMessageId,
     };
   }
 

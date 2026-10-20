@@ -141,6 +141,17 @@ describe("MessageService", () => {
       expect(createMessageMock).not.toHaveBeenCalled();
     });
 
+    it("passes the direct pair for a transaction-level friendship lock", async () => {
+      findConversationByIdMock.mockResolvedValue({ kind: "DIRECT", partner: { id: userB } });
+      createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
+
+      await service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" });
+
+      expect(createMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({ requiredFriendship: { userAId: userA, userBId: userB } }),
+      );
+    });
+
     it("throws BAD_REQUEST if message body exceeds 4000 characters", async () => {
       await expect(
         service.sendMessage(userA, convId, { body: "a".repeat(4001), kind: "TEXT" }),

@@ -43,9 +43,8 @@ export const conversations = pgTable(
     uniqueIndex("conversations_direct_key_uq")
       .on(table.directKey)
       .where(sql`${table.directKey} IS NOT NULL`),
-    index("conversations_last_message_idx").on(table.lastMessageAt.desc()),
-    index("conversations_active_idx")
-      .on(table.lastMessageAt.desc())
+    index("conversations_inbox_order_idx")
+      .on(sql`coalesce(${table.lastMessageAt}, ${table.createdAt}) DESC`)
       .where(sql`${table.deletedAt} IS NULL`),
   ],
 );
