@@ -266,7 +266,7 @@ describe("ChatGateway", () => {
       });
     });
 
-    it("skips marking offline when another node still heartbeats (ttl > 30)", async () => {
+    it("rechecks offline presence after another node's heartbeat expires", async () => {
       vi.useFakeTimers();
       verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
       const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
@@ -274,13 +274,20 @@ describe("ChatGateway", () => {
       await gateway.handleConnection(client);
       await gateway.handleDisconnect(client);
 
-      redisTtlMock.mockResolvedValue(60);
+      redisTtlMock.mockResolvedValueOnce(60).mockResolvedValueOnce(30);
       await vi.advanceTimersByTimeAsync(60_000);
 
       expect(redisTtlMock).toHaveBeenCalledWith(`presence:${mockUserId}`);
       expect(redisPipelineMock).toHaveBeenCalledTimes(1);
       expect(pipelineZremMock).not.toHaveBeenCalled();
       expect(dbUpdateMock).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      expect(redisTtlMock).toHaveBeenCalledTimes(2);
+      expect(redisPipelineMock).toHaveBeenCalledTimes(2);
+      expect(pipelineZremMock).toHaveBeenCalledWith("presence:online", mockUserId);
+      expect(dbUpdateMock).toHaveBeenCalled();
     });
 
     it("marks offline when no other node heartbeats (ttl <= 30)", async () => {
