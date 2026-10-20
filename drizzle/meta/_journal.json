@@ -57,6 +57,13 @@
       "when": 1792486553226,
       "tag": "0007_melted_toad_men",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792507490066,
+      "tag": "0008_wise_starbolt",
+      "breakpoints": true
     }
   ]
 }

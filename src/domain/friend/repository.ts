@@ -1,5 +1,12 @@
 import type { Friendship } from "./schema.js";
 import type { CursorPage } from "../shared.js";
+import type { ConversationResponse } from "../conversation/dto/response.js";
+
+export interface AcceptedFriendRequest {
+  requesterId: string;
+  addresseeId: string;
+  conversation: ConversationResponse;
+}
 
 export interface FriendUser {
   id: string;
@@ -37,10 +44,7 @@ export interface FriendRepository {
     incoming: CursorPage<FriendRequestRecord>;
     outgoing: CursorPage<FriendRequestRecord>;
   }>;
-  acceptRequest(
-    requestId: string,
-    addresseeId: string,
-  ): Promise<{ requesterId: string; addresseeId: string } | null>;
+  acceptRequest(requestId: string, addresseeId: string): Promise<AcceptedFriendRequest | null>;
   deleteIncomingRequest(requestId: string, addresseeId: string): Promise<boolean>;
   deleteOutgoingRequest(requestId: string, requesterId: string): Promise<boolean>;
   deleteAcceptedPair(userAId: string, userBId: string): Promise<boolean>;

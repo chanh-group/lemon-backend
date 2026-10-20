@@ -131,6 +131,40 @@ describe("FriendService", () => {
     await expect(service.assertCanChat(userId, otherId)).resolves.toBeUndefined();
   });
 
+  it("returns the conversation created atomically with an accepted request", async () => {
+    const conversation = {
+      id: "conversation-id",
+      kind: "DIRECT",
+      unreadCount: 0,
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+    };
+    const joinConversation = vi.fn();
+    friendRepo.acceptRequest.mockResolvedValue({
+      requesterId: userId,
+      addresseeId: otherId,
+      conversation,
+    });
+    service = new FriendService(
+      friendRepo as never,
+      userRepo as never,
+      { emitFriendRequestReceived: vi.fn(), joinConversation } as never,
+      cache as never,
+    );
+
+    await expect(service.acceptRequest("request-id", otherId)).resolves.toBe(conversation);
+    expect(joinConversation).toHaveBeenCalledWith([userId, otherId], conversation.id);
+    expect(cache.deleteManyBestEffort).toHaveBeenCalled();
+  });
+
+  it("does not create a conversation when there is no pending request to accept", async () => {
+    friendRepo.acceptRequest.mockResolvedValue(null);
+
+    await expect(service.acceptRequest("missing-request", otherId)).rejects.toMatchObject({
+      code: "FRIEND_REQUEST_NOT_FOUND",
+    });
+    expect(cache.deleteManyBestEffort).not.toHaveBeenCalled();
+  });
+
   it("records a block even when no friendship row exists yet", async () => {
     await service.blockUser(userId, otherId);
 
