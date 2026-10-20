@@ -1,10 +1,13 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, asc, desc, eq, gt, isNull, lt } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lt, or } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { isUniqueViolation } from "../../utils/errors/pg.js";
 import { conversations } from "../conversation/schema.js";
+import { friendships } from "../friend/schema.js";
+import { DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE } from "../pagination.constants.js";
+import { ATTACHMENT_PREVIEW_TOKEN } from "./constants.js";
 import type {
   CreatedMessageResult,
   MessageRepository,
@@ -42,9 +45,26 @@ export class MessagePgRepository implements MessageRepository {
     kind?: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "FILE" | "SYSTEM";
     clientMsgId?: string | null;
     replyToId?: string | null;
+    requiredFriendship?: { userAId: string; userBId: string };
   }): Promise<CreatedMessageResult> {
     try {
       return await this.db.transaction(async (tx) => {
+        if (messageData.requiredFriendship) {
+          const [userLow, userHigh] = [
+            messageData.requiredFriendship.userAId,
+            messageData.requiredFriendship.userBId,
+          ].sort();
+          const [relation] = await tx
+            .select({ status: friendships.status })
+            .from(friendships)
+            .where(and(eq(friendships.userLow, userLow), eq(friendships.userHigh, userHigh)))
+            .for("share")
+            .limit(1);
+
+          if (relation?.status === "BLOCKED") throw new BusinessError("USER_BLOCKED");
+          if (relation?.status !== "ACCEPTED") throw new BusinessError("FRIENDSHIP_REQUIRED");
+        }
+
         // 1. Idempotency check with clientMsgId
         if (messageData.clientMsgId) {
           const [existing] = await tx
@@ -75,7 +95,7 @@ export class MessagePgRepository implements MessageRepository {
           .returning();
 
         // 3. Atomically update parent conversation inbox fields
-        const preview = newMsg.body ? newMsg.body.slice(0, 80) : "[Tệp đính kèm]";
+        const preview = newMsg.body ? newMsg.body.slice(0, 80) : ATTACHMENT_PREVIEW_TOKEN;
         await tx
           .update(conversations)
           .set({
@@ -84,7 +104,19 @@ export class MessagePgRepository implements MessageRepository {
             lastMessagePreview: preview,
             updatedAt: new Date(),
           })
-          .where(eq(conversations.id, messageData.conversationId));
+          .where(
+            and(
+              eq(conversations.id, messageData.conversationId),
+              or(
+                isNull(conversations.lastMessageAt),
+                lt(conversations.lastMessageAt, newMsg.createdAt),
+                and(
+                  eq(conversations.lastMessageAt, newMsg.createdAt),
+                  lt(conversations.lastMessageId, newMsg.id),
+                ),
+              ),
+            ),
+          );
 
         return { message: newMsg, isNew: true };
       });
@@ -105,10 +137,10 @@ export class MessagePgRepository implements MessageRepository {
   async findTimeline(
     conversationId: string,
     cursor?: string,
-    limit = 30,
+    limit = DEFAULT_MESSAGE_PAGE_SIZE,
     after?: string,
   ): Promise<MessageTimelineResult> {
-    const queryLimit = Math.min(Math.max(limit, 1), 50);
+    const queryLimit = Math.min(Math.max(limit, 1), MAX_MESSAGE_PAGE_SIZE);
 
     const conditions = [eq(messages.conversationId, conversationId), isNull(messages.deletedAt)];
 
@@ -182,7 +214,7 @@ export class MessagePgRepository implements MessageRepository {
       if (!updated) return null;
 
       // Update conversation preview if this is the last message
-      const preview = updated.body ? updated.body.slice(0, 80) : "[Tệp đính kèm]";
+      const preview = updated.body ? updated.body.slice(0, 80) : ATTACHMENT_PREVIEW_TOKEN;
       await tx
         .update(conversations)
         .set({

@@ -3,10 +3,10 @@ import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
 import type { DrizzleDb } from "../../configs/database.js";
 import { friendships } from "../friend/schema.js";
+import type { UserSummary } from "../user/dto/response.js";
 import { users } from "../user/schema.js";
 import { notes, type Note } from "./schema.js";
 import type { NoteRepository } from "./repository.js";
-import type { UserSummary } from "../user/dto/response.js";
 
 @Injectable()
 export class NotePgRepository implements NoteRepository {
@@ -48,29 +48,22 @@ export class NotePgRepository implements NoteRepository {
     return rows[0] ?? null;
   }
 
-  async findActiveByUserIds(userIds: string[]): Promise<Note[]> {
+  async findActiveFeedByUserIds(userIds: string[]): Promise<{ note: Note; user: UserSummary }[]> {
     if (userIds.length === 0) return [];
 
     return await this.db
-      .select()
-      .from(notes)
-      .where(and(inArray(notes.userId, userIds), gt(notes.expiresAt, new Date())));
-  }
-
-  async findUsersByIds(userIds: string[]): Promise<Map<string, UserSummary>> {
-    if (userIds.length === 0) return new Map();
-
-    const rows = await this.db
       .select({
-        id: users.id,
-        username: users.username,
-        fullName: users.fullName,
-        avatarUrl: users.avatarUrl,
+        note: notes,
+        user: {
+          id: users.id,
+          username: users.username,
+          fullName: users.fullName,
+          avatarUrl: users.avatarUrl,
+        },
       })
-      .from(users)
-      .where(inArray(users.id, userIds));
-
-    return new Map(rows.map((u) => [u.id, u]));
+      .from(notes)
+      .innerJoin(users, eq(notes.userId, users.id))
+      .where(and(inArray(notes.userId, userIds), gt(notes.expiresAt, new Date())));
   }
 
   async getFriendUserIds(userId: string): Promise<string[]> {

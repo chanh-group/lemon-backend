@@ -24,6 +24,7 @@ export interface MessageRepository {
     kind?: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "FILE" | "SYSTEM";
     clientMsgId?: string | null;
     replyToId?: string | null;
+    requiredFriendship?: { userAId: string; userBId: string };
   }): Promise<CreatedMessageResult>;
   findTimeline(
     conversationId: string,

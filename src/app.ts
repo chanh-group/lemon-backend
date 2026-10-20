@@ -11,6 +11,7 @@ import { ConversationModule } from "./domain/conversation/module.js";
 import { ExampleModule } from "./domain/example/module.js";
 import { FileModule } from "./domain/file/module.js";
 import { FriendModule } from "./domain/friend/module.js";
+import { HealthModule } from "./domain/health/module.js";
 import { MessageModule } from "./domain/message/module.js";
 import { NoteModule } from "./domain/note/module.js";
 import { RealtimeModule } from "./domain/realtime/realtime.module.js";
@@ -18,6 +19,8 @@ import { StoryModule } from "./domain/story/module.js";
 import { UserModule } from "./domain/user/module.js";
 import { PurgeModule } from "./jobs/purge/module.js";
 import { RequestLoggerMiddleware } from "./middleware/request-logger.js";
+import { RateLimitModule } from "./middleware/ratelimit.module.js";
+import { RedisReadinessGuard } from "./middleware/redis-readiness.guard.js";
 
 @Module({
   imports: [
@@ -26,8 +29,10 @@ import { RequestLoggerMiddleware } from "./middleware/request-logger.js";
     CacheModule,
     StorageModule,
     MailModule,
+    RateLimitModule,
     UserModule,
     AuthModule,
+    HealthModule,
     RealtimeModule,
     ConversationModule,
     MessageModule,
@@ -39,6 +44,10 @@ import { RequestLoggerMiddleware } from "./middleware/request-logger.js";
     ExampleModule,
   ],
   providers: [
+    {
+      provide: APP_GUARD,
+      useClass: RedisReadinessGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: AuthGuard,

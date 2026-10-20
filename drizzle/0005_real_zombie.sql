@@ -1,0 +1,2 @@
+CREATE INDEX "users_username_trgm_idx" ON "users" USING gin ("username" gin_trgm_ops) WHERE "users"."deleted_at" IS NULL;--> statement-breakpoint
+CREATE INDEX "users_email_trgm_idx" ON "users" USING gin (("email"::text) gin_trgm_ops) WHERE "users"."deleted_at" IS NULL;

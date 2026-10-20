@@ -9,15 +9,12 @@ import {
 } from "../../utils/cache/constants.js";
 import { CACHE_STORE, type CacheStoreExt } from "../../utils/cache/store.js";
 import { storyFeedKey } from "../../utils/cache/keys.js";
+import { RedisMetricsService } from "../../configs/redis-metrics.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.js";
 import { groupStoriesByUser, reviveUserStoryFeed, toStoryItemResponse } from "./dto/mapper.js";
 import type { CreateStoryDto } from "./dto/request.js";
-import type {
-  StoryItemResponse,
-  StoryViewerResponse,
-  UserStoryFeedResponse,
-} from "./dto/response.js";
+import type { StoryItemResponse, UserStoryFeedResponse } from "./dto/response.js";
 import { STORY_REPOSITORY, type StoryRepository } from "./repository.js";
 import type { NewStory } from "./schema.js";
 
@@ -39,6 +36,7 @@ export class StoryService {
     @Inject(STORY_REPOSITORY) private readonly storyRepo: StoryRepository,
     @Inject(CACHE_STORE) private readonly cache: CacheStoreExt,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
+    private readonly metrics?: RedisMetricsService,
   ) {}
 
   async createStory(userId: string, dto: CreateStoryDto): Promise<StoryItemResponse> {
@@ -101,8 +99,7 @@ export class StoryService {
 
     // Invalidate feed cache for owner and all accepted friends in 1 round trip
     const friendIds = await this.storyRepo.getFriendUserIds(userId);
-    const keysToInvalidate = [userId, ...friendIds].map(storyFeedKey);
-    await this.cache.deleteManyBestEffort(keysToInvalidate);
+    await this.cache.deleteManyBestEffort([userId, ...friendIds].map(storyFeedKey));
 
     this.logger.log("Story created successfully", { storyId: created.id, userId, kind: dto.kind });
 
@@ -111,12 +108,16 @@ export class StoryService {
 
   async getFeed(userId: string): Promise<UserStoryFeedResponse[]> {
     const cacheKey = storyFeedKey(userId);
-    const cached = await this.cache.getBestEffort<UserStoryFeedResponse[]>(cacheKey);
+    const [friendIds, cached] = await Promise.all([
+      this.storyRepo.getFriendUserIds(userId),
+      this.cache.getBestEffort<UserStoryFeedResponse[]>(cacheKey),
+    ]);
+    const visibleUserIds = new Set([userId, ...friendIds]);
+    this.metrics?.recordLookup("story_feed", cached === null ? "miss" : "hit");
     if (cached) {
-      return reviveUserStoryFeed(cached);
+      return reviveUserStoryFeed(cached.filter((entry) => visibleUserIds.has(entry.user.id)));
     }
 
-    const friendIds = await this.storyRepo.getFriendUserIds(userId);
     const targetUserIds = [userId, ...friendIds];
 
     // Parallel fetch: active stories and user profile summaries
@@ -142,8 +143,7 @@ export class StoryService {
     }
 
     if (story.userId !== userId) {
-      const friendIds = await this.storyRepo.getFriendUserIds(story.userId);
-      if (!friendIds.includes(userId)) {
+      if (!(await this.storyRepo.isAcceptedFriend(story.userId, userId))) {
         throw new BusinessError("STORY_VIEW_FORBIDDEN");
       }
     }
@@ -164,8 +164,7 @@ export class StoryService {
       return;
     }
 
-    const friendIds = await this.storyRepo.getFriendUserIds(story.userId);
-    if (!friendIds.includes(userId)) {
+    if (!(await this.storyRepo.isAcceptedFriend(story.userId, userId))) {
       throw new BusinessError("STORY_VIEW_FORBIDDEN");
     }
 
@@ -173,7 +172,7 @@ export class StoryService {
     await this.cache.deleteBestEffort(storyFeedKey(userId));
   }
 
-  async getViewers(userId: string, storyId: string): Promise<StoryViewerResponse[]> {
+  async getViewers(userId: string, storyId: string, cursor: string | undefined, limit: number) {
     const story = await this.storyRepo.findById(storyId);
     if (!story) {
       throw new BusinessError("STORY_NOT_FOUND");
@@ -183,7 +182,7 @@ export class StoryService {
       throw new BusinessError("STORY_VIEWERS_FORBIDDEN");
     }
 
-    return this.storyRepo.findViewersByStoryId(storyId);
+    return this.storyRepo.findViewersByStoryId(storyId, cursor, limit);
   }
 
   async deleteStory(userId: string, storyId: string): Promise<void> {
@@ -202,8 +201,7 @@ export class StoryService {
     }
 
     const friendIds = await this.storyRepo.getFriendUserIds(userId);
-    const keysToInvalidate = [userId, ...friendIds].map(storyFeedKey);
-    await this.cache.deleteManyBestEffort(keysToInvalidate);
+    await this.cache.deleteManyBestEffort([userId, ...friendIds].map(storyFeedKey));
 
     this.logger.log("Story deleted", { storyId, userId });
   }

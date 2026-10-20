@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, desc, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { isUniqueViolation } from "../../utils/errors/pg.js";
@@ -8,14 +9,21 @@ import { messages } from "../message/schema.js";
 import { users } from "../user/schema.js";
 import type { ConversationRepository, ConversationWithPartner } from "./repository.js";
 import { conversationParticipants, conversations } from "./schema.js";
+import { toCursorPage } from "../shared.js";
+
+const partnerParticipants = alias(conversationParticipants, "partner_participants");
 
 @Injectable()
 export class ConversationPgRepository implements ConversationRepository {
   constructor(@InjectDrizzle() private readonly db: DrizzleDb) {}
 
   private getDirectKey(userAId: string, userBId: string): string {
-    const [low, high] = [userAId, userBId].sort();
+    const [low, high] = this.canonicalParticipants(userAId, userBId);
     return `${low}:${high}`;
+  }
+
+  private canonicalParticipants(userAId: string, userBId: string): [string, string] {
+    return userAId < userBId ? [userAId, userBId] : [userBId, userAId];
   }
 
   async findDirectByParticipants(
@@ -24,7 +32,7 @@ export class ConversationPgRepository implements ConversationRepository {
   ): Promise<ConversationWithPartner | null> {
     const directKey = this.getDirectKey(userAId, userBId);
 
-    const [conv] = await this.db
+    const [row] = await this.db
       .select({
         id: conversations.id,
         kind: conversations.kind,
@@ -32,29 +40,19 @@ export class ConversationPgRepository implements ConversationRepository {
         lastMessagePreview: conversations.lastMessagePreview,
         lastMessageAt: conversations.lastMessageAt,
         createdAt: conversations.createdAt,
+        partner: {
+          id: users.id,
+          username: users.username,
+          fullName: users.fullName,
+          avatarUrl: users.avatarUrl,
+        },
       })
       .from(conversations)
+      .innerJoin(users, eq(users.id, userBId))
       .where(and(eq(conversations.directKey, directKey), isNull(conversations.deletedAt)))
       .limit(1);
 
-    if (!conv) return null;
-
-    // Fetch partner details
-    const [partner] = await this.db
-      .select({
-        id: users.id,
-        username: users.username,
-        fullName: users.fullName,
-        avatarUrl: users.avatarUrl,
-      })
-      .from(users)
-      .where(eq(users.id, userBId))
-      .limit(1);
-
-    return {
-      ...conv,
-      partner,
-    };
+    return row ?? null;
   }
 
   async createDirectConversation(
@@ -94,11 +92,12 @@ export class ConversationPgRepository implements ConversationRepository {
         }
 
         // Ensure both participants exist
+        const [participantLow, participantHigh] = this.canonicalParticipants(userAId, userBId);
         await tx
           .insert(conversationParticipants)
           .values([
-            { conversationId: convId, userId: userAId, role: "MEMBER" },
-            { conversationId: convId, userId: userBId, role: "MEMBER" },
+            { conversationId: convId, userId: participantLow, role: "MEMBER" },
+            { conversationId: convId, userId: participantHigh, role: "MEMBER" },
           ])
           .onConflictDoNothing();
 
@@ -133,26 +132,30 @@ export class ConversationPgRepository implements ConversationRepository {
     }
   }
 
-  async findUserConversations(userId: string, limit = 20): Promise<ConversationWithPartner[]> {
-    // 1. Get all conversations that this user participates in
-    const myParticipations = await this.db
-      .select({
-        conversationId: conversationParticipants.conversationId,
-        lastReadMessageId: conversationParticipants.lastReadMessageId,
-      })
-      .from(conversationParticipants)
-      .where(
-        and(eq(conversationParticipants.userId, userId), isNull(conversationParticipants.leftAt)),
+  async findUserConversations(userId: string, limit: number, cursor?: string) {
+    // Apply pagination before loading participant details so users with many
+    // conversations do not create an unbounded IN list.
+    const activityOrder = sql`COALESCE(${conversations.lastMessageAt}, ${conversations.createdAt})`;
+    const cursorActivity = cursor
+      ? sql`(SELECT COALESCE(c.last_message_at, c.created_at)
+          FROM conversations c
+          INNER JOIN conversation_participants cp ON cp.conversation_id = c.id
+          WHERE c.id = ${cursor} AND cp.user_id = ${userId}
+            AND cp.left_at IS NULL AND c.deleted_at IS NULL)`
+      : undefined;
+    const conditions = [
+      eq(conversationParticipants.userId, userId),
+      isNull(conversationParticipants.leftAt),
+      isNull(conversations.deletedAt),
+    ];
+    if (cursor && cursorActivity) {
+      conditions.push(
+        or(
+          lt(activityOrder, cursorActivity),
+          and(eq(activityOrder, cursorActivity), lt(conversations.id, cursor)),
+        )!,
       );
-
-    if (myParticipations.length === 0) return [];
-
-    const convIds = myParticipations.map((p) => p.conversationId);
-    const lastReadMap = new Map(
-      myParticipations.map((p) => [p.conversationId, p.lastReadMessageId]),
-    );
-
-    // 2. Fetch conversations details
+    }
     const convRows = await this.db
       .select({
         id: conversations.id,
@@ -161,13 +164,25 @@ export class ConversationPgRepository implements ConversationRepository {
         lastMessagePreview: conversations.lastMessagePreview,
         lastMessageAt: conversations.lastMessageAt,
         createdAt: conversations.createdAt,
+        lastReadMessageId: conversationParticipants.lastReadMessageId,
       })
-      .from(conversations)
-      .where(and(inArray(conversations.id, convIds), isNull(conversations.deletedAt)))
-      .orderBy(desc(sql`COALESCE(${conversations.lastMessageAt}, ${conversations.createdAt})`))
-      .limit(limit);
+      .from(conversationParticipants)
+      .innerJoin(conversations, eq(conversationParticipants.conversationId, conversations.id))
+      .where(and(...conditions))
+      .orderBy(desc(activityOrder), desc(conversations.id))
+      .limit(limit + 1);
+    const page = toCursorPage(convRows, limit, (conversation) => conversation.id);
+    if (page.items.length === 0) return page;
 
-    // 3. For DIRECT conversations, find partner info
+    const directIds = page.items.filter((conv) => conv.kind === "DIRECT").map((conv) => conv.id);
+    if (directIds.length === 0) {
+      return {
+        ...page,
+        items: page.items.map((conv) => ({ ...conv, lastReadMessageId: conv.lastReadMessageId })),
+      };
+    }
+
+    // Fetch partners in one query for the paginated direct conversations.
     const otherParticipants = await this.db
       .select({
         conversationId: conversationParticipants.conversationId,
@@ -182,69 +197,75 @@ export class ConversationPgRepository implements ConversationRepository {
       .innerJoin(users, eq(conversationParticipants.userId, users.id))
       .where(
         and(
-          inArray(conversationParticipants.conversationId, convIds),
+          inArray(conversationParticipants.conversationId, directIds),
           ne(conversationParticipants.userId, userId),
+          isNull(conversationParticipants.leftAt),
         ),
       );
 
     const partnerMap = new Map(otherParticipants.map((p) => [p.conversationId, p.user]));
 
-    return convRows.map((conv) => ({
-      ...conv,
-      partner: partnerMap.get(conv.id),
-      lastReadMessageId: lastReadMap.get(conv.id),
-    }));
+    return {
+      ...page,
+      items: page.items.map((conv) => ({ ...conv, partner: partnerMap.get(conv.id) })),
+    };
   }
 
   async findById(conversationId: string, userId: string): Promise<ConversationWithPartner | null> {
-    const [membership] = await this.db
-      .select()
-      .from(conversationParticipants)
-      .where(
+    const [row] = await this.db
+      .select({
+        id: conversations.id,
+        kind: conversations.kind,
+        directKey: conversations.directKey,
+        lastMessagePreview: conversations.lastMessagePreview,
+        lastMessageAt: conversations.lastMessageAt,
+        createdAt: conversations.createdAt,
+        lastReadMessageId: conversationParticipants.lastReadMessageId,
+        partnerId: users.id,
+        partnerUsername: users.username,
+        partnerFullName: users.fullName,
+        partnerAvatarUrl: users.avatarUrl,
+      })
+      .from(conversations)
+      .innerJoin(
+        conversationParticipants,
         and(
-          eq(conversationParticipants.conversationId, conversationId),
+          eq(conversationParticipants.conversationId, conversations.id),
           eq(conversationParticipants.userId, userId),
           isNull(conversationParticipants.leftAt),
         ),
       )
-      .limit(1);
-
-    if (!membership) return null;
-
-    const [conv] = await this.db
-      .select()
-      .from(conversations)
+      .leftJoin(
+        partnerParticipants,
+        and(
+          eq(partnerParticipants.conversationId, conversations.id),
+          ne(partnerParticipants.userId, userId),
+          isNull(partnerParticipants.leftAt),
+        ),
+      )
+      .leftJoin(users, eq(partnerParticipants.userId, users.id))
       .where(and(eq(conversations.id, conversationId), isNull(conversations.deletedAt)))
       .limit(1);
 
-    if (!conv) return null;
-
-    const [partnerRow] = await this.db
-      .select({
-        id: users.id,
-        username: users.username,
-        fullName: users.fullName,
-        avatarUrl: users.avatarUrl,
-      })
-      .from(conversationParticipants)
-      .innerJoin(users, eq(conversationParticipants.userId, users.id))
-      .where(
-        and(
-          eq(conversationParticipants.conversationId, conversationId),
-          ne(conversationParticipants.userId, userId),
-        ),
-      )
-      .limit(1);
+    if (!row) return null;
 
     return {
-      id: conv.id,
-      kind: conv.kind,
-      directKey: conv.directKey,
-      lastMessagePreview: conv.lastMessagePreview,
-      lastMessageAt: conv.lastMessageAt,
-      createdAt: conv.createdAt,
-      partner: partnerRow,
-      lastReadMessageId: membership.lastReadMessageId,
+      id: row.id,
+      kind: row.kind,
+      directKey: row.directKey,
+      lastMessagePreview: row.lastMessagePreview,
+      lastMessageAt: row.lastMessageAt,
+      createdAt: row.createdAt,
+      partner:
+        row.partnerId && row.partnerUsername && row.partnerFullName
+          ? {
+              id: row.partnerId,
+              username: row.partnerUsername,
+              fullName: row.partnerFullName,
+              avatarUrl: row.partnerAvatarUrl,
+            }
+          : undefined,
+      lastReadMessageId: row.lastReadMessageId,
     };
   }
 
@@ -333,5 +354,39 @@ export class ConversationPgRepository implements ConversationRepository {
       );
 
     return row?.count ?? 0;
+  }
+
+  async countUnreadByConversationIds(
+    conversationIds: string[],
+    userId: string,
+  ): Promise<Map<string, number>> {
+    if (conversationIds.length === 0) return new Map();
+    const rows = await this.db
+      .select({
+        conversationId: messages.conversationId,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(messages)
+      .innerJoin(
+        conversationParticipants,
+        and(
+          eq(conversationParticipants.conversationId, messages.conversationId),
+          eq(conversationParticipants.userId, userId),
+          isNull(conversationParticipants.leftAt),
+        ),
+      )
+      .where(
+        and(
+          inArray(messages.conversationId, conversationIds),
+          isNull(messages.deletedAt),
+          ne(messages.senderId, userId),
+          or(
+            isNull(conversationParticipants.lastReadMessageId),
+            gt(messages.id, conversationParticipants.lastReadMessageId),
+          ),
+        ),
+      )
+      .groupBy(messages.conversationId);
+    return new Map(rows.map((row) => [row.conversationId, Number(row.count)]));
   }
 }

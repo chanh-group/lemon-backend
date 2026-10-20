@@ -1,10 +1,12 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, eq, ilike, isNull, ne, or } from "drizzle-orm";
+import { and, asc, eq, gt, ilike, isNull, ne, or, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import type { UserRepository } from "./repository.js";
 import type { NewUser, User } from "./schema.js";
 import { users } from "./schema.js";
+import { toCursorPage } from "../shared.js";
+import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "../pagination.constants.js";
 
 @Injectable()
 export class UserPgRepository implements UserRepository {
@@ -47,19 +49,24 @@ export class UserPgRepository implements UserRepository {
     query: string,
     field: "email" | "username",
     excludeId?: string,
-    limit = 20,
-  ): Promise<User[]> {
+    cursor?: string,
+    limit = DEFAULT_PAGE_SIZE,
+  ) {
     const pattern = `%${query.trim().replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
-    const column = field === "email" ? users.email : users.username;
-    const filters = [ilike(column, pattern), isNull(users.deletedAt)];
+    const searchColumn = field === "email" ? sql<string>`${users.email}::text` : users.username;
+    const filters = [ilike(searchColumn, pattern), isNull(users.deletedAt)];
     if (excludeId) {
       filters.push(ne(users.id, excludeId));
     }
-    return this.db
+    if (cursor) filters.push(gt(users.id, cursor));
+    const pageSize = Math.min(limit, MAX_PAGE_SIZE);
+    const rows = await this.db
       .select()
       .from(users)
       .where(and(...filters))
-      .limit(limit);
+      .orderBy(asc(users.id))
+      .limit(pageSize + 1);
+    return toCursorPage(rows, pageSize, (user) => user.id);
   }
 
   async create(data: NewUser): Promise<User> {

@@ -7,6 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi, type Mock } 
 import { ConversationController } from "../../../../src/domain/conversation/controller.js";
 import { ConversationService } from "../../../../src/domain/conversation/service.js";
 import type { ConversationResponse } from "../../../../src/domain/conversation/dto/response.js";
+import type { CursorPage } from "../../../../src/domain/shared.js";
 import { standardSchemaPipe } from "../../../../src/utils/validation.js";
 
 describe("ConversationController", () => {
@@ -15,7 +16,7 @@ describe("ConversationController", () => {
     (userId: string, targetUserId: string) => Promise<ConversationResponse>
   >;
   let listConversationsMock: Mock<
-    (userId: string, limit?: number) => Promise<ConversationResponse[]>
+    (userId: string, limit: number, cursor?: string) => Promise<CursorPage<ConversationResponse>>
   >;
   let getByIdMock: Mock<(conversationId: string, userId: string) => Promise<ConversationResponse>>;
   let markAsReadMock: Mock<
@@ -48,8 +49,14 @@ describe("ConversationController", () => {
       .mockResolvedValue(mockConversation);
 
     listConversationsMock = vi
-      .fn<(userId: string, limit?: number) => Promise<ConversationResponse[]>>()
-      .mockResolvedValue([mockConversation]);
+      .fn<
+        (
+          userId: string,
+          limit: number,
+          cursor?: string,
+        ) => Promise<CursorPage<ConversationResponse>>
+      >()
+      .mockResolvedValue({ items: [mockConversation], hasMore: false });
 
     getByIdMock = vi
       .fn<(conversationId: string, userId: string) => Promise<ConversationResponse>>()
@@ -102,20 +109,24 @@ describe("ConversationController", () => {
 
   describe("listConversations", () => {
     it("GET /conversations - lists user conversations with default limit 20", async () => {
-      const res = await controller.listConversations({ user: { id: mockUserId } }, undefined);
+      const res = await controller.listConversations(
+        { user: { id: mockUserId } },
+        undefined,
+        undefined,
+      );
 
-      expect(listConversationsMock).toHaveBeenCalledWith(mockUserId, 20);
+      expect(listConversationsMock).toHaveBeenCalledWith(mockUserId, 20, undefined);
       expect(res).toEqual({
         success: true,
         message: "OK",
-        data: [mockConversation],
+        data: { items: [mockConversation], hasMore: false },
       });
     });
 
     it("respects the query limit param", async () => {
-      await controller.listConversations({ user: { id: mockUserId } }, "50");
+      await controller.listConversations({ user: { id: mockUserId } }, undefined, "50");
 
-      expect(listConversationsMock).toHaveBeenCalledWith(mockUserId, 50);
+      expect(listConversationsMock).toHaveBeenCalledWith(mockUserId, 50, undefined);
     });
   });
 

@@ -1,8 +1,10 @@
 // Production Redis backend — every session/OTP op runs as one Lua script
 // (single round trip, atomic). Scripts are ported verbatim from Rust
 // `dsa/src/utils/cache/redis.rs` (`cjson` ships with Redis Lua).
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import type { Redis } from "ioredis";
+import { RedisHealthService } from "../../configs/redis-health.js";
+import { RedisMetricsService, type RedisMetricOperation } from "../../configs/redis-metrics.js";
 import { REFRESH_TOKEN_KEY_PREFIX } from "./constants.js";
 import { CacheError } from "./error.js";
 import { CacheStoreExt, REDIS_CLIENT } from "./store.js";
@@ -172,13 +174,29 @@ export interface RedisWithCacheCommands extends Redis {
 
 @Injectable()
 export class RedisCacheService extends CacheStoreExt {
-  constructor(@Inject(REDIS_CLIENT) private readonly redis: RedisWithCacheCommands) {
+  constructor(
+    @Inject(REDIS_CLIENT) private readonly redis: RedisWithCacheCommands,
+    @Optional() @Inject(RedisHealthService) private readonly health?: RedisHealthService,
+    @Optional() @Inject(RedisMetricsService) private readonly metrics?: RedisMetricsService,
+  ) {
     super();
+  }
+
+  private execute<T>(operation: RedisMetricOperation, action: () => Promise<T>): Promise<T> {
+    const run = async (): Promise<T> => {
+      try {
+        return await action();
+      } catch (err) {
+        this.health?.markUnavailable(err);
+        throw err;
+      }
+    };
+    return this.metrics ? this.metrics.measure(operation, run) : run();
   }
 
   async getRaw(key: string): Promise<string | null> {
     try {
-      return await this.redis.get(key);
+      return await this.execute("cache_get", () => this.redis.get(key));
     } catch (err) {
       this.logger.warn(`Redis GET failed: ${String(err)}`);
       throw new CacheError("GET", err);
@@ -187,7 +205,7 @@ export class RedisCacheService extends CacheStoreExt {
 
   async setRaw(key: string, value: string, expirationSecs: number): Promise<void> {
     try {
-      await this.redis.set(key, value, "EX", expirationSecs);
+      await this.execute("cache_set", () => this.redis.set(key, value, "EX", expirationSecs));
     } catch (err) {
       this.logger.warn(`Redis SETEX failed: ${String(err)}`);
       throw new CacheError("SETEX", err);
@@ -196,7 +214,7 @@ export class RedisCacheService extends CacheStoreExt {
 
   async delete(key: string): Promise<void> {
     try {
-      await this.redis.del(key);
+      await this.execute("cache_delete", () => this.redis.del(key));
     } catch (err) {
       this.logger.warn(`Redis DEL failed: ${String(err)}`);
       throw new CacheError("DEL", err);
@@ -206,7 +224,12 @@ export class RedisCacheService extends CacheStoreExt {
   async deleteMany(keys: string[]): Promise<void> {
     if (keys.length === 0) return;
     try {
-      await this.redis.pipeline(keys.map((key) => ["del", key])).exec();
+      await this.execute("cache_delete_many", async () => {
+        const results = await this.redis.pipeline(keys.map((key) => ["del", key])).exec();
+        if (!results || results.length !== keys.length || results.some(([err]) => err)) {
+          throw new Error("Redis pipelined DEL returned a failed result");
+        }
+      });
     } catch (err) {
       this.logger.warn(`Redis pipelined DEL failed: ${String(err)}`);
       throw new CacheError("pipelined DEL", err);
@@ -215,15 +238,17 @@ export class RedisCacheService extends CacheStoreExt {
 
   async rotateRefreshToken(rotation: RefreshRotation): Promise<RotationOutcome> {
     try {
-      const rotated = await this.redis.rotateRefresh(
-        3,
-        rotation.oldKey,
-        rotation.newKey,
-        rotation.sessionKey,
-        rotation.subject,
-        rotation.oldJti,
-        rotation.newJti,
-        rotation.ttlSecs,
+      const rotated = await this.execute("cache_rotate_refresh", () =>
+        this.redis.rotateRefresh(
+          3,
+          rotation.oldKey,
+          rotation.newKey,
+          rotation.sessionKey,
+          rotation.subject,
+          rotation.oldJti,
+          rotation.newJti,
+          rotation.ttlSecs,
+        ),
       );
       return rotated === 1 ? RotationOutcome.Rotated : RotationOutcome.Stale;
     } catch (err) {
@@ -234,15 +259,17 @@ export class RedisCacheService extends CacheStoreExt {
 
   async createRefreshSession(session: NewRefreshSession): Promise<void> {
     try {
-      await this.redis.createSession(
-        2,
-        session.key,
-        session.sessionKey,
-        session.subject,
-        session.jti,
-        session.ttlSecs,
-        session.maxSessions,
-        REFRESH_TOKEN_KEY_PREFIX,
+      await this.execute("cache_create_session", () =>
+        this.redis.createSession(
+          2,
+          session.key,
+          session.sessionKey,
+          session.subject,
+          session.jti,
+          session.ttlSecs,
+          session.maxSessions,
+          REFRESH_TOKEN_KEY_PREFIX,
+        ),
       );
     } catch (err) {
       this.logger.warn(`Redis session creation failed: ${String(err)}`);
@@ -252,7 +279,9 @@ export class RedisCacheService extends CacheStoreExt {
 
   async revokeRefreshSession(revoke: RevokeRefreshSession): Promise<void> {
     try {
-      await this.redis.revokeSession(2, revoke.key, revoke.sessionKey, revoke.jti);
+      await this.execute("cache_revoke_session", () =>
+        this.redis.revokeSession(2, revoke.key, revoke.sessionKey, revoke.jti),
+      );
     } catch (err) {
       this.logger.warn(`Redis session revocation failed: ${String(err)}`);
       throw new CacheError("session revocation", err);
@@ -265,7 +294,9 @@ export class RedisCacheService extends CacheStoreExt {
     maxAttempts: number,
   ): Promise<OtpCheckOutcome> {
     try {
-      const verdict = await this.redis.checkOtp(1, key, candidate, maxAttempts);
+      const verdict = await this.execute("cache_check_otp", () =>
+        this.redis.checkOtp(1, key, candidate, maxAttempts),
+      );
       switch (verdict) {
         case 1:
           return OtpCheckOutcome.Match;
@@ -284,7 +315,11 @@ export class RedisCacheService extends CacheStoreExt {
 
   async tryAcquireLock(key: string, token: string, expirationSecs: number): Promise<boolean> {
     try {
-      return (await this.redis.set(key, token, "EX", expirationSecs, "NX")) === "OK";
+      return (
+        (await this.execute("cache_lock", () =>
+          this.redis.set(key, token, "EX", expirationSecs, "NX"),
+        )) === "OK"
+      );
     } catch (err) {
       this.logger.warn(`Redis lock acquire failed: ${String(err)}`);
       throw new CacheError("lock acquire", err);
@@ -293,7 +328,7 @@ export class RedisCacheService extends CacheStoreExt {
 
   async releaseLock(key: string, token: string): Promise<void> {
     try {
-      await this.redis.releaseLock(1, key, token);
+      await this.execute("cache_unlock", () => this.redis.releaseLock(1, key, token));
     } catch (err) {
       this.logger.warn(`Redis lock release failed: ${String(err)}`);
       throw new CacheError("lock release", err);

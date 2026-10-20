@@ -2,6 +2,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import { CACHE_STORE, type CacheStoreExt } from "../../utils/cache/store.js";
 import { NOTE_FEED_TTL_SECS, NOTE_TTL_MS } from "../../utils/cache/constants.js";
 import { noteFeedKey } from "../../utils/cache/keys.js";
+import { RedisMetricsService } from "../../configs/redis-metrics.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { Logger } from "../../utils/logger.js";
 import type { UpsertNoteDto } from "./dto/request.js";
@@ -16,6 +17,7 @@ export class NoteService {
   constructor(
     @Inject(NOTE_REPOSITORY) private readonly noteRepo: NoteRepository,
     @Inject(CACHE_STORE) private readonly cacheStore: CacheStoreExt,
+    private readonly metrics?: RedisMetricsService,
   ) {}
 
   async upsertNote(userId: string, dto: UpsertNoteDto): Promise<NoteResponse> {
@@ -40,38 +42,32 @@ export class NoteService {
 
   async getFeed(userId: string): Promise<UserNoteFeedResponse[]> {
     const key = noteFeedKey(userId);
-    const cached = await this.cacheStore.getBestEffort<UserNoteFeedResponse[]>(key);
+    const [friendIds, cached] = await Promise.all([
+      this.noteRepo.getFriendUserIds(userId),
+      this.cacheStore.getBestEffort<UserNoteFeedResponse[]>(key),
+    ]);
+    const visibleUserIds = new Set([userId, ...friendIds]);
+    this.metrics?.recordLookup("note_feed", cached === null ? "miss" : "hit");
 
     if (cached) {
-      return cached.map((item) => ({
-        ...item,
-        note: {
-          ...item.note,
-          createdAt: new Date(item.note.createdAt),
-          expiresAt: new Date(item.note.expiresAt),
-        },
-      }));
+      return cached
+        .filter((item) => visibleUserIds.has(item.user.id))
+        .map((item) => ({
+          ...item,
+          note: {
+            ...item.note,
+            createdAt: new Date(item.note.createdAt),
+            expiresAt: new Date(item.note.expiresAt),
+          },
+        }));
     }
 
-    const friendIds = await this.noteRepo.getFriendUserIds(userId);
     const allUserIds = [userId, ...friendIds];
-    const notes = await this.noteRepo.findActiveByUserIds(allUserIds);
-
-    const noteUserIds = [...new Set(notes.map((n) => n.userId))];
-    const userMap = await this.noteRepo.findUsersByIds(noteUserIds);
-
-    const feed: UserNoteFeedResponse[] = notes.map((n) => {
-      const user = userMap.get(n.userId) ?? {
-        id: n.userId,
-        username: "unknown",
-        fullName: "Unknown User",
-        avatarUrl: null,
-      };
-      return {
-        user,
-        note: toNoteResponse(n),
-      };
-    });
+    const rows = await this.noteRepo.findActiveFeedByUserIds(allUserIds);
+    const feed: UserNoteFeedResponse[] = rows.map(({ note, user }) => ({
+      user,
+      note: toNoteResponse(note),
+    }));
 
     await this.cacheStore.setBestEffort(key, feed, NOTE_FEED_TTL_SECS);
     return feed;
@@ -89,7 +85,9 @@ export class NoteService {
 
   private async invalidateUserAndFriendFeeds(userId: string): Promise<void> {
     const friendIds = await this.noteRepo.getFriendUserIds(userId);
-    const keys = [noteFeedKey(userId), ...friendIds.map((id) => noteFeedKey(id))];
-    await this.cacheStore.deleteManyBestEffort(keys);
+    await this.cacheStore.deleteManyBestEffort([
+      noteFeedKey(userId),
+      ...friendIds.map(noteFeedKey),
+    ]);
   }
 }

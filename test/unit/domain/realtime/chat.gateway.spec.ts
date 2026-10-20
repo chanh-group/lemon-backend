@@ -68,6 +68,8 @@ describe("ChatGateway", () => {
 
     redisTtlMock = vi.fn().mockResolvedValue(-2);
     mockRedis = {
+      status: "ready",
+      on: vi.fn(),
       pipeline: redisPipelineMock,
       set: vi.fn().mockResolvedValue("OK"),
       del: vi.fn().mockResolvedValue(1),
@@ -134,6 +136,17 @@ describe("ChatGateway", () => {
   }
 
   describe("handleConnection", () => {
+    it("rejects connections while Redis is not ready", async () => {
+      mockRedis.status = "reconnecting";
+      const { client, disconnectMock } = createMockSocket({ auth: { token: "valid-jwt" } });
+
+      await gateway.handleConnection(client);
+
+      expect(disconnectMock).toHaveBeenCalledWith(true);
+      expect(verifyAccessTokenMock).not.toHaveBeenCalled();
+      expect(dbSelectMock).not.toHaveBeenCalled();
+    });
+
     it("accepts connection with valid JWT in handshake.auth.token", async () => {
       verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
       const { client, joinMock, disconnectMock } = createMockSocket({

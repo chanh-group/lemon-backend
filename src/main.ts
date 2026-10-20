@@ -15,6 +15,7 @@ async function bootstrap() {
 
   // Global REST API prefix: /api
   app.setGlobalPrefix("api");
+  app.getHttpAdapter().getInstance().set("trust proxy", get_env("TRUST_PROXY", "loopback"));
 
   // Middlewares & Pipes
   app.use(cookieParser());
@@ -34,7 +35,12 @@ async function bootstrap() {
 
   // WebSocket Redis IoAdapter for multi-node scaling
   const redisIoAdapter = new RedisIoAdapter(app);
-  await redisIoAdapter.connectToRedis();
+  try {
+    await redisIoAdapter.connectToRedis();
+  } catch (err) {
+    await app.close();
+    throw err;
+  }
   app.useWebSocketAdapter(redisIoAdapter);
 
   const port = Number(get_env("PORT", "3000"));

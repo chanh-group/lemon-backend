@@ -9,8 +9,7 @@ export interface NoteRepository {
     data: { content: string; background?: string | null; expiresAt: Date },
   ): Promise<Note>;
   findActiveByUserId(userId: string): Promise<Note | null>;
-  findActiveByUserIds(userIds: string[]): Promise<Note[]>;
-  findUsersByIds(userIds: string[]): Promise<Map<string, UserSummary>>;
+  findActiveFeedByUserIds(userIds: string[]): Promise<{ note: Note; user: UserSummary }[]>;
   getFriendUserIds(userId: string): Promise<string[]>;
   deleteByUserId(userId: string): Promise<boolean>;
   findExpiredIds(limit: number): Promise<string[]>;

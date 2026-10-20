@@ -8,12 +8,14 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Req,
 } from "@nestjs/common";
 import { Lang } from "../../utils/decorators.js";
 import { t } from "../../utils/i18n/index.js";
 import { messageOnly, ok, withMessage } from "../../utils/response.js";
 import { getAuthUser, type AuthUser } from "../shared.js";
+import { parseCursorPage } from "../shared.js";
 import { createStorySchema, type CreateStoryDto } from "./dto/request.js";
 import { StoryService } from "./service.js";
 
@@ -60,9 +62,15 @@ export class StoryController {
   }
 
   @Get(":id/views")
-  async getViewers(@Req() req: { user?: unknown }, @Param("id", ParseUUIDPipe) storyId: string) {
+  async getViewers(
+    @Req() req: { user?: unknown },
+    @Param("id", ParseUUIDPipe) storyId: string,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ) {
     const { id: userId }: AuthUser = getAuthUser(req);
-    const data = await this.storyService.getViewers(userId, storyId);
+    const page = parseCursorPage(cursor, limit);
+    const data = await this.storyService.getViewers(userId, storyId, page.cursor, page.size);
     return ok(data);
   }
 

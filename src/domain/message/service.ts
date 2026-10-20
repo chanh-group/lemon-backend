@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { BusinessError } from "../../utils/errors/business.js";
 import {
   CONVERSATION_REPOSITORY,
@@ -14,17 +14,31 @@ import type { SendMessageDto } from "./dto/request.js";
 import type { MessageResponse, MessageTimelineResponse } from "./dto/response.js";
 import { toMessageResponse, toMessageTimeline } from "./dto/mapper.js";
 import { FriendService } from "../friend/service.js";
+import { SystemError } from "../../utils/errors/system.js";
+import { RedisHealthService } from "../../configs/redis-health.js";
+import { RedisMetricsService } from "../../configs/redis-metrics.js";
+import { MESSAGE_MAX_BODY_LENGTH } from "./constants.js";
 
 export type { SendMessageDto };
 
+export const INCREMENT_UNREAD_WITH_TTL_LUA = `
+  local value = redis.call('INCR', KEYS[1])
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+  return value
+`;
+
 @Injectable()
 export class MessageService {
+  private readonly logger = new Logger(MessageService.name);
+
   constructor(
     @Inject(MESSAGE_REPOSITORY) private readonly messageRepo: MessageRepository,
     @Inject(CONVERSATION_REPOSITORY) private readonly convRepo: ConversationRepository,
     private readonly friendService: FriendService,
     private readonly realtimeService: RealtimeService,
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
+    @Optional() @Inject(RedisHealthService) private readonly redisHealth?: RedisHealthService,
+    @Optional() @Inject(RedisMetricsService) private readonly metrics?: RedisMetricsService,
   ) {}
 
   async sendMessage(
@@ -37,13 +51,13 @@ export class MessageService {
     if (!participantIds.includes(senderId)) {
       throw new BusinessError("NOT_PARTICIPANT");
     }
-    await this.assertDirectConversationAllowed(conversationId, senderId);
+    const directPartnerId = await this.assertDirectConversationAllowed(conversationId, senderId);
 
     if ((!dto.kind || dto.kind === "TEXT") && (!dto.body || dto.body.trim().length === 0)) {
       throw new BusinessError("BAD_REQUEST");
     }
 
-    if (dto.body && dto.body.length > 4000) {
+    if (dto.body && dto.body.length > MESSAGE_MAX_BODY_LENGTH) {
       throw new BusinessError("BAD_REQUEST");
     }
 
@@ -62,6 +76,9 @@ export class MessageService {
       kind: dto.kind ?? "TEXT",
       clientMsgId: dto.clientMsgId,
       replyToId: dto.replyToId,
+      ...(directPartnerId
+        ? { requiredFriendship: { userAId: senderId, userBId: directPartnerId } }
+        : {}),
     });
 
     const response = toMessageResponse(message);
@@ -74,13 +91,29 @@ export class MessageService {
         try {
           const pipeline = this.redis.pipeline();
           for (const recipientId of recipientIds) {
-            const key = unreadCountKey(recipientId, conversationId);
-            pipeline.incr(key);
-            pipeline.expire(key, UNREAD_TTL_SECONDS);
+            pipeline.eval(
+              INCREMENT_UNREAD_WITH_TTL_LUA,
+              1,
+              unreadCountKey(recipientId, conversationId),
+              UNREAD_TTL_SECONDS,
+            );
           }
-          await pipeline.exec();
-        } catch {
-          // Best-effort cache
+          const results = await (this.metrics
+            ? this.metrics.measure("unread_write", () => pipeline.exec())
+            : pipeline.exec());
+          if (!results || results.length !== recipientIds.length || results.some(([err]) => err)) {
+            throw new SystemError("unavailable", "Redis unread counter pipeline failed", {
+              cause: results?.find(([err]) => err)?.[0],
+            });
+          }
+        } catch (err) {
+          this.redisHealth?.markUnavailable(err);
+          this.logger.error("Message persisted but Redis unread counter update failed", {
+            conversationId,
+            messageId: response.id,
+            err,
+          });
+          // The PostgreSQL insert already committed; the outer emit still delivers it.
         }
       }
 
@@ -98,10 +131,6 @@ export class MessageService {
     limit?: number,
     after?: string,
   ): Promise<MessageTimelineResponse> {
-    const participantIds = await this.convRepo.getParticipantUserIds(conversationId);
-    if (!participantIds.includes(userId)) {
-      throw new BusinessError("NOT_PARTICIPANT");
-    }
     await this.assertDirectConversationAllowed(conversationId, userId);
 
     return toMessageTimeline(
@@ -109,12 +138,17 @@ export class MessageService {
     );
   }
 
-  private async assertDirectConversationAllowed(conversationId: string, userId: string): Promise<void> {
+  private async assertDirectConversationAllowed(
+    conversationId: string,
+    userId: string,
+  ): Promise<string | undefined> {
     const conversation = await this.convRepo.findById(conversationId, userId);
     if (!conversation) throw new BusinessError("NOT_PARTICIPANT");
     if (conversation.kind === "DIRECT" && conversation.partner) {
       await this.friendService.assertCanChat(userId, conversation.partner.id);
+      return conversation.partner.id;
     }
+    return undefined;
   }
 
   async editMessage(userId: string, messageId: string, body: string): Promise<MessageResponse> {
@@ -140,7 +174,7 @@ export class MessageService {
       throw new BusinessError("BAD_REQUEST");
     }
 
-    if (body.length > 4000) {
+    if (body.length > MESSAGE_MAX_BODY_LENGTH) {
       throw new BusinessError("BAD_REQUEST");
     }
 

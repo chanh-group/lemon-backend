@@ -11,6 +11,7 @@ import {
 import type { Server, Socket } from "socket.io";
 import { presenceOnlineKey, presenceUserKey, typingKey } from "../../utils/cache/keys.js";
 import {
+  OFFLINE_PRESENCE_TTL_SECONDS,
   PRESENCE_GRACE_MS,
   PRESENCE_OTHER_NODE_TTL_SECONDS,
   PRESENCE_TTL_SECONDS,
@@ -53,9 +54,21 @@ export class ChatGateway
     @InjectDrizzle() private readonly db: DrizzleDb,
     @Inject(JWT_CONFIG) private readonly jwt: JwtConfig,
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
-  ) {}
+  ) {
+    if (this.redis && typeof this.redis.on === "function") {
+      const disconnectSockets = () => this.server?.disconnectSockets(true);
+      for (const event of ["close", "end", "reconnecting", "error"]) {
+        this.redis.on(event, disconnectSockets);
+      }
+    }
+  }
 
   async handleConnection(client: Socket): Promise<void> {
+    if (this.redis && this.redis.status !== "ready") {
+      client.disconnect(true);
+      return;
+    }
+
     const userId = await this.extractUserId(client);
     if (!userId) {
       logger.warn(`Unauthorized socket connection rejected: ${client.id}`);
@@ -346,7 +359,7 @@ export class ChatGateway
           presenceUserKey(userId),
           JSON.stringify({ state: "offline", lastSeen: now }),
           "EX",
-          86400 * 7,
+          OFFLINE_PRESENCE_TTL_SECONDS,
         )
         .zrem(presenceOnlineKey(), userId)
         .exec();

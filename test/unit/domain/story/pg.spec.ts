@@ -4,11 +4,15 @@ import { describe, expect, it, vi } from "vitest";
 import type { DrizzleDb } from "../../../../src/configs/database.js";
 import { StoryPgRepository } from "../../../../src/domain/story/pg.js";
 import { stories } from "../../../../src/domain/story/schema.js";
+import { friendships } from "../../../../src/domain/friend/schema.js";
 
 function makeDb() {
   const limitMock = vi.fn<(limit: number) => Promise<unknown>>();
   const orderByMock = vi.fn<(condition: SQL) => unknown>(() => ({ limit: limitMock }));
-  const whereMock = vi.fn<(condition: SQL) => unknown>(() => ({ orderBy: orderByMock }));
+  const whereMock = vi.fn<(condition: SQL) => unknown>(() => ({
+    orderBy: orderByMock,
+    limit: limitMock,
+  }));
   const fromMock = vi.fn(() => ({ where: whereMock }));
   const selectMock = vi.fn(() => ({ from: fromMock }));
   const returningMock = vi.fn();
@@ -31,6 +35,22 @@ const dialect = new PgDialect();
 const render = (condition: SQL): string => dialect.sqlToQuery(condition).sql;
 
 describe("StoryPgRepository purge queries", () => {
+  describe("isAcceptedFriend", () => {
+    it("checks the canonical pair and accepted status with a bounded lookup", async () => {
+      const { db, selectMock, whereMock, limitMock } = makeDb();
+      limitMock.mockResolvedValue([{ id: "friendship-1" }]);
+      const repo = new StoryPgRepository(db);
+
+      await expect(repo.isAcceptedFriend("z-user", "a-user")).resolves.toBe(true);
+      expect(selectMock).toHaveBeenCalledWith({ id: friendships.id });
+      expect(limitMock).toHaveBeenCalledWith(1);
+      const whereSql = render(whereMock.mock.calls[0][0]);
+      expect(whereSql).toContain('"friendships"."user_low" = $1');
+      expect(whereSql).toContain('"friendships"."user_high" = $2');
+      expect(whereSql).toContain('"friendships"."status" = $3');
+    });
+  });
+
   describe("findPurgeable", () => {
     it("findPurgeable selects id and object_key with the batch limit", async () => {
       const { db, selectMock, whereMock, orderByMock, limitMock } = makeDb();

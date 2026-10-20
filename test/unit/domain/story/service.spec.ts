@@ -25,11 +25,22 @@ describe("StoryService", () => {
       Map<string, { id: string; username: string; fullName: string; avatarUrl: string | null }>
     >
   >;
-  let findViewersByStoryIdMock: Mock<(storyId: string) => Promise<StoryViewerResponse[]>>;
+  let findViewersByStoryIdMock: Mock<
+    (
+      storyId: string,
+      cursor: string | undefined,
+      limit: number,
+    ) => Promise<{
+      items: StoryViewerResponse[];
+      nextCursor?: string;
+      hasMore: boolean;
+    }>
+  >;
   let findViewedStoryIdsMock: Mock<(userId: string, storyIds: string[]) => Promise<Set<string>>>;
   let markAsViewedMock: Mock<(storyId: string, viewerId: string) => Promise<void>>;
   let markDeletedMock: Mock<(id: string) => Promise<boolean>>;
   let getFriendUserIdsMock: Mock<(userId: string) => Promise<string[]>>;
+  let isAcceptedFriendMock: Mock<(userAId: string, userBId: string) => Promise<boolean>>;
   let findPurgeableMock: Mock<(limit: number) => Promise<PurgeableStory[]>>;
   let deleteByIdsMock: Mock<(ids: string[]) => Promise<number>>;
 
@@ -100,18 +111,31 @@ describe("StoryService", () => {
         ]),
       );
     findViewersByStoryIdMock = vi
-      .fn<(storyId: string) => Promise<StoryViewerResponse[]>>()
-      .mockResolvedValue([
-        {
-          user: {
-            id: "viewer-1",
-            username: "friend1",
-            fullName: "Friend One",
-            avatarUrl: null,
+      .fn<
+        (
+          storyId: string,
+          cursor: string | undefined,
+          limit: number,
+        ) => Promise<{
+          items: StoryViewerResponse[];
+          nextCursor?: string;
+          hasMore: boolean;
+        }>
+      >()
+      .mockResolvedValue({
+        items: [
+          {
+            user: {
+              id: "viewer-1",
+              username: "friend1",
+              fullName: "Friend One",
+              avatarUrl: null,
+            },
+            viewedAt: new Date(),
           },
-          viewedAt: new Date(),
-        },
-      ]);
+        ],
+        hasMore: false,
+      });
     findViewedStoryIdsMock = vi
       .fn<(userId: string, storyIds: string[]) => Promise<Set<string>>>()
       .mockResolvedValue(new Set());
@@ -122,6 +146,9 @@ describe("StoryService", () => {
     getFriendUserIdsMock = vi
       .fn<(userId: string) => Promise<string[]>>()
       .mockResolvedValue(["friend-1", "friend-2"]);
+    isAcceptedFriendMock = vi
+      .fn<(userAId: string, userBId: string) => Promise<boolean>>()
+      .mockResolvedValue(true);
     findPurgeableMock = vi.fn<(limit: number) => Promise<PurgeableStory[]>>().mockResolvedValue([]);
     deleteByIdsMock = vi.fn<(ids: string[]) => Promise<number>>().mockResolvedValue(0);
 
@@ -154,6 +181,7 @@ describe("StoryService", () => {
       markAsViewed: markAsViewedMock,
       markDeleted: markDeletedMock,
       getFriendUserIds: getFriendUserIdsMock,
+      isAcceptedFriend: isAcceptedFriendMock,
       findPurgeable: findPurgeableMock,
       deleteByIds: deleteByIdsMock,
     };
@@ -362,6 +390,7 @@ describe("StoryService", () => {
       const cachedFeed: UserStoryFeedResponse[] = [
         { user: { id: "u1", username: "u1", fullName: "U1", avatarUrl: null }, stories: [] },
       ];
+      getFriendUserIdsMock.mockResolvedValueOnce(["u1"]);
       getBestEffortMock.mockResolvedValueOnce(cachedFeed);
 
       const result = await service.getFeed("user-viewer-1");
@@ -392,6 +421,7 @@ describe("StoryService", () => {
           ],
         },
       ];
+      getFriendUserIdsMock.mockResolvedValueOnce(["u1"]);
       getBestEffortMock.mockResolvedValueOnce(JSON.parse(JSON.stringify(feed)));
 
       const result = await service.getFeed("user-viewer-1");
@@ -424,13 +454,13 @@ describe("StoryService", () => {
     });
 
     it("returns active story for friend", async () => {
-      getFriendUserIdsMock.mockResolvedValueOnce(["friend-1"]);
       const result = await service.getStoryById("friend-1", mockStory.id);
       expect(result.id).toBe(mockStory.id);
+      expect(isAcceptedFriendMock).toHaveBeenCalledWith("user-owner-1", "friend-1");
     });
 
     it("throws STORY_VIEW_FORBIDDEN if viewer is not a friend", async () => {
-      getFriendUserIdsMock.mockResolvedValueOnce(["friend-other"]);
+      isAcceptedFriendMock.mockResolvedValueOnce(false);
       await expect(service.getStoryById("stranger-user", mockStory.id)).rejects.toMatchObject({
         code: "STORY_VIEW_FORBIDDEN",
       });
@@ -446,7 +476,6 @@ describe("StoryService", () => {
 
   describe("viewStory", () => {
     it("marks active story as viewed for friend", async () => {
-      getFriendUserIdsMock.mockResolvedValueOnce(["friend-1"]);
       await service.viewStory("friend-1", mockStory.id);
 
       expect(markAsViewedMock).toHaveBeenCalledWith(mockStory.id, "friend-1");
@@ -454,7 +483,7 @@ describe("StoryService", () => {
     });
 
     it("throws STORY_VIEW_FORBIDDEN if viewer is not a friend", async () => {
-      getFriendUserIdsMock.mockResolvedValueOnce(["friend-other"]);
+      isAcceptedFriendMock.mockResolvedValueOnce(false);
       await expect(service.viewStory("stranger-user", mockStory.id)).rejects.toMatchObject({
         code: "STORY_VIEW_FORBIDDEN",
       });
@@ -476,20 +505,24 @@ describe("StoryService", () => {
 
   describe("getViewers", () => {
     it("returns viewers list for story owner", async () => {
-      const viewers = await service.getViewers("user-owner-1", mockStory.id);
-      expect(viewers).toHaveLength(1);
-      expect(viewers[0].user.id).toBe("viewer-1");
+      const viewers = await service.getViewers("user-owner-1", mockStory.id, undefined, 20);
+      expect(viewers.items).toHaveLength(1);
+      expect(viewers.items[0].user.id).toBe("viewer-1");
     });
 
     it("throws STORY_VIEWERS_FORBIDDEN if caller is NOT the story owner", async () => {
-      await expect(service.getViewers("not-owner-user", mockStory.id)).rejects.toMatchObject({
+      await expect(
+        service.getViewers("not-owner-user", mockStory.id, undefined, 20),
+      ).rejects.toMatchObject({
         code: "STORY_VIEWERS_FORBIDDEN",
       });
     });
 
     it("throws STORY_NOT_FOUND if story does not exist", async () => {
       findByIdMock.mockResolvedValueOnce(null);
-      await expect(service.getViewers("user-owner-1", "not-found-id")).rejects.toMatchObject({
+      await expect(
+        service.getViewers("user-owner-1", "not-found-id", undefined, 20),
+      ).rejects.toMatchObject({
         code: "STORY_NOT_FOUND",
       });
     });

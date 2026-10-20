@@ -1,5 +1,12 @@
 import { z } from "zod";
 import { vmsg } from "../../../utils/validation.js";
+import {
+  FULL_NAME_MAX_LENGTH,
+  FULL_NAME_MIN_LENGTH,
+  USER_BIO_MAX_LENGTH,
+  USERNAME_MAX_LENGTH,
+  USERNAME_MIN_LENGTH,
+} from "../constants.js";
 
 export const createUserSchema = z
   .object({
@@ -8,14 +15,29 @@ export const createUserSchema = z
       .string()
       .trim()
       .toLowerCase()
-      .min(3, vmsg("VALIDATION_USERNAME_MIN", { min: "3" }))
-      .max(30, vmsg("VALIDATION_USERNAME_MAX", { max: "30" }))
-      .regex(/^[a-z0-9_]{3,30}$/, vmsg("VALIDATION_USERNAME_FORMAT")),
+      .min(
+        USERNAME_MIN_LENGTH,
+        vmsg("VALIDATION_USERNAME_MIN", { min: String(USERNAME_MIN_LENGTH) }),
+      )
+      .max(
+        USERNAME_MAX_LENGTH,
+        vmsg("VALIDATION_USERNAME_MAX", { max: String(USERNAME_MAX_LENGTH) }),
+      )
+      .regex(
+        new RegExp(`^[a-z0-9_]{${USERNAME_MIN_LENGTH},${USERNAME_MAX_LENGTH}}$`),
+        vmsg("VALIDATION_USERNAME_FORMAT"),
+      ),
     fullName: z
       .string()
       .trim()
-      .min(2, vmsg("VALIDATION_FULL_NAME_MIN", { min: "2" }))
-      .max(100, vmsg("VALIDATION_FULL_NAME_MAX", { max: "100" })),
+      .min(
+        FULL_NAME_MIN_LENGTH,
+        vmsg("VALIDATION_FULL_NAME_MIN", { min: String(FULL_NAME_MIN_LENGTH) }),
+      )
+      .max(
+        FULL_NAME_MAX_LENGTH,
+        vmsg("VALIDATION_FULL_NAME_MAX", { max: String(FULL_NAME_MAX_LENGTH) }),
+      ),
     passwordHash: z
       .string()
       .min(1, vmsg("VALIDATION_PASSWORD_HASH_REQUIRED"))
@@ -25,7 +47,7 @@ export const createUserSchema = z
     avatarUrl: z.string().url(vmsg("VALIDATION_URL")).optional().nullable(),
     bio: z
       .string()
-      .max(500, vmsg("VALIDATION_BIO_MAX", { max: "500" }))
+      .max(USER_BIO_MAX_LENGTH, vmsg("VALIDATION_BIO_MAX", { max: String(USER_BIO_MAX_LENGTH) }))
       .optional()
       .nullable(),
     phone: z.string().optional().nullable(),
@@ -44,13 +66,19 @@ export const updateUserSchema = z.object({
   fullName: z
     .string()
     .trim()
-    .min(2, vmsg("VALIDATION_FULL_NAME_MIN", { min: "2" }))
-    .max(100, vmsg("VALIDATION_FULL_NAME_MAX", { max: "100" }))
+    .min(
+      FULL_NAME_MIN_LENGTH,
+      vmsg("VALIDATION_FULL_NAME_MIN", { min: String(FULL_NAME_MIN_LENGTH) }),
+    )
+    .max(
+      FULL_NAME_MAX_LENGTH,
+      vmsg("VALIDATION_FULL_NAME_MAX", { max: String(FULL_NAME_MAX_LENGTH) }),
+    )
     .optional(),
   avatarUrl: z.string().url(vmsg("VALIDATION_URL")).optional().nullable(),
   bio: z
     .string()
-    .max(500, vmsg("VALIDATION_BIO_MAX", { max: "500" }))
+    .max(USER_BIO_MAX_LENGTH, vmsg("VALIDATION_BIO_MAX", { max: String(USER_BIO_MAX_LENGTH) }))
     .optional()
     .nullable(),
   phone: z.string().optional().nullable(),

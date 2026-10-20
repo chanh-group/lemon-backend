@@ -1,4 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { CACHE_STORE, type CacheStoreExt } from "../../utils/cache/store.js";
+import { noteFeedKey, storyFeedKey } from "../../utils/cache/keys.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { USER_REPOSITORY, type UserRepository } from "../user/repository.js";
 import { RealtimeService } from "../realtime/realtime.service.js";
@@ -10,17 +12,22 @@ export class FriendService {
     @Inject(FRIEND_REPOSITORY) private readonly friendRepo: FriendRepository,
     @Inject(USER_REPOSITORY) private readonly userRepo: UserRepository,
     private readonly realtimeService: RealtimeService,
+    @Inject(CACHE_STORE) private readonly cache: CacheStoreExt,
   ) {}
 
   async sendRequest(requesterId: string, addresseeId: string): Promise<void> {
     if (!addresseeId || requesterId === addresseeId) {
-      throw new BusinessError(requesterId === addresseeId ? "CANNOT_CHAT_WITH_SELF" : "BAD_REQUEST");
+      throw new BusinessError(
+        requesterId === addresseeId ? "CANNOT_CHAT_WITH_SELF" : "BAD_REQUEST",
+      );
     }
-    const addressee = await this.userRepo.findById(addresseeId);
+    const [addressee, requester] = await Promise.all([
+      this.userRepo.findById(addresseeId),
+      this.userRepo.findById(requesterId),
+    ]);
     if (!addressee) {
       throw new BusinessError("USER_NOT_FOUND");
     }
-    const requester = await this.userRepo.findById(requesterId);
     if (!requester) throw new BusinessError("USER_NOT_FOUND");
 
     const existing = await this.friendRepo.findByPair(requesterId, addresseeId);
@@ -48,18 +55,29 @@ export class FriendService {
     });
   }
 
-  listRequests(userId: string) {
-    return this.friendRepo.listRequests(userId);
+  listRequestsPage(
+    userId: string,
+    incomingCursor: string | undefined,
+    outgoingCursor: string | undefined,
+    limit: number,
+  ) {
+    return this.friendRepo.listRequestsPage(userId, incomingCursor, outgoingCursor, limit);
   }
 
-  listFriends(userId: string) {
-    return this.friendRepo.listFriends(userId);
+  listFriendsPage(userId: string, cursor: string | undefined, limit: number) {
+    return this.friendRepo.listFriendsPage(userId, cursor, limit);
+  }
+
+  findAcceptedFriendIds(userId: string, candidates: string[]) {
+    return this.friendRepo.findAcceptedFriendIds(userId, candidates);
   }
 
   async acceptRequest(requestId: string, userId: string): Promise<void> {
-    if (!(await this.friendRepo.acceptRequest(requestId, userId))) {
+    const accepted = await this.friendRepo.acceptRequest(requestId, userId);
+    if (!accepted) {
       throw new BusinessError("FRIEND_REQUEST_NOT_FOUND");
     }
+    await this.invalidateSocialFeeds(accepted.requesterId, accepted.addresseeId);
   }
 
   async declineRequest(requestId: string, userId: string): Promise<void> {
@@ -79,6 +97,7 @@ export class FriendService {
     if (!(await this.friendRepo.deleteAcceptedPair(userId, friendId))) {
       throw new BusinessError("NOT_FOUND");
     }
+    await this.invalidateSocialFeeds(userId, friendId);
   }
 
   async blockUser(blockerId: string, targetId: string): Promise<void> {
@@ -87,6 +106,16 @@ export class FriendService {
       throw new BusinessError("USER_NOT_FOUND");
     }
     await this.friendRepo.blockPair(blockerId, targetId);
+    await this.invalidateSocialFeeds(blockerId, targetId);
+  }
+
+  private async invalidateSocialFeeds(userAId: string, userBId: string): Promise<void> {
+    await this.cache.deleteManyBestEffort([
+      storyFeedKey(userAId),
+      storyFeedKey(userBId),
+      noteFeedKey(userAId),
+      noteFeedKey(userBId),
+    ]);
   }
 
   async assertCanChat(userId: string, targetId: string): Promise<void> {

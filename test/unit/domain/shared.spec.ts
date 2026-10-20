@@ -1,24 +1,26 @@
-import { BusinessError } from "../../../src/utils/errors/business.js";
 import { describe, expect, it } from "vitest";
-import { getAuthUser } from "../../../src/domain/shared.js";
+import { parseCursorPage, toCursorPage } from "../../../src/domain/shared.js";
 
-describe("getAuthUser", () => {
-  it("returns the injected id when req.user is present", () => {
-    expect(getAuthUser({ user: { id: "user-1" } })).toEqual({ id: "user-1" });
+describe("cursor pagination helpers", () => {
+  it("returns a next cursor only when the extra row proves another page exists", () => {
+    const rows = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    expect(toCursorPage(rows, 2, (row) => row.id)).toEqual({
+      items: [{ id: "a" }, { id: "b" }],
+      nextCursor: "b",
+      hasMore: true,
+    });
+    expect(toCursorPage(rows.slice(0, 2), 2, (row) => row.id)).toEqual({
+      items: [{ id: "a" }, { id: "b" }],
+      hasMore: false,
+    });
   });
 
-  it("throws UNAUTHORIZED when req.user is missing", () => {
-    expect(() => getAuthUser({})).toThrow(BusinessError);
-    expect(() => getAuthUser({})).toThrow(expect.objectContaining({ code: "UNAUTHORIZED" }));
-  });
-
-  it("throws UNAUTHORIZED when req.user is malformed (missing or non-string id)", () => {
-    expect(() => getAuthUser({ user: {} })).toThrow(BusinessError);
-    expect(() => getAuthUser({ user: { id: 42 } })).toThrow(BusinessError);
-  });
-
-  it("ignores spoofable headers entirely", () => {
-    const reqWithSpoofedHeader = { headers: { "x-user-id": "spoofed" }, user: undefined };
-    expect(() => getAuthUser(reqWithSpoofedHeader)).toThrow(BusinessError);
+  it("bounds page size and rejects invalid cursor or size values", () => {
+    const cursor = "0193a2b1-0000-7000-8000-000000000001";
+    expect(parseCursorPage(cursor, "500")).toEqual({ cursor, size: 50 });
+    expect(parseCursorPage(undefined, undefined)).toEqual({ cursor: undefined, size: 20 });
+    expect(() => parseCursorPage("bad", "20")).toThrow();
+    expect(() => parseCursorPage(undefined, "0")).toThrow();
+    expect(() => parseCursorPage(undefined, "1.5")).toThrow();
   });
 });

@@ -6,6 +6,7 @@ import type { App } from "supertest/types.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { MessageController } from "../../../../src/domain/message/controller.js";
 import { MessageService } from "../../../../src/domain/message/service.js";
+import { MemoryRateLimiter, RATE_LIMITER } from "../../../../src/middleware/ratelimit.js";
 import type {
   MessageResponse,
   MessageTimelineResponse,
@@ -94,7 +95,7 @@ describe("MessageController", () => {
       revokeMessage: revokeMessageMock,
     } as unknown as MessageService;
 
-    controller = new MessageController(mockService);
+    controller = new MessageController(mockService, new MemoryRateLimiter());
   });
 
   describe("sendMessage", () => {
@@ -147,6 +148,40 @@ describe("MessageController", () => {
           hasMore: false,
         },
       });
+    });
+
+    it("rejects malformed cursors before they reach PostgreSQL", async () => {
+      await expect(
+        controller.getMessages({ user: { id: mockUserId } }, mockConvId, "not-a-uuid", undefined),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      expect(getTimelineMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects requests that combine backward and forward cursors", async () => {
+      await expect(
+        controller.getMessages(
+          { user: { id: mockUserId } },
+          mockConvId,
+          mockMsgId,
+          undefined,
+          mockMsgId,
+        ),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      expect(getTimelineMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects invalid limits and caps valid limits at the server maximum", async () => {
+      await expect(
+        controller.getMessages({ user: { id: mockUserId } }, mockConvId, undefined, "0"),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      await controller.getMessages({ user: { id: mockUserId } }, mockConvId, undefined, "500");
+      expect(getTimelineMock).toHaveBeenCalledWith(
+        mockUserId,
+        mockConvId,
+        undefined,
+        50,
+        undefined,
+      );
     });
   });
 
@@ -265,7 +300,10 @@ describe("MessageController", () => {
 
       const moduleRef = await Test.createTestingModule({
         controllers: [MessageController],
-        providers: [{ provide: MessageService, useValue: mockService }],
+        providers: [
+          { provide: MessageService, useValue: mockService },
+          { provide: RATE_LIMITER, useValue: new MemoryRateLimiter() },
+        ],
       }).compile();
 
       app = moduleRef.createNestApplication();

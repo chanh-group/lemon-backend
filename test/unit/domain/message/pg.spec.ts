@@ -4,16 +4,18 @@ import { describe, expect, it, vi } from "vitest";
 import type { DrizzleDb } from "../../../../src/configs/database.js";
 import { conversations } from "../../../../src/domain/conversation/schema.js";
 import { MessagePgRepository } from "../../../../src/domain/message/pg.js";
+import { ATTACHMENT_PREVIEW_TOKEN } from "../../../../src/domain/message/constants.js";
 import { type Message, messages } from "../../../../src/domain/message/schema.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
 
 function makeSelectChain() {
   const limitMock = vi.fn<(limit: number) => Promise<unknown[]>>();
-  const whereMock = vi.fn<(condition: SQL) => unknown>(() => ({ limit: limitMock }));
+  const forMock = vi.fn(() => ({ limit: limitMock }));
+  const whereMock = vi.fn<(condition: SQL) => unknown>(() => ({ limit: limitMock, for: forMock }));
   const fromMock = vi.fn(() => ({ where: whereMock }));
   const selectMock = vi.fn(() => ({ from: fromMock }));
 
-  return { selectMock, fromMock, whereMock, limitMock };
+  return { selectMock, fromMock, whereMock, forMock, limitMock };
 }
 
 function makeDb() {
@@ -182,7 +184,14 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
     );
     const update = render(updateWhereMock.mock.calls[0][0]);
     expect(update.sql).toContain('"conversations"."id" =');
-    expect(update.params).toEqual([conversationId]);
+    expect(update.sql).toContain('"conversations"."last_message_at"');
+    expect(update.sql).toContain('"conversations"."last_message_id"');
+    expect(update.params).toEqual([
+      conversationId,
+      existingRow.createdAt.toISOString(),
+      existingRow.createdAt.toISOString(),
+      existingRow.id,
+    ]);
   });
 
   it("uses the attachment preview when the message has no body", async () => {
@@ -201,8 +210,44 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
 
     expect(result).toEqual({ message: attachmentRow, isNew: true });
     expect(setMock).toHaveBeenCalledWith(
-      expect.objectContaining({ lastMessagePreview: "[Tệp đính kèm]" }),
+      expect.objectContaining({ lastMessagePreview: ATTACHMENT_PREVIEW_TOKEN }),
     );
+  });
+
+  it("locks the accepted friendship until a direct message transaction commits", async () => {
+    const { db, txSelect, returningMock } = makeDb();
+    txSelect.limitMock.mockResolvedValueOnce([{ status: "ACCEPTED" }]).mockResolvedValueOnce([]);
+    returningMock.mockResolvedValueOnce([existingRow]);
+    const repo = new MessagePgRepository(db);
+
+    await repo.createMessageWithConversationUpdate({
+      conversationId,
+      senderId,
+      body: "Hello from the first attempt",
+      requiredFriendship: { userAId: senderId, userBId: "0193a2b1-0000-7000-8000-000000000002" },
+    });
+
+    expect(txSelect.forMock).toHaveBeenCalledWith("share");
+    const lookup = render(txSelect.whereMock.mock.calls[0][0]);
+    expect(lookup.sql).toContain('"friendships"."user_low" =');
+    expect(lookup.sql).toContain('"friendships"."user_high" =');
+    expect(lookup.params).toEqual([senderId, "0193a2b1-0000-7000-8000-000000000002"]);
+  });
+
+  it("rejects a direct message if the friendship was blocked before the transaction lock", async () => {
+    const { db, txSelect, insertMock } = makeDb();
+    txSelect.limitMock.mockResolvedValueOnce([{ status: "BLOCKED" }]);
+    const repo = new MessagePgRepository(db);
+
+    await expect(
+      repo.createMessageWithConversationUpdate({
+        conversationId,
+        senderId,
+        body: "Hello",
+        requiredFriendship: { userAId: senderId, userBId: "0193a2b1-0000-7000-8000-000000000002" },
+      }),
+    ).rejects.toMatchObject({ code: "USER_BLOCKED" });
+    expect(insertMock).not.toHaveBeenCalled();
   });
 });
 

@@ -29,6 +29,34 @@
       "when": 1792269454764,
       "tag": "0003_little_gamma_corps",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792484634751,
+      "tag": "0004_pg_trgm_extension",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792484655971,
+      "tag": "0005_real_zombie",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792485299909,
+      "tag": "0006_modern_mockingbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792486553226,
+      "tag": "0007_melted_toad_men",
+      "breakpoints": true
     }
   ]
 }

@@ -3,7 +3,6 @@ import type { CacheStoreExt } from "../../../../src/utils/cache/store.js";
 import type { NoteRepository } from "../../../../src/domain/note/repository.js";
 import { NoteService } from "../../../../src/domain/note/service.js";
 import type { Note } from "../../../../src/domain/note/schema.js";
-import type { UserSummary } from "../../../../src/domain/user/dto/response.js";
 import type { UserNoteFeedResponse } from "../../../../src/domain/note/dto/response.js";
 
 describe("NoteService", () => {
@@ -16,8 +15,14 @@ describe("NoteService", () => {
     ) => Promise<Note>
   >;
   let findActiveByUserIdMock: Mock<(userId: string) => Promise<Note | null>>;
-  let findActiveByUserIdsMock: Mock<(userIds: string[]) => Promise<Note[]>>;
-  let findUsersByIdsMock: Mock<(userIds: string[]) => Promise<Map<string, UserSummary>>>;
+  let findActiveFeedByUserIdsMock: Mock<
+    (userIds: string[]) => Promise<
+      {
+        note: Note;
+        user: { id: string; username: string; fullName: string; avatarUrl: string | null };
+      }[]
+    >
+  >;
   let getFriendUserIdsMock: Mock<(userId: string) => Promise<string[]>>;
   let deleteByUserIdMock: Mock<(userId: string) => Promise<boolean>>;
   let findExpiredIdsMock: Mock<(limit: number) => Promise<string[]>>;
@@ -57,24 +62,17 @@ describe("NoteService", () => {
     findActiveByUserIdMock = vi
       .fn<(userId: string) => Promise<Note | null>>()
       .mockResolvedValue(mockNote);
-    findActiveByUserIdsMock = vi
-      .fn<(userIds: string[]) => Promise<Note[]>>()
-      .mockResolvedValue([mockNote]);
-    findUsersByIdsMock = vi
-      .fn<(userIds: string[]) => Promise<Map<string, UserSummary>>>()
-      .mockResolvedValue(
-        new Map([
-          [
-            "user-1",
-            {
-              id: "user-1",
-              username: "user1",
-              fullName: "User One",
-              avatarUrl: null,
-            },
-          ],
-        ]),
-      );
+    findActiveFeedByUserIdsMock = vi.fn().mockResolvedValue([
+      {
+        note: mockNote,
+        user: {
+          id: "user-1",
+          username: "user1",
+          fullName: "User One",
+          avatarUrl: null,
+        },
+      },
+    ]);
     getFriendUserIdsMock = vi
       .fn<(userId: string) => Promise<string[]>>()
       .mockResolvedValue(["friend-1", "friend-2"]);
@@ -93,8 +91,7 @@ describe("NoteService", () => {
     const mockRepo: NoteRepository = {
       upsert: upsertMock,
       findActiveByUserId: findActiveByUserIdMock,
-      findActiveByUserIds: findActiveByUserIdsMock,
-      findUsersByIds: findUsersByIdsMock,
+      findActiveFeedByUserIds: findActiveFeedByUserIdsMock,
       getFriendUserIds: getFriendUserIdsMock,
       deleteByUserId: deleteByUserIdMock,
       findExpiredIds: findExpiredIdsMock,
@@ -152,12 +149,13 @@ describe("NoteService", () => {
           },
         },
       ];
+      getFriendUserIdsMock.mockResolvedValueOnce(["user-1"]);
       getBestEffortMock.mockResolvedValueOnce(cachedFeed);
 
       const result = await service.getFeed("user-viewer");
       expect(result).toHaveLength(1);
       expect(result[0].note.content).toBe("cached note");
-      expect(findActiveByUserIdsMock).not.toHaveBeenCalled();
+      expect(findActiveFeedByUserIdsMock).not.toHaveBeenCalled();
     });
 
     it("revives Date objects from JSON cached feed", async () => {
@@ -174,6 +172,7 @@ describe("NoteService", () => {
           },
         },
       ];
+      getFriendUserIdsMock.mockResolvedValueOnce(["user-1"]);
       getBestEffortMock.mockResolvedValueOnce(rawCached);
 
       const result = await service.getFeed("user-viewer");
@@ -187,16 +186,14 @@ describe("NoteService", () => {
       expect(result).toHaveLength(1);
       expect(result[0].user.id).toBe("user-1");
       expect(result[0].note.id).toBe(mockNote.id);
-      expect(findActiveByUserIdsMock).toHaveBeenCalledTimes(1);
+      expect(findActiveFeedByUserIdsMock).toHaveBeenCalledTimes(1);
       expect(setBestEffortMock).toHaveBeenCalledWith("notes:feed:user-1", expect.any(Array), 60);
     });
 
-    it("falls back to unknown profile if user is not in users map", async () => {
-      findUsersByIdsMock.mockResolvedValueOnce(new Map());
-
+    it("loads note and profile together for all visible users", async () => {
       const result = await service.getFeed("user-1");
-      expect(result[0].user.id).toBe("user-1");
-      expect(result[0].user.username).toBe("unknown");
+      expect(findActiveFeedByUserIdsMock).toHaveBeenCalledWith(["user-1", "friend-1", "friend-2"]);
+      expect(result[0].user.username).toBe("user1");
     });
   });
 

@@ -16,7 +16,6 @@ import { t } from "../../utils/i18n/index.js";
 import { created, messageOnly, withMessage } from "../../utils/response.js";
 import { extractClientIp } from "../../middleware/ratelimit.js";
 import type { RateLimiter } from "../../middleware/ratelimit.js";
-import { MemoryRateLimiter } from "../../middleware/ratelimit.js";
 import { toUserResponse } from "../user/dto/mapper.js";
 import { UserService } from "../user/service.js";
 import {
@@ -88,7 +87,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly userService: UserService,
-    @Inject(RATE_LIMITER) private readonly rateLimiter: RateLimiter = new MemoryRateLimiter(),
+    @Inject(RATE_LIMITER) private readonly rateLimiter: RateLimiter,
   ) {
     this.cookieConfig = resolveCookieConfig();
   }

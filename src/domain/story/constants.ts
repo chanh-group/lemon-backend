@@ -1,0 +1,2 @@
+export const STORY_MAX_CAPTION_LENGTH = 500;
+export const STORY_MAX_BACKGROUND_LENGTH = 200;

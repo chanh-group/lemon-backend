@@ -22,7 +22,11 @@ export interface ConversationRepository {
     userBId: string,
   ): Promise<ConversationWithPartner | null>;
   createDirectConversation(userAId: string, userBId: string): Promise<ConversationWithPartner>;
-  findUserConversations(userId: string, limit?: number): Promise<ConversationWithPartner[]>;
+  findUserConversations(
+    userId: string,
+    limit: number,
+    cursor?: string,
+  ): Promise<CursorPage<ConversationWithPartner>>;
   findById(conversationId: string, userId: string): Promise<ConversationWithPartner | null>;
   existsById(conversationId: string): Promise<boolean>;
   isParticipant(conversationId: string, userId: string): Promise<boolean>;
@@ -30,6 +34,11 @@ export interface ConversationRepository {
   getParticipantUserIds(conversationId: string): Promise<string[]>;
   updateLastRead(conversationId: string, userId: string, messageId: string): Promise<void>;
   countUnread(conversationId: string, userId: string): Promise<number>;
+  countUnreadByConversationIds(
+    conversationIds: string[],
+    userId: string,
+  ): Promise<Map<string, number>>;
 }
 
 export const CONVERSATION_REPOSITORY = Symbol("CONVERSATION_REPOSITORY");
+import type { CursorPage } from "../shared.js";

@@ -19,7 +19,6 @@ export const STORY_FEED_KEY_PREFIX = "stories:feed:";
 export const STORY_FEED_TTL_SECS = 60; // 1 minute — per-viewer feed tray cache
 export const STORY_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours — story lifetime
 export const STORY_DEFAULT_BUCKET = "lemon-stories";
-export const STORY_MAX_CAPTION_LENGTH = 500;
 
 // Story media upload limits (single source used by presign AND verify).
 export const STORY_MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
@@ -43,11 +42,10 @@ export const MIME_EXTENSION_MAP: Record<string, string | undefined> = {
 export const S3_PRESIGN_TTL_SECS = 300;
 export const S3_DELETE_BATCH_SIZE = 1000;
 
-// Note domain TTLs/limits (24h expiry, 200 char limit).
+// Note feed key and lifetime settings.
 export const NOTE_FEED_KEY_PREFIX = "notes:feed:";
 export const NOTE_FEED_TTL_SECS = 60; // 1 minute — per-viewer note feed tray cache
 export const NOTE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours — note lifetime
-export const NOTE_MAX_CONTENT_LENGTH = 200;
 
 // Purge job: leader lock so only one instance sweeps expired stories/notes.
 export const PURGE_LOCK_KEY = "lock:purge-stories-notes";
@@ -67,3 +65,7 @@ export const PRESENCE_OTHER_NODE_TTL_SECONDS = 30;
 // ioredis client tuning (mirrors Rust ConnectionManager timeouts).
 export const REDIS_COMMAND_TIMEOUT_MS = 2000;
 export const REDIS_MAX_RETRIES_PER_REQUEST = 2;
+export const REDIS_RECONNECT_DELAY_BASE_MS = 100;
+export const REDIS_RECONNECT_DELAY_MAX_MS = 3000;
+export const DEFAULT_REDIS_URL = "redis://localhost:6379";
+export const OFFLINE_PRESENCE_TTL_SECONDS = 7 * 24 * 60 * 60;

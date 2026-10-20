@@ -1,6 +1,12 @@
 import { sql } from "drizzle-orm";
 import { boolean, check, index, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { citext, created, updated, uuidV7 } from "../../utils/database.js";
+import {
+  FULL_NAME_MAX_LENGTH,
+  FULL_NAME_MIN_LENGTH,
+  USERNAME_MAX_LENGTH,
+  USERNAME_MIN_LENGTH,
+} from "./constants.js";
 
 export const users = pgTable(
   "users",
@@ -22,8 +28,14 @@ export const users = pgTable(
     updatedAt: updated("updated_at"),
   },
   (table) => [
-    check("users_username_format_chk", sql`${table.username} ~ '^[a-z0-9_]{3,30}$'`),
-    check("users_full_name_chk", sql`char_length(btrim(${table.fullName})) BETWEEN 2 AND 100`),
+    check(
+      "users_username_format_chk",
+      sql`${table.username} ~ ${sql.raw(`'^[a-z0-9_]{${USERNAME_MIN_LENGTH},${USERNAME_MAX_LENGTH}}$'`)}`,
+    ),
+    check(
+      "users_full_name_chk",
+      sql`char_length(btrim(${table.fullName})) BETWEEN ${sql.raw(String(FULL_NAME_MIN_LENGTH))} AND ${sql.raw(String(FULL_NAME_MAX_LENGTH))}`,
+    ),
     uniqueIndex("users_email_uq")
       .on(table.email)
       .where(sql`${table.deletedAt} IS NULL`),
@@ -36,6 +48,12 @@ export const users = pgTable(
     uniqueIndex("users_phone_uq")
       .on(table.phone)
       .where(sql`${table.phone} IS NOT NULL AND ${table.deletedAt} IS NULL`),
+    index("users_username_trgm_idx")
+      .using("gin", sql`${table.username} gin_trgm_ops`)
+      .where(sql`${table.deletedAt} IS NULL`),
+    index("users_email_trgm_idx")
+      .using("gin", sql`(${table.email}::text) gin_trgm_ops`)
+      .where(sql`${table.deletedAt} IS NULL`),
     index("users_last_seen").on(table.lastSeenAt),
   ],
 );

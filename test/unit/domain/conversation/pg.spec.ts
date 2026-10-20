@@ -14,11 +14,15 @@ import { BusinessError } from "../../../../src/utils/errors/business.js";
 function makeSelectChain() {
   const limitMock = vi.fn<(limit: number) => Promise<unknown[]>>();
   const whereMock = vi.fn<(condition: SQL) => unknown>(() => ({ limit: limitMock }));
-  const innerJoinMock = vi.fn(() => ({ where: whereMock }));
-  const fromMock = vi.fn(() => ({ where: whereMock, innerJoin: innerJoinMock }));
+  const innerJoinMock = vi.fn<(table: unknown, condition: SQL) => unknown>();
+  const leftJoinMock = vi.fn<(table: unknown, condition: SQL) => unknown>();
+  const joinChain = { where: whereMock, innerJoin: innerJoinMock, leftJoin: leftJoinMock };
+  innerJoinMock.mockReturnValue(joinChain);
+  leftJoinMock.mockReturnValue(joinChain);
+  const fromMock = vi.fn(() => joinChain);
   const selectMock = vi.fn(() => ({ from: fromMock }));
 
-  return { selectMock, fromMock, whereMock, innerJoinMock, limitMock };
+  return { selectMock, fromMock, whereMock, innerJoinMock, leftJoinMock, limitMock };
 }
 
 function makeDb() {
@@ -106,7 +110,7 @@ describe("ConversationPgRepository.createDirectConversation", () => {
   it("returns the existing conversation when a concurrent insert hits the unique index", async () => {
     const { db, dbSelect, transactionMock } = makeDb();
     transactionMock.mockRejectedValueOnce(uniqueViolation);
-    dbSelect.limitMock.mockResolvedValueOnce([convRow]).mockResolvedValueOnce([partnerRow]);
+    dbSelect.limitMock.mockResolvedValueOnce([{ ...convRow, partner: partnerRow }]);
     const repo = new ConversationPgRepository(db);
 
     const result = await repo.createDirectConversation(userAId, userBId);
@@ -117,10 +121,8 @@ describe("ConversationPgRepository.createDirectConversation", () => {
     expect(lookup.sql).toContain('"conversations"."direct_key" =');
     expect(lookup.sql).toContain('"conversations"."deleted_at" is null');
     expect(lookup.params).toEqual([directKey]);
-    expect(dbSelect.fromMock).toHaveBeenNthCalledWith(2, users);
-    const partnerLookup = render(dbSelect.whereMock.mock.calls[1][0]);
-    expect(partnerLookup.sql).toContain('"users"."id" =');
-    expect(partnerLookup.params).toEqual([userBId]);
+    expect(dbSelect.fromMock).toHaveBeenCalledTimes(1);
+    expect(dbSelect.innerJoinMock).toHaveBeenCalledWith(users, expect.anything());
   });
 
   it("rejects with CONFLICT when the winning insert cannot be read back", async () => {
@@ -202,6 +204,24 @@ describe("ConversationPgRepository.createDirectConversation", () => {
       { conversationId: newConvRow.id, userId: userBId, role: "MEMBER" },
     ]);
     expect(onConflictDoNothingMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores participants in canonical ID order regardless of the caller order", async () => {
+    const { db, txSelect, insertMock, valuesMock, returningMock } = makeDb();
+    const partnerA = { ...partnerRow, id: userAId, username: "alice" };
+    txSelect.limitMock.mockResolvedValueOnce([]).mockResolvedValueOnce([partnerA]);
+    returningMock.mockResolvedValueOnce([newConvRow]);
+    const repo = new ConversationPgRepository(db);
+
+    const result = await repo.createDirectConversation(userBId, userAId);
+
+    expect(result.partner).toEqual(partnerA);
+    expect(valuesMock).toHaveBeenNthCalledWith(1, { kind: "DIRECT", directKey });
+    expect(insertMock).toHaveBeenNthCalledWith(2, conversationParticipants);
+    expect(valuesMock).toHaveBeenNthCalledWith(2, [
+      { conversationId: newConvRow.id, userId: userAId, role: "MEMBER" },
+      { conversationId: newConvRow.id, userId: userBId, role: "MEMBER" },
+    ]);
   });
 });
 
@@ -289,24 +309,35 @@ describe("ConversationPgRepository.isMessageInConversation", () => {
 });
 
 describe("ConversationPgRepository.findById", () => {
-  it("restricts membership to active participants", async () => {
+  it("loads the conversation, active membership, and active partner in one query", async () => {
     const { db, dbSelect } = makeDb();
-    dbSelect.limitMock
-      .mockResolvedValueOnce([
-        { conversationId: convRow.id, userId: userAId, lastReadMessageId: null },
-      ])
-      .mockResolvedValueOnce([convRow])
-      .mockResolvedValueOnce([partnerRow]);
+    dbSelect.limitMock.mockResolvedValueOnce([
+      {
+        ...convRow,
+        lastReadMessageId: null,
+        partnerId: partnerRow.id,
+        partnerUsername: partnerRow.username,
+        partnerFullName: partnerRow.fullName,
+        partnerAvatarUrl: partnerRow.avatarUrl,
+      },
+    ]);
     const repo = new ConversationPgRepository(db);
 
     const result = await repo.findById(convRow.id, userAId);
 
-    expect(result).not.toBeNull();
-    const membership = render(dbSelect.whereMock.mock.calls[0][0]);
-    expect(membership.sql).toContain('"conversation_participants"."conversation_id" =');
+    expect(result).toMatchObject({
+      id: convRow.id,
+      lastReadMessageId: null,
+      partner: { id: userBId, username: "bob" },
+    });
+    expect(dbSelect.limitMock).toHaveBeenCalledTimes(1);
+    const membership = render(dbSelect.innerJoinMock.mock.calls[0][1]);
     expect(membership.sql).toContain('"conversation_participants"."user_id" =');
     expect(membership.sql).toContain('"conversation_participants"."left_at" is null');
-    expect(membership.params).toEqual([convRow.id, userAId]);
+    expect(membership.params).toEqual([userAId]);
+    const partnerJoin = render(dbSelect.leftJoinMock.mock.calls[0][1]);
+    expect(partnerJoin.sql).toContain('"partner_participants"."left_at" is null');
+    expect(partnerJoin.params).toEqual([userAId]);
   });
 
   it("returns null when the participant has left the conversation", async () => {

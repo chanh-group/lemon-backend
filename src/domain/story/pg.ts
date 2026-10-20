@@ -4,10 +4,10 @@ import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from 
 import type { DrizzleDb } from "../../configs/database.js";
 import { friendships } from "../friend/schema.js";
 import { users } from "../user/schema.js";
-import type { StoryViewerResponse } from "./dto/response.js";
 import type { UserSummary } from "../user/dto/response.js";
 import type { PurgeableStory, StoryRepository } from "./repository.js";
 import { type NewStory, type Story, stories, storyViews } from "./schema.js";
+import { toCursorPage } from "../shared.js";
 
 @Injectable()
 export class StoryPgRepository implements StoryRepository {
@@ -70,7 +70,19 @@ export class StoryPgRepository implements StoryRepository {
     return map;
   }
 
-  async findViewersByStoryId(storyId: string): Promise<StoryViewerResponse[]> {
+  async findViewersByStoryId(storyId: string, cursor: string | undefined, limit: number) {
+    const cursorViewedAt = cursor
+      ? sql`(SELECT sv.viewed_at FROM story_views sv WHERE sv.story_id = ${storyId} AND sv.user_id = ${cursor})`
+      : undefined;
+    const conditions = [eq(storyViews.storyId, storyId)];
+    if (cursor && cursorViewedAt) {
+      conditions.push(
+        or(
+          lt(storyViews.viewedAt, cursorViewedAt),
+          and(eq(storyViews.viewedAt, cursorViewedAt), lt(users.id, cursor)),
+        )!,
+      );
+    }
     const rows = await this.db
       .select({
         userId: users.id,
@@ -81,10 +93,11 @@ export class StoryPgRepository implements StoryRepository {
       })
       .from(storyViews)
       .innerJoin(users, eq(storyViews.userId, users.id))
-      .where(eq(storyViews.storyId, storyId))
-      .orderBy(desc(storyViews.viewedAt));
+      .where(and(...conditions))
+      .orderBy(desc(storyViews.viewedAt), desc(users.id))
+      .limit(limit + 1);
 
-    return rows.map((r) => ({
+    const viewers = rows.map((r) => ({
       user: {
         id: r.userId,
         username: r.username,
@@ -93,6 +106,7 @@ export class StoryPgRepository implements StoryRepository {
       },
       viewedAt: r.viewedAt,
     }));
+    return toCursorPage(viewers, limit, (viewer) => viewer.user.id);
   }
 
   async findViewedStoryIds(userId: string, storyIds: string[]): Promise<Set<string>> {
@@ -136,6 +150,22 @@ export class StoryPgRepository implements StoryRepository {
       );
 
     return rows.map((r) => (r.userLow === userId ? r.userHigh : r.userLow));
+  }
+
+  async isAcceptedFriend(userAId: string, userBId: string): Promise<boolean> {
+    const [userLow, userHigh] = userAId < userBId ? [userAId, userBId] : [userBId, userAId];
+    const [relation] = await this.db
+      .select({ id: friendships.id })
+      .from(friendships)
+      .where(
+        and(
+          eq(friendships.userLow, userLow),
+          eq(friendships.userHigh, userHigh),
+          eq(friendships.status, "ACCEPTED"),
+        ),
+      )
+      .limit(1);
+    return Boolean(relation);
   }
 
   async findPurgeable(limit: number): Promise<PurgeableStory[]> {

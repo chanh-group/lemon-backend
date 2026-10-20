@@ -1,0 +1,4 @@
+export {
+  DEFAULT_PAGE_SIZE as DEFAULT_CONVERSATION_PAGE_SIZE,
+  MAX_PAGE_SIZE as MAX_CONVERSATION_PAGE_SIZE,
+} from "../pagination.constants.js";
