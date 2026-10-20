@@ -249,6 +249,7 @@ describe("MessageService", () => {
 
   describe("getTimeline", () => {
     it("throws NOT_PARTICIPANT if requester is not a member", async () => {
+      findConversationByIdMock.mockResolvedValueOnce(null);
       await expect(service.getTimeline(outsider, convId)).rejects.toThrow(
         expect.objectContaining({ code: "NOT_PARTICIPANT" }),
       );
@@ -264,6 +265,8 @@ describe("MessageService", () => {
       expect(res.items[0]).not.toHaveProperty("clientMsgId");
       expect(res.hasMore).toBe(false);
       expect(findTimelineMock).toHaveBeenCalledWith(convId, undefined, undefined, undefined);
+      expect(getParticipantUserIdsMock).not.toHaveBeenCalled();
+      expect(findConversationByIdMock).toHaveBeenCalledWith(convId, userA);
     });
   });
 

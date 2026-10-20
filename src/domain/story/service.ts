@@ -107,10 +107,12 @@ export class StoryService {
   }
 
   async getFeed(userId: string): Promise<UserStoryFeedResponse[]> {
-    const friendIds = await this.storyRepo.getFriendUserIds(userId);
-    const visibleUserIds = new Set([userId, ...friendIds]);
     const cacheKey = storyFeedKey(userId);
-    const cached = await this.cache.getBestEffort<UserStoryFeedResponse[]>(cacheKey);
+    const [friendIds, cached] = await Promise.all([
+      this.storyRepo.getFriendUserIds(userId),
+      this.cache.getBestEffort<UserStoryFeedResponse[]>(cacheKey),
+    ]);
+    const visibleUserIds = new Set([userId, ...friendIds]);
     this.metrics?.recordLookup("story_feed", cached === null ? "miss" : "hit");
     if (cached) {
       return reviveUserStoryFeed(cached.filter((entry) => visibleUserIds.has(entry.user.id)));
@@ -141,8 +143,7 @@ export class StoryService {
     }
 
     if (story.userId !== userId) {
-      const friendIds = await this.storyRepo.getFriendUserIds(story.userId);
-      if (!friendIds.includes(userId)) {
+      if (!(await this.storyRepo.isAcceptedFriend(story.userId, userId))) {
         throw new BusinessError("STORY_VIEW_FORBIDDEN");
       }
     }
@@ -163,8 +164,7 @@ export class StoryService {
       return;
     }
 
-    const friendIds = await this.storyRepo.getFriendUserIds(story.userId);
-    if (!friendIds.includes(userId)) {
+    if (!(await this.storyRepo.isAcceptedFriend(story.userId, userId))) {
       throw new BusinessError("STORY_VIEW_FORBIDDEN");
     }
 

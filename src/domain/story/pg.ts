@@ -152,6 +152,22 @@ export class StoryPgRepository implements StoryRepository {
     return rows.map((r) => (r.userLow === userId ? r.userHigh : r.userLow));
   }
 
+  async isAcceptedFriend(userAId: string, userBId: string): Promise<boolean> {
+    const [userLow, userHigh] = userAId < userBId ? [userAId, userBId] : [userBId, userAId];
+    const [relation] = await this.db
+      .select({ id: friendships.id })
+      .from(friendships)
+      .where(
+        and(
+          eq(friendships.userLow, userLow),
+          eq(friendships.userHigh, userHigh),
+          eq(friendships.status, "ACCEPTED"),
+        ),
+      )
+      .limit(1);
+    return Boolean(relation);
+  }
+
   async findPurgeable(limit: number): Promise<PurgeableStory[]> {
     return this.db
       .select({ id: stories.id, objectKey: stories.objectKey })

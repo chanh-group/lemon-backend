@@ -57,12 +57,13 @@ export class UserService {
     }
     const data = parsed.data;
 
-    const existingEmail = await this.userRepo.findByEmail(data.email);
+    const [existingEmail, existingUsername] = await Promise.all([
+      this.userRepo.findByEmail(data.email),
+      this.userRepo.findByUsername(data.username),
+    ]);
     if (existingEmail) {
       throw new BusinessError("USER_ALREADY_EXISTS");
     }
-
-    const existingUsername = await this.userRepo.findByUsername(data.username);
     if (existingUsername) {
       throw new BusinessError("USERNAME_TAKEN");
     }

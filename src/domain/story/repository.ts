@@ -11,6 +11,7 @@ export interface StoryRepository {
   findActiveById(id: string): Promise<Story | null>;
   findActiveByUserIds(userIds: string[]): Promise<Story[]>;
   findUsersByIds(userIds: string[]): Promise<Map<string, UserSummary>>;
+  isAcceptedFriend(userAId: string, userBId: string): Promise<boolean>;
   findViewersByStoryId(
     storyId: string,
     cursor: string | undefined,

@@ -41,10 +41,12 @@ export class NoteService {
   }
 
   async getFeed(userId: string): Promise<UserNoteFeedResponse[]> {
-    const friendIds = await this.noteRepo.getFriendUserIds(userId);
-    const visibleUserIds = new Set([userId, ...friendIds]);
     const key = noteFeedKey(userId);
-    const cached = await this.cacheStore.getBestEffort<UserNoteFeedResponse[]>(key);
+    const [friendIds, cached] = await Promise.all([
+      this.noteRepo.getFriendUserIds(userId),
+      this.cacheStore.getBestEffort<UserNoteFeedResponse[]>(key),
+    ]);
+    const visibleUserIds = new Set([userId, ...friendIds]);
     this.metrics?.recordLookup("note_feed", cached === null ? "miss" : "hit");
 
     if (cached) {

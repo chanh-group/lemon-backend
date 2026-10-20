@@ -40,6 +40,7 @@ describe("StoryService", () => {
   let markAsViewedMock: Mock<(storyId: string, viewerId: string) => Promise<void>>;
   let markDeletedMock: Mock<(id: string) => Promise<boolean>>;
   let getFriendUserIdsMock: Mock<(userId: string) => Promise<string[]>>;
+  let isAcceptedFriendMock: Mock<(userAId: string, userBId: string) => Promise<boolean>>;
   let findPurgeableMock: Mock<(limit: number) => Promise<PurgeableStory[]>>;
   let deleteByIdsMock: Mock<(ids: string[]) => Promise<number>>;
 
@@ -145,6 +146,9 @@ describe("StoryService", () => {
     getFriendUserIdsMock = vi
       .fn<(userId: string) => Promise<string[]>>()
       .mockResolvedValue(["friend-1", "friend-2"]);
+    isAcceptedFriendMock = vi
+      .fn<(userAId: string, userBId: string) => Promise<boolean>>()
+      .mockResolvedValue(true);
     findPurgeableMock = vi.fn<(limit: number) => Promise<PurgeableStory[]>>().mockResolvedValue([]);
     deleteByIdsMock = vi.fn<(ids: string[]) => Promise<number>>().mockResolvedValue(0);
 
@@ -177,6 +181,7 @@ describe("StoryService", () => {
       markAsViewed: markAsViewedMock,
       markDeleted: markDeletedMock,
       getFriendUserIds: getFriendUserIdsMock,
+      isAcceptedFriend: isAcceptedFriendMock,
       findPurgeable: findPurgeableMock,
       deleteByIds: deleteByIdsMock,
     };
@@ -449,13 +454,13 @@ describe("StoryService", () => {
     });
 
     it("returns active story for friend", async () => {
-      getFriendUserIdsMock.mockResolvedValueOnce(["friend-1"]);
       const result = await service.getStoryById("friend-1", mockStory.id);
       expect(result.id).toBe(mockStory.id);
+      expect(isAcceptedFriendMock).toHaveBeenCalledWith("user-owner-1", "friend-1");
     });
 
     it("throws STORY_VIEW_FORBIDDEN if viewer is not a friend", async () => {
-      getFriendUserIdsMock.mockResolvedValueOnce(["friend-other"]);
+      isAcceptedFriendMock.mockResolvedValueOnce(false);
       await expect(service.getStoryById("stranger-user", mockStory.id)).rejects.toMatchObject({
         code: "STORY_VIEW_FORBIDDEN",
       });
@@ -471,7 +476,6 @@ describe("StoryService", () => {
 
   describe("viewStory", () => {
     it("marks active story as viewed for friend", async () => {
-      getFriendUserIdsMock.mockResolvedValueOnce(["friend-1"]);
       await service.viewStory("friend-1", mockStory.id);
 
       expect(markAsViewedMock).toHaveBeenCalledWith(mockStory.id, "friend-1");
@@ -479,7 +483,7 @@ describe("StoryService", () => {
     });
 
     it("throws STORY_VIEW_FORBIDDEN if viewer is not a friend", async () => {
-      getFriendUserIdsMock.mockResolvedValueOnce(["friend-other"]);
+      isAcceptedFriendMock.mockResolvedValueOnce(false);
       await expect(service.viewStory("stranger-user", mockStory.id)).rejects.toMatchObject({
         code: "STORY_VIEW_FORBIDDEN",
       });

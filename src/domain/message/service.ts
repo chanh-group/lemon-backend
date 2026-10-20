@@ -131,10 +131,6 @@ export class MessageService {
     limit?: number,
     after?: string,
   ): Promise<MessageTimelineResponse> {
-    const participantIds = await this.convRepo.getParticipantUserIds(conversationId);
-    if (!participantIds.includes(userId)) {
-      throw new BusinessError("NOT_PARTICIPANT");
-    }
     await this.assertDirectConversationAllowed(conversationId, userId);
 
     return toMessageTimeline(
