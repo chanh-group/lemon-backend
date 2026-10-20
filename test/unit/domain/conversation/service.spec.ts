@@ -301,16 +301,13 @@ describe("ConversationService", () => {
       expect(result[1].unreadCount).toBe(1);
     });
 
-    it("keeps the list usable with unreadCount 0 and warns when the database rebuild fails", async () => {
+    it("returns a server error when rebuilding unread counts fails", async () => {
       findUserConversationsMock.mockResolvedValue([{ ...mockConvWithPartner }]);
       redisPipelineExecMock.mockResolvedValue([[null, null], presenceOnline]);
       countUnreadBatchMock.mockRejectedValue(new Error("db down"));
       const warn = vi.spyOn(Logger.prototype, "warn").mockReturnValue(undefined);
 
-      const result = await service.listConversations(userA);
-
-      expect(result).toHaveLength(1);
-      expect(result[0].unreadCount).toBe(0);
+      await expect(service.listConversations(userA)).rejects.toMatchObject({ kind: "database" });
       expect(warn).toHaveBeenCalled();
       warn.mockRestore();
     });
@@ -370,16 +367,14 @@ describe("ConversationService", () => {
       expect(countUnreadMock).not.toHaveBeenCalled();
     });
 
-    it("keeps the conversation usable with unreadCount 0 and warns when the database rebuild fails", async () => {
+    it("returns a server error when rebuilding unread counts fails", async () => {
       existsByIdMock.mockResolvedValue(true);
       findByIdMock.mockResolvedValue({ ...mockConvWithPartner });
       redisPipelineExecMock.mockResolvedValue([[null, null], presenceOnline]);
       countUnreadMock.mockRejectedValue(new Error("db down"));
       const warn = vi.spyOn(Logger.prototype, "warn").mockReturnValue(undefined);
 
-      const result = await service.getById(convId, userA);
-
-      expect(result.unreadCount).toBe(0);
+      await expect(service.getById(convId, userA)).rejects.toMatchObject({ kind: "database" });
       expect(warn).toHaveBeenCalled();
       warn.mockRestore();
     });

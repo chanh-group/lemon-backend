@@ -13,7 +13,7 @@ describe("CacheModule", () => {
     const quit = vi.fn().mockResolvedValue("OK");
     const mod = await Test.createTestingModule({ imports: [CacheModule] })
       .overrideProvider(REDIS_CLIENT)
-      .useValue({ quit })
+      .useValue({ quit, status: "ready", on: vi.fn(), ping: vi.fn().mockResolvedValue("PONG") })
       .compile();
     expect(mod.get(CACHE_STORE)).toBeInstanceOf(RedisCacheService);
     await mod.close();

@@ -9,6 +9,7 @@ import {
 } from "../utils/cache/constants.js";
 import { CACHE_STORE, REDIS_CLIENT } from "../utils/cache/store.js";
 import { RedisHealthService } from "./redis-health.js";
+import { RedisMetricsService } from "./redis-metrics.js";
 import {
   RedisCacheService,
   registerCacheCommands,
@@ -45,6 +46,7 @@ async function createRedisClient(): Promise<RedisWithCacheCommands> {
 @Global()
 @Module({
   providers: [
+    RedisMetricsService,
     RedisHealthService,
     {
       provide: REDIS_CLIENT,
@@ -54,11 +56,15 @@ async function createRedisClient(): Promise<RedisWithCacheCommands> {
     },
     {
       provide: CACHE_STORE,
-      useFactory: (redis: RedisWithCacheCommands) => new RedisCacheService(redis),
-      inject: [REDIS_CLIENT],
+      useFactory: (
+        redis: RedisWithCacheCommands,
+        health: RedisHealthService,
+        metrics: RedisMetricsService,
+      ) => new RedisCacheService(redis, health, metrics),
+      inject: [REDIS_CLIENT, RedisHealthService, RedisMetricsService],
     },
   ],
-  exports: [CACHE_STORE, REDIS_CLIENT, RedisHealthService],
+  exports: [CACHE_STORE, REDIS_CLIENT, RedisHealthService, RedisMetricsService],
 })
 export class CacheModule implements OnModuleDestroy {
   constructor(@Inject(REDIS_CLIENT) private readonly redis: RedisWithCacheCommands) {}

@@ -16,8 +16,15 @@ import { toMessageResponse, toMessageTimeline } from "./dto/mapper.js";
 import { FriendService } from "../friend/service.js";
 import { SystemError } from "../../utils/errors/system.js";
 import { RedisHealthService } from "../../configs/redis-health.js";
+import { RedisMetricsService } from "../../configs/redis-metrics.js";
 
 export type { SendMessageDto };
+
+export const INCREMENT_UNREAD_WITH_TTL_LUA = `
+  local value = redis.call('INCR', KEYS[1])
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+  return value
+`;
 
 @Injectable()
 export class MessageService {
@@ -30,6 +37,7 @@ export class MessageService {
     private readonly realtimeService: RealtimeService,
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
     @Optional() @Inject(RedisHealthService) private readonly redisHealth?: RedisHealthService,
+    @Optional() @Inject(RedisMetricsService) private readonly metrics?: RedisMetricsService,
   ) {}
 
   async sendMessage(
@@ -79,12 +87,17 @@ export class MessageService {
         try {
           const pipeline = this.redis.pipeline();
           for (const recipientId of recipientIds) {
-            const key = unreadCountKey(recipientId, conversationId);
-            pipeline.incr(key);
-            pipeline.expire(key, UNREAD_TTL_SECONDS);
+            pipeline.eval(
+              INCREMENT_UNREAD_WITH_TTL_LUA,
+              1,
+              unreadCountKey(recipientId, conversationId),
+              UNREAD_TTL_SECONDS,
+            );
           }
-          const results = await pipeline.exec();
-          if (!results || results.some(([err]) => err)) {
+          const results = await (this.metrics
+            ? this.metrics.measure("unread_write", () => pipeline.exec())
+            : pipeline.exec());
+          if (!results || results.length !== recipientIds.length || results.some(([err]) => err)) {
             throw new SystemError("unavailable", "Redis unread counter pipeline failed", {
               cause: results?.find(([err]) => err)?.[0],
             });
@@ -96,8 +109,7 @@ export class MessageService {
             messageId: response.id,
             err,
           });
-          // The PostgreSQL insert already committed; still deliver the durable message.
-          this.realtimeService.emitNewMessage(conversationId, response);
+          // The PostgreSQL insert already committed; the outer emit still delivers it.
         }
       }
 

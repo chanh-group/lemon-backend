@@ -61,7 +61,10 @@ describe("RedisCacheService", () => {
   });
 
   it("deleteMany pipelines DEL and skips empty", async () => {
-    const exec = vi.fn().mockResolvedValue([]);
+    const exec = vi.fn().mockResolvedValue([
+      [null, 1],
+      [null, 1],
+    ]);
     const { service, redis } = serviceWith({
       pipeline: vi.fn().mockReturnValue({ exec }),
     });

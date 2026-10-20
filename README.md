@@ -76,6 +76,7 @@ Xem đầy đủ ở `.env.example`. Các biến quan trọng:
 | `NODE_ENV`                    | `development` / `production` (quyết định format log)                                 |
 | `FRONTEND_URL`                | URL FE, dùng cho CORS                                                                |
 | `TRUST_PROXY`                 | Mặc định `loopback`; đặt dải IP của proxy tin cậy khi chạy sau ingress/load balancer |
+| `METRICS_TOKEN`               | Token Bearer tùy chọn; để trống thì `/metrics` bị tắt                                |
 
 Đọc env trong code luôn qua helper `get_env()` (`src/helpers/index.ts`) — thiếu biến bắt buộc là crash ngay lúc boot, không fail âm thầm.
 

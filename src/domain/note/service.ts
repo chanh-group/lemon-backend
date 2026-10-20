@@ -2,6 +2,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import { CACHE_STORE, type CacheStoreExt } from "../../utils/cache/store.js";
 import { NOTE_FEED_TTL_SECS, NOTE_TTL_MS } from "../../utils/cache/constants.js";
 import { noteFeedKey } from "../../utils/cache/keys.js";
+import { RedisMetricsService } from "../../configs/redis-metrics.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { Logger } from "../../utils/logger.js";
 import type { UpsertNoteDto } from "./dto/request.js";
@@ -16,6 +17,7 @@ export class NoteService {
   constructor(
     @Inject(NOTE_REPOSITORY) private readonly noteRepo: NoteRepository,
     @Inject(CACHE_STORE) private readonly cacheStore: CacheStoreExt,
+    private readonly metrics?: RedisMetricsService,
   ) {}
 
   async upsertNote(userId: string, dto: UpsertNoteDto): Promise<NoteResponse> {
@@ -39,10 +41,11 @@ export class NoteService {
   }
 
   async getFeed(userId: string): Promise<UserNoteFeedResponse[]> {
-    const key = noteFeedKey(userId);
     const friendIds = await this.noteRepo.getFriendUserIds(userId);
     const visibleUserIds = new Set([userId, ...friendIds]);
+    const key = noteFeedKey(userId);
     const cached = await this.cacheStore.getBestEffort<UserNoteFeedResponse[]>(key);
+    this.metrics?.recordLookup("note_feed", cached === null ? "miss" : "hit");
 
     if (cached) {
       return cached
@@ -92,7 +95,9 @@ export class NoteService {
 
   private async invalidateUserAndFriendFeeds(userId: string): Promise<void> {
     const friendIds = await this.noteRepo.getFriendUserIds(userId);
-    const keys = [noteFeedKey(userId), ...friendIds.map((id) => noteFeedKey(id))];
-    await this.cacheStore.deleteManyBestEffort(keys);
+    await this.cacheStore.deleteManyBestEffort([
+      noteFeedKey(userId),
+      ...friendIds.map(noteFeedKey),
+    ]);
   }
 }

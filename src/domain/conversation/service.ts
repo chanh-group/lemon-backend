@@ -11,6 +11,8 @@ import type { ConversationResponse } from "./dto/response.js";
 import { toConversationResponse } from "./dto/mapper.js";
 import { FriendService } from "../friend/service.js";
 import { SystemError } from "../../utils/errors/system.js";
+import { RedisHealthService } from "../../configs/redis-health.js";
+import { RedisMetricsService } from "../../configs/redis-metrics.js";
 
 function requireRedisPipelineResults(
   results: [Error | null, unknown][] | null,
@@ -31,6 +33,12 @@ function requireRedisPipelineResults(
   return results;
 }
 
+function parseUnreadCount(value: unknown): number | null {
+  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
 @Injectable()
 export class ConversationService {
   private readonly logger = new Logger(ConversationService.name);
@@ -41,6 +49,8 @@ export class ConversationService {
     private readonly friendService: FriendService,
     private readonly realtimeService: RealtimeService,
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
+    @Optional() @Inject(RedisHealthService) private readonly redisHealth?: RedisHealthService,
+    @Optional() @Inject(RedisMetricsService) private readonly metrics?: RedisMetricsService,
   ) {}
 
   async getOrCreateDirect(userId: string, targetUserId: string): Promise<ConversationResponse> {
@@ -112,8 +122,11 @@ export class ConversationService {
             pipeline.get(presenceUserKey(conv.partner.id));
           }
         }
-        results = await pipeline.exec();
+        results = await (this.metrics
+          ? this.metrics.measure("unread_read", () => pipeline.exec())
+          : pipeline.exec());
       } catch (err) {
+        this.redisHealth?.markUnavailable(err);
         throw new SystemError("unavailable", "Redis conversation list query failed", {
           cause: err,
         });
@@ -129,9 +142,17 @@ export class ConversationService {
         for (let i = 0; i < list.length; i++) {
           const [err, val] = results[i];
           if (!err && val !== null && val !== undefined) {
-            list[i].unreadCount = parseInt(val as string, 10) || 0;
+            const parsed = parseUnreadCount(val);
+            if (parsed !== null) {
+              list[i].unreadCount = parsed;
+              this.metrics?.recordLookup("unread", "hit");
+            } else {
+              missing.push(i);
+              this.metrics?.recordLookup("unread", "miss");
+            }
           } else {
             missing.push(i);
+            this.metrics?.recordLookup("unread", "miss");
           }
         }
 
@@ -196,16 +217,27 @@ export class ConversationService {
         if (conv.partner) {
           pipeline.get(presenceUserKey(conv.partner.id));
         }
-        results = await pipeline.exec();
+        results = await (this.metrics
+          ? this.metrics.measure("unread_read", () => pipeline.exec())
+          : pipeline.exec());
       } catch (err) {
+        this.redisHealth?.markUnavailable(err);
         throw new SystemError("unavailable", "Redis conversation query failed", { cause: err });
       }
       results = requireRedisPipelineResults(results, "conversation query", conv.partner ? 2 : 1);
 
       const [errCount, valCount] = results?.[0] ?? [null, null];
       if (!errCount && valCount !== null && valCount !== undefined) {
-        conv.unreadCount = parseInt(valCount as string, 10) || 0;
+        const parsed = parseUnreadCount(valCount);
+        if (parsed !== null) {
+          conv.unreadCount = parsed;
+          this.metrics?.recordLookup("unread", "hit");
+        } else {
+          this.metrics?.recordLookup("unread", "miss");
+          conv.unreadCount = await this.rebuildUnread(userId, conversationId);
+        }
       } else {
+        this.metrics?.recordLookup("unread", "miss");
         conv.unreadCount = await this.rebuildUnread(userId, conversationId);
       }
 
@@ -228,30 +260,39 @@ export class ConversationService {
   }
 
   private async rebuildUnread(userId: string, conversationId: string): Promise<number> {
+    let count: number;
     try {
-      const count = await this.convRepo.countUnread(conversationId, userId);
-      if (this.redis) {
-        try {
-          await this.redis.set(
-            unreadCountKey(userId, conversationId),
-            String(count),
-            "EX",
-            UNREAD_TTL_SECONDS,
-          );
-        } catch (err) {
-          throw new SystemError("unavailable", "Redis unread cache write failed", {
-            cause: err,
-          });
-        }
-      }
-      return count;
+      count = await this.convRepo.countUnread(conversationId, userId);
     } catch (err) {
       this.logger.warn("Failed to rebuild unread count from the database", {
         conversationId,
         err,
       });
-      return 0;
+      throw new SystemError("database", "Unread count query failed", { cause: err });
     }
+    if (this.redis) {
+      try {
+        await (this.metrics
+          ? this.metrics.measure("unread_write", () =>
+              this.redis!.set(
+                unreadCountKey(userId, conversationId),
+                String(count),
+                "EX",
+                UNREAD_TTL_SECONDS,
+              ),
+            )
+          : this.redis.set(
+              unreadCountKey(userId, conversationId),
+              String(count),
+              "EX",
+              UNREAD_TTL_SECONDS,
+            ));
+      } catch (err) {
+        this.redisHealth?.markUnavailable(err);
+        throw new SystemError("unavailable", "Redis unread cache write failed", { cause: err });
+      }
+    }
+    return count;
   }
 
   private async cacheUnreadCounts(userId: string, counts: Map<string, number>): Promise<void> {
@@ -266,8 +307,12 @@ export class ConversationService {
           UNREAD_TTL_SECONDS,
         );
       }
-      requireRedisPipelineResults(await pipeline.exec(), "unread cache pipeline", counts.size);
+      const result = this.metrics
+        ? await this.metrics.measure("unread_write", () => pipeline.exec())
+        : await pipeline.exec();
+      requireRedisPipelineResults(result, "unread cache pipeline", counts.size);
     } catch (err) {
+      this.redisHealth?.markUnavailable(err);
       throw new SystemError("unavailable", "Redis unread cache pipeline failed", { cause: err });
     }
   }
@@ -280,7 +325,7 @@ export class ConversationService {
       return await this.convRepo.countUnreadByConversationIds(conversationIds, userId);
     } catch (err) {
       this.logger.warn("Failed to rebuild unread counts from the database", { err });
-      return new Map();
+      throw new SystemError("database", "Unread count query failed", { cause: err });
     }
   }
 
@@ -314,6 +359,7 @@ export class ConversationService {
       try {
         await this.redis.del(unreadCountKey(userId, conversationId));
       } catch (err) {
+        this.redisHealth?.markUnavailable(err);
         throw new SystemError("unavailable", "Redis unread reset failed", { cause: err });
       }
     }

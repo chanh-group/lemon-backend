@@ -5,7 +5,6 @@ import type { ConversationRepository } from "../../../../src/domain/conversation
 import type { RealtimeService } from "../../../../src/domain/realtime/realtime.service.js";
 import type { Redis } from "ioredis";
 import type { Message } from "../../../../src/domain/message/schema.js";
-import { unreadCountKey } from "../../../../src/utils/cache/keys.js";
 import type { FriendService } from "../../../../src/domain/friend/service.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
 import type { RedisHealthService } from "../../../../src/configs/redis-health.js";
@@ -98,8 +97,7 @@ describe("MessageService", () => {
       [null, 1],
     ]);
     redisPipelineMock = vi.fn().mockReturnValue({
-      incr: redisIncrMock,
-      expire: redisExpireMock,
+      eval: vi.fn().mockReturnThis(),
       exec: redisPipelineExecMock,
     });
 
@@ -159,10 +157,8 @@ describe("MessageService", () => {
       expect(res.body).toBe("Hello");
       expect(res).not.toHaveProperty("clientMsgId");
       expect(redisPipelineMock).toHaveBeenCalled();
-      expect(redisIncrMock).toHaveBeenCalledTimes(1);
-      expect(redisIncrMock).toHaveBeenCalledWith(unreadCountKey(userB, convId));
-      expect(redisExpireMock).toHaveBeenCalledTimes(1);
-      expect(redisExpireMock).toHaveBeenCalledWith(unreadCountKey(userB, convId), 604800);
+      expect(redisPipelineMock).toHaveBeenCalledTimes(1);
+      expect(redisExpireMock).not.toHaveBeenCalled();
       expect(emitNewMessageMock).toHaveBeenCalledWith(convId, res);
     });
 
