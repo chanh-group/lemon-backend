@@ -14,7 +14,18 @@ export const createStorySchema = z.object({
 
 export type CreateStoryDto = z.infer<typeof createStorySchema>;
 
-export const ALLOWED_STORY_EMOJIS = ["❤️", "🔥", "😂", "😮", "😢", "👏", "👍"] as const;
+export const ALLOWED_STORY_EMOJIS = [
+  "👍",
+  "❤️",
+  "🥰",
+  "😆",
+  "😂",
+  "😮",
+  "😢",
+  "😡",
+  "🔥",
+  "👏",
+] as const;
 
 export const reactStorySchema = z.object({
   emoji: z
