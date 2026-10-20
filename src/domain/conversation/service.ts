@@ -61,7 +61,9 @@ export class ConversationService {
 
   async listConversations(userId: string, limit = 20): Promise<ConversationResponse[]> {
     const conversations = await this.convRepo.findUserConversations(userId, limit);
-    const friendIds = new Set((await this.friendService.listFriends(userId)).map((friend) => friend.id));
+    const friendIds = new Set(
+      (await this.friendService.listFriends(userId)).map((friend) => friend.id),
+    );
     const list = conversations.filter(
       (conversation) =>
         conversation.kind !== "DIRECT" ||
@@ -69,7 +71,16 @@ export class ConversationService {
     );
 
     // Enrich with unread counts and presence from Redis
-    if (this.redis && list.length > 0) {
+    if (list.length > 0) {
+      if (!this.redis) {
+        const counts = await this.rebuildUnreadBatch(
+          list.map((conv) => conv.id),
+          userId,
+        );
+        for (const conv of list) conv.unreadCount = counts.get(conv.id) ?? 0;
+        return list.map(toConversationResponse);
+      }
+
       let results: [Error | null, unknown][] | null = null;
       try {
         const pipeline = this.redis.pipeline();
@@ -120,11 +131,11 @@ export class ConversationService {
       }
 
       if (missing.length > 0) {
-        const counts = await Promise.all(
-          missing.map((i) => this.rebuildUnread(userId, list[i].id)),
-        );
-        missing.forEach((idx, j) => {
-          list[idx].unreadCount = counts[j];
+        const conversationIds = missing.map((i) => list[i].id);
+        const counts = await this.rebuildUnreadBatch(conversationIds, userId);
+        await this.cacheUnreadCounts(userId, counts);
+        missing.forEach((idx) => {
+          list[idx].unreadCount = counts.get(list[idx].id) ?? 0;
         });
       }
     }
@@ -147,6 +158,9 @@ export class ConversationService {
     }
 
     // Enrich with unreadCount and presence from Redis
+    if (!this.redis) {
+      conv.unreadCount = await this.rebuildUnread(userId, conversationId);
+    }
     if (this.redis) {
       let results: [Error | null, unknown][] | null = null;
       try {
@@ -207,6 +221,36 @@ export class ConversationService {
         err,
       });
       return 0;
+    }
+  }
+
+  private async cacheUnreadCounts(userId: string, counts: Map<string, number>): Promise<void> {
+    if (!this.redis || counts.size === 0) return;
+    try {
+      const pipeline = this.redis.pipeline();
+      for (const [conversationId, count] of counts) {
+        pipeline.set(
+          unreadCountKey(userId, conversationId),
+          String(count),
+          "EX",
+          UNREAD_TTL_SECONDS,
+        );
+      }
+      await pipeline.exec();
+    } catch {
+      // The database counts are still returned when the cache write fails.
+    }
+  }
+
+  private async rebuildUnreadBatch(
+    conversationIds: string[],
+    userId: string,
+  ): Promise<Map<string, number>> {
+    try {
+      return await this.convRepo.countUnreadByConversationIds(conversationIds, userId);
+    } catch (err) {
+      this.logger.warn("Failed to rebuild unread counts from the database", { err });
+      return new Map(conversationIds.map((conversationId) => [conversationId, 0]));
     }
   }
 

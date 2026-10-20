@@ -1,5 +1,22 @@
 import { Logger } from "@nestjs/common";
-import type { Request } from "express";
+import { SystemError } from "../utils/errors/system.js";
+
+export const RATE_LIMIT_WINDOW_SECS = 60;
+export const RATE_LIMIT_EMAIL_WINDOW_SECS = 3600;
+export const RATE_LIMIT_REQUEST_OTP_IP_MAX = 3;
+export const RATE_LIMIT_REQUEST_OTP_EMAIL_MAX = 3;
+export const RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX = 3;
+export const RATE_LIMIT_VERIFY_OTP_IP_MAX = 10;
+export const RATE_LIMIT_SIGNIN_IP_MAX = 5;
+export const RATE_LIMIT_CHANGE_PASSWORD_USER_MAX = 3;
+export const RATE_LIMIT_CHANGE_PASSWORD_IP_MAX = 10;
+export const RATE_LIMIT_MESSAGE_USER_MAX = 60;
+export const RATE_LIMIT_MESSAGE_IP_MAX = 300;
+export const RATE_LIMIT_PRESIGN_USER_MAX = 10;
+export const RATE_LIMIT_PRESIGN_IP_MAX = 60;
+export const RATE_LIMIT_FRIEND_REQUEST_USER_MAX = 10;
+export const RATE_LIMIT_FRIEND_REQUEST_IP_MAX = 60;
+export const RATE_LIMIT_FRIEND_REQUEST_WINDOW_SECS = 3600;
 
 export interface RateLimiter {
   checkIpLimit(action: string, ip: string, max: number, windowSecs: number): Promise<boolean>;
@@ -38,13 +55,17 @@ return {first, second}
 
 export class RedisRateLimiter implements RateLimiter {
   private readonly redis: unknown;
-  private readonly logger: { warn: (message: unknown) => void };
+  private readonly logger: {
+    warn: (message: unknown) => void;
+    error: (message: unknown, context?: unknown) => void;
+  };
 
   constructor(redis: unknown, logger?: unknown) {
     this.redis = redis;
     this.logger =
-      (logger as { warn: (message: unknown) => void } | undefined) ??
-      new Logger(RedisRateLimiter.name);
+      (logger as
+        | { warn: (message: unknown) => void; error: (message: unknown, context?: unknown) => void }
+        | undefined) ?? new Logger(RedisRateLimiter.name);
   }
 
   private async checkRateLimit(key: string, max: number, windowSecs: number): Promise<boolean> {
@@ -54,8 +75,9 @@ export class RedisRateLimiter implements RateLimiter {
       const current = (await redis.eval(INCR_EXPIRE_SCRIPT, 1, key, durationSecs)) as number;
       return Number(current) <= max;
     } catch (err) {
-      this.logger.warn(`Redis rate limiter error: ${String(err)}`);
-      return true;
+      if (err instanceof SystemError) throw err;
+      this.logger.error("Redis rate limiter unavailable", { err });
+      throw new SystemError("unavailable", "rate limiter unavailable", { cause: err });
     }
   }
 
@@ -100,10 +122,12 @@ export class RedisRateLimiter implements RateLimiter {
       if (Array.isArray(counts) && counts.length === 2) {
         return Number(counts[0]) <= userMax && Number(counts[1]) <= ipMax;
       }
-      return true;
+      this.logger.error("Redis rate limiter returned an invalid result", { action });
+      throw new SystemError("unavailable", "rate limiter unavailable");
     } catch (err) {
-      this.logger.warn(`Redis rate limiter error: ${String(err)}`);
-      return true;
+      if (err instanceof SystemError) throw err;
+      this.logger.error("Redis rate limiter unavailable", { err });
+      throw new SystemError("unavailable", "rate limiter unavailable", { cause: err });
     }
   }
 }
@@ -154,16 +178,13 @@ export class MemoryRateLimiter implements RateLimiter {
   }
 }
 
-export function extractClientIp(req?: Request): string {
-  const forwarded = req?.headers?.["x-forwarded-for"];
-  const first = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-  if (typeof first === "string") {
-    const candidate = first.split(",")[0]?.trim();
-    if (candidate && candidate.length > 0) return candidate;
-  }
-  const ip = req?.ip;
+export function extractClientIp(req?: {
+  ip?: string;
+  socket?: { remoteAddress?: string | null };
+}): string {
+  const ip = req?.ip ?? req?.socket?.remoteAddress;
   if (typeof ip === "string" && ip.trim().length > 0) {
     return ip.trim();
   }
-  return "127.0.0.1";
+  return "unknown";
 }

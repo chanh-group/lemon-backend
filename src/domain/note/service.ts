@@ -40,20 +40,23 @@ export class NoteService {
 
   async getFeed(userId: string): Promise<UserNoteFeedResponse[]> {
     const key = noteFeedKey(userId);
+    const friendIds = await this.noteRepo.getFriendUserIds(userId);
+    const visibleUserIds = new Set([userId, ...friendIds]);
     const cached = await this.cacheStore.getBestEffort<UserNoteFeedResponse[]>(key);
 
     if (cached) {
-      return cached.map((item) => ({
-        ...item,
-        note: {
-          ...item.note,
-          createdAt: new Date(item.note.createdAt),
-          expiresAt: new Date(item.note.expiresAt),
-        },
-      }));
+      return cached
+        .filter((item) => visibleUserIds.has(item.user.id))
+        .map((item) => ({
+          ...item,
+          note: {
+            ...item.note,
+            createdAt: new Date(item.note.createdAt),
+            expiresAt: new Date(item.note.expiresAt),
+          },
+        }));
     }
 
-    const friendIds = await this.noteRepo.getFriendUserIds(userId);
     const allUserIds = [userId, ...friendIds];
     const notes = await this.noteRepo.findActiveByUserIds(allUserIds);
 

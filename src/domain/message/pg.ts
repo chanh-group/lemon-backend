@@ -5,6 +5,7 @@ import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { isUniqueViolation } from "../../utils/errors/pg.js";
 import { conversations } from "../conversation/schema.js";
+import { ATTACHMENT_PREVIEW_TOKEN } from "./constants.js";
 import type {
   CreatedMessageResult,
   MessageRepository,
@@ -75,7 +76,7 @@ export class MessagePgRepository implements MessageRepository {
           .returning();
 
         // 3. Atomically update parent conversation inbox fields
-        const preview = newMsg.body ? newMsg.body.slice(0, 80) : "[Tệp đính kèm]";
+        const preview = newMsg.body ? newMsg.body.slice(0, 80) : ATTACHMENT_PREVIEW_TOKEN;
         await tx
           .update(conversations)
           .set({
@@ -182,7 +183,7 @@ export class MessagePgRepository implements MessageRepository {
       if (!updated) return null;
 
       // Update conversation preview if this is the last message
-      const preview = updated.body ? updated.body.slice(0, 80) : "[Tệp đính kèm]";
+      const preview = updated.body ? updated.body.slice(0, 80) : ATTACHMENT_PREVIEW_TOKEN;
       await tx
         .update(conversations)
         .set({

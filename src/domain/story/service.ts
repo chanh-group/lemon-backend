@@ -111,12 +111,13 @@ export class StoryService {
 
   async getFeed(userId: string): Promise<UserStoryFeedResponse[]> {
     const cacheKey = storyFeedKey(userId);
+    const friendIds = await this.storyRepo.getFriendUserIds(userId);
+    const visibleUserIds = new Set([userId, ...friendIds]);
     const cached = await this.cache.getBestEffort<UserStoryFeedResponse[]>(cacheKey);
     if (cached) {
-      return reviveUserStoryFeed(cached);
+      return reviveUserStoryFeed(cached.filter((entry) => visibleUserIds.has(entry.user.id)));
     }
 
-    const friendIds = await this.storyRepo.getFriendUserIds(userId);
     const targetUserIds = [userId, ...friendIds];
 
     // Parallel fetch: active stories and user profile summaries

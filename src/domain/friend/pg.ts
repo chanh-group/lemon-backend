@@ -134,7 +134,10 @@ export class FriendPgRepository implements FriendRepository {
     return [...outgoing, ...incoming];
   }
 
-  async acceptRequest(requestId: string, addresseeId: string): Promise<boolean> {
+  async acceptRequest(
+    requestId: string,
+    addresseeId: string,
+  ): Promise<{ requesterId: string; addresseeId: string } | null> {
     const [row] = await this.db
       .update(friendships)
       .set({ status: "ACCEPTED", respondedAt: new Date(), updatedAt: new Date() })
@@ -145,8 +148,8 @@ export class FriendPgRepository implements FriendRepository {
           eq(friendships.status, "PENDING"),
         ),
       )
-      .returning({ id: friendships.id });
-    return Boolean(row);
+      .returning({ requesterId: friendships.requesterId, addresseeId: friendships.addresseeId });
+    return row ?? null;
   }
 
   async deleteIncomingRequest(requestId: string, addresseeId: string): Promise<boolean> {

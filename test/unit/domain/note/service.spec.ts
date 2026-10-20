@@ -152,6 +152,7 @@ describe("NoteService", () => {
           },
         },
       ];
+      getFriendUserIdsMock.mockResolvedValueOnce(["user-1"]);
       getBestEffortMock.mockResolvedValueOnce(cachedFeed);
 
       const result = await service.getFeed("user-viewer");
@@ -174,6 +175,7 @@ describe("NoteService", () => {
           },
         },
       ];
+      getFriendUserIdsMock.mockResolvedValueOnce(["user-1"]);
       getBestEffortMock.mockResolvedValueOnce(rawCached);
 
       const result = await service.getFeed("user-viewer");

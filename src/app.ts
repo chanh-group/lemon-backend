@@ -18,6 +18,7 @@ import { StoryModule } from "./domain/story/module.js";
 import { UserModule } from "./domain/user/module.js";
 import { PurgeModule } from "./jobs/purge/module.js";
 import { RequestLoggerMiddleware } from "./middleware/request-logger.js";
+import { RateLimitModule } from "./middleware/ratelimit.module.js";
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { RequestLoggerMiddleware } from "./middleware/request-logger.js";
     CacheModule,
     StorageModule,
     MailModule,
+    RateLimitModule,
     UserModule,
     AuthModule,
     RealtimeModule,

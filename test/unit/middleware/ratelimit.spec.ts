@@ -8,12 +8,12 @@ import {
 
 describe("RedisRateLimiter", () => {
   let redis: { eval: ReturnType<typeof vi.fn> };
-  let logger: { warn: ReturnType<typeof vi.fn> };
+  let logger: { warn: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
   let limiter: RedisRateLimiter;
 
   beforeEach(() => {
     redis = { eval: vi.fn() };
-    logger = { warn: vi.fn() };
+    logger = { warn: vi.fn(), error: vi.fn() };
     limiter = new RedisRateLimiter(redis, logger);
   });
 
@@ -67,16 +67,20 @@ describe("RedisRateLimiter", () => {
     await expect(limiter.checkMixedLimit("a", "u", "i", 3, 10, 60)).resolves.toBe(false);
   });
 
-  it("fail-opens with warn when eval rejects", async () => {
+  it("fails closed when Redis is unavailable", async () => {
     redis.eval.mockRejectedValue(new Error("boom"));
-    await expect(limiter.checkIpLimit("login", "ip", 5, 60)).resolves.toBe(true);
-    expect(logger.warn).toHaveBeenCalled();
+    await expect(limiter.checkIpLimit("login", "ip", 5, 60)).rejects.toMatchObject({
+      kind: "unavailable",
+    });
+    expect(logger.error).toHaveBeenCalled();
   });
 
-  it("fail-opens mixed with warn when eval rejects", async () => {
+  it("fails closed for mixed limits when Redis is unavailable", async () => {
     redis.eval.mockRejectedValue(new Error("boom"));
-    await expect(limiter.checkMixedLimit("a", "u", "i", 3, 10, 60)).resolves.toBe(true);
-    expect(logger.warn).toHaveBeenCalled();
+    await expect(limiter.checkMixedLimit("a", "u", "i", 3, 10, 60)).rejects.toMatchObject({
+      kind: "unavailable",
+    });
+    expect(logger.error).toHaveBeenCalled();
   });
 });
 
@@ -114,21 +118,20 @@ describe("MemoryRateLimiter", () => {
 });
 
 describe("extractClientIp", () => {
-  it("returns first trimmed element of x-forwarded-for", () => {
+  it("uses the Express resolved IP and ignores the raw forwarded header", () => {
     const req = {
       headers: { "x-forwarded-for": "1.2.3.4, 5.6.7.8" },
       ip: "9.9.9.9",
-    } as unknown as Request;
-    expect(extractClientIp(req)).toBe("1.2.3.4");
-  });
-
-  it("falls back to req.ip when no header", () => {
-    const req = { headers: {}, ip: "9.9.9.9" } as unknown as Request;
+    } as unknown as Pick<Request, "ip">;
     expect(extractClientIp(req)).toBe("9.9.9.9");
   });
 
-  it("returns 127.0.0.1 when nothing available", () => {
-    const req = { headers: {} } as unknown as Request;
-    expect(extractClientIp(req)).toBe("127.0.0.1");
+  it("falls back to req.ip when no header", () => {
+    const req = { ip: "9.9.9.9" };
+    expect(extractClientIp(req)).toBe("9.9.9.9");
+  });
+
+  it("returns unknown when no address is available", () => {
+    expect(extractClientIp()).toBe("unknown");
   });
 });

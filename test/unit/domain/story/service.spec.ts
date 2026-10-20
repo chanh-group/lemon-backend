@@ -362,6 +362,7 @@ describe("StoryService", () => {
       const cachedFeed: UserStoryFeedResponse[] = [
         { user: { id: "u1", username: "u1", fullName: "U1", avatarUrl: null }, stories: [] },
       ];
+      getFriendUserIdsMock.mockResolvedValueOnce(["u1"]);
       getBestEffortMock.mockResolvedValueOnce(cachedFeed);
 
       const result = await service.getFeed("user-viewer-1");
@@ -392,6 +393,7 @@ describe("StoryService", () => {
           ],
         },
       ];
+      getFriendUserIdsMock.mockResolvedValueOnce(["u1"]);
       getBestEffortMock.mockResolvedValueOnce(JSON.parse(JSON.stringify(feed)));
 
       const result = await service.getFeed("user-viewer-1");

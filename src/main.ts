@@ -15,6 +15,7 @@ async function bootstrap() {
 
   // Global REST API prefix: /api
   app.setGlobalPrefix("api");
+  app.getHttpAdapter().getInstance().set("trust proxy", get_env("TRUST_PROXY", "loopback"));
 
   // Middlewares & Pipes
   app.use(cookieParser());

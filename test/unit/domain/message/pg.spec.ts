@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { DrizzleDb } from "../../../../src/configs/database.js";
 import { conversations } from "../../../../src/domain/conversation/schema.js";
 import { MessagePgRepository } from "../../../../src/domain/message/pg.js";
+import { ATTACHMENT_PREVIEW_TOKEN } from "../../../../src/domain/message/constants.js";
 import { type Message, messages } from "../../../../src/domain/message/schema.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
 
@@ -201,7 +202,7 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
 
     expect(result).toEqual({ message: attachmentRow, isNew: true });
     expect(setMock).toHaveBeenCalledWith(
-      expect.objectContaining({ lastMessagePreview: "[Tệp đính kèm]" }),
+      expect.objectContaining({ lastMessagePreview: ATTACHMENT_PREVIEW_TOKEN }),
     );
   });
 });

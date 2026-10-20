@@ -16,6 +16,7 @@ describe("FriendService", () => {
     blockPair: ReturnType<typeof vi.fn>;
   };
   let userRepo: { findById: ReturnType<typeof vi.fn> };
+  let cache: { deleteManyBestEffort: ReturnType<typeof vi.fn> };
   let service: FriendService;
 
   beforeEach(() => {
@@ -40,9 +41,13 @@ describe("FriendService", () => {
         username: id === userId ? "requester" : "recipient",
       })),
     };
-    service = new FriendService(friendRepo as never, userRepo as never, {
-      emitFriendRequestReceived: vi.fn(),
-    } as never);
+    cache = { deleteManyBestEffort: vi.fn().mockResolvedValue(undefined) };
+    service = new FriendService(
+      friendRepo as never,
+      userRepo as never,
+      { emitFriendRequestReceived: vi.fn() } as never,
+      cache as never,
+    );
   });
 
   it("persists a request only after verifying the recipient", async () => {
@@ -55,9 +60,12 @@ describe("FriendService", () => {
 
   it("emits a realtime notification only after creating a new request", async () => {
     const emitFriendRequestReceived = vi.fn();
-    service = new FriendService(friendRepo as never, userRepo as never, {
-      emitFriendRequestReceived,
-    } as never);
+    service = new FriendService(
+      friendRepo as never,
+      userRepo as never,
+      { emitFriendRequestReceived } as never,
+      cache as never,
+    );
 
     await service.sendRequest(userId, otherId);
 
@@ -73,9 +81,12 @@ describe("FriendService", () => {
       friendship: { id: "request-id", requesterId: userId, status: "PENDING" },
       created: false,
     });
-    service = new FriendService(friendRepo as never, userRepo as never, {
-      emitFriendRequestReceived,
-    } as never);
+    service = new FriendService(
+      friendRepo as never,
+      userRepo as never,
+      { emitFriendRequestReceived } as never,
+      cache as never,
+    );
 
     await expect(service.sendRequest(userId, otherId)).rejects.toMatchObject({
       code: "FRIEND_REQUEST_EXISTS",
@@ -87,7 +98,9 @@ describe("FriendService", () => {
   it("rejects requests to blocked users", async () => {
     friendRepo.findByPair.mockResolvedValue({ status: "BLOCKED" });
 
-    await expect(service.sendRequest(userId, otherId)).rejects.toMatchObject({ code: "USER_BLOCKED" });
+    await expect(service.sendRequest(userId, otherId)).rejects.toMatchObject({
+      code: "USER_BLOCKED",
+    });
     expect(friendRepo.createRequest).not.toHaveBeenCalled();
   });
 

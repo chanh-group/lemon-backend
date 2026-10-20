@@ -5,6 +5,8 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Inject,
+  Optional,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -12,6 +14,16 @@ import {
   Query,
   Req,
 } from "@nestjs/common";
+import {
+  MemoryRateLimiter,
+  RATE_LIMITER,
+  RATE_LIMIT_MESSAGE_IP_MAX,
+  RATE_LIMIT_MESSAGE_USER_MAX,
+  RATE_LIMIT_WINDOW_SECS,
+  extractClientIp,
+  type RateLimiter,
+} from "../../middleware/ratelimit.js";
+import { BusinessError } from "../../utils/errors/business.js";
 import { Lang } from "../../utils/decorators.js";
 import { t } from "../../utils/i18n/index.js";
 import { created, ok, withMessage } from "../../utils/response.js";
@@ -26,17 +38,34 @@ import {
 
 @Controller()
 export class MessageController {
-  constructor(private readonly messageService: MessageService) {}
+  constructor(
+    private readonly messageService: MessageService,
+    @Optional()
+    @Inject(RATE_LIMITER)
+    private readonly rateLimiter: RateLimiter = new MemoryRateLimiter(),
+  ) {}
 
   @Post("conversations/:id/messages")
   @HttpCode(HttpStatus.CREATED)
   async sendMessage(
-    @Req() req: { user?: unknown },
+    @Req() req: { user?: unknown; ip?: string; socket?: { remoteAddress?: string | null } },
     @Param("id", ParseUUIDPipe) conversationId: string,
     @Body({ schema: sendMessageSchema }) dto: SendMessageDto,
     @Lang() lang: string,
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
+    if (
+      !(await this.rateLimiter.checkMixedLimit(
+        "send-message",
+        userId,
+        extractClientIp(req),
+        RATE_LIMIT_MESSAGE_USER_MAX,
+        RATE_LIMIT_MESSAGE_IP_MAX,
+        RATE_LIMIT_WINDOW_SECS,
+      ))
+    ) {
+      throw new BusinessError("TOO_MANY_REQUESTS");
+    }
     const data = await this.messageService.sendMessage(userId, conversationId, dto);
     return created(data, t("MESSAGE_SENT", lang));
   }
@@ -50,7 +79,8 @@ export class MessageController {
     @Query("after") after?: string,
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
-    const parsedLimit = limit ? parseInt(limit, 10) : 30;
+    const requestedLimit = limit === undefined ? 30 : Number(limit);
+    const parsedLimit = Number.isInteger(requestedLimit) ? requestedLimit : 30;
     const data = await this.messageService.getTimeline(
       userId,
       conversationId,

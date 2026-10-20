@@ -66,15 +66,15 @@ App mặc định nghe ở `http://localhost:3000` (đổi qua `PORT`).
 
 Xem đầy đủ ở `.env.example`. Các biến quan trọng:
 
-| Biến                          | Ví dụ / Ghi chú                                          |
-| ----------------------------- | -------------------------------------------------------- |
-| `DATABASE_URL`                | `postgres://postgres:postgres@localhost:5432/lemon_chat` |
-| `REDIS_URL`                   | `redis://localhost:6379`                                 |
-| `JWT_SECRET`                  | Chuỗi bí mật **≥ 32 bytes**                              |
-| `JWT_ISSUER` / `JWT_AUDIENCE` | `lemon-chat` / `lemon-chat-client`                       |
-| `USE_MEMORY_CACHE`            | `true` → dùng cache in-memory, khỏi cần Redis (dev/test) |
-| `NODE_ENV`                    | `development` / `production` (quyết định format log)     |
-| `FRONTEND_URL`                | URL FE, dùng cho CORS                                    |
+| Biến                          | Ví dụ / Ghi chú                                                                      |
+| ----------------------------- | ------------------------------------------------------------------------------------ |
+| `DATABASE_URL`                | `postgres://postgres:postgres@localhost:5432/lemon_chat`                             |
+| `REDIS_URL`                   | `redis://localhost:6379`                                                             |
+| `JWT_SECRET`                  | Chuỗi bí mật **≥ 32 bytes**                                                          |
+| `JWT_ISSUER` / `JWT_AUDIENCE` | `lemon-chat` / `lemon-chat-client`                                                   |
+| `NODE_ENV`                    | `development` / `production` (quyết định format log)                                 |
+| `FRONTEND_URL`                | URL FE, dùng cho CORS                                                                |
+| `TRUST_PROXY`                 | Mặc định `loopback`; đặt dải IP của proxy tin cậy khi chạy sau ingress/load balancer |
 
 Đọc env trong code luôn qua helper `get_env()` (`src/helpers/index.ts`) — thiếu biến bắt buộc là crash ngay lúc boot, không fail âm thầm.
 

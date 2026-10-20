@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { RateLimitModule } from "../../middleware/ratelimit.module.js";
 import { RealtimeModule } from "../realtime/realtime.module.js";
 import { UserModule } from "../user/module.js";
 import { FriendController } from "./controller.js";
@@ -7,7 +8,7 @@ import { FriendPgRepository } from "./pg.js";
 import { FriendService } from "./service.js";
 
 @Module({
-  imports: [UserModule, RealtimeModule],
+  imports: [UserModule, RealtimeModule, RateLimitModule],
   controllers: [FriendController],
   providers: [
     {

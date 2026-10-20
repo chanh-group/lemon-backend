@@ -134,25 +134,8 @@ export class ConversationPgRepository implements ConversationRepository {
   }
 
   async findUserConversations(userId: string, limit = 20): Promise<ConversationWithPartner[]> {
-    // 1. Get all conversations that this user participates in
-    const myParticipations = await this.db
-      .select({
-        conversationId: conversationParticipants.conversationId,
-        lastReadMessageId: conversationParticipants.lastReadMessageId,
-      })
-      .from(conversationParticipants)
-      .where(
-        and(eq(conversationParticipants.userId, userId), isNull(conversationParticipants.leftAt)),
-      );
-
-    if (myParticipations.length === 0) return [];
-
-    const convIds = myParticipations.map((p) => p.conversationId);
-    const lastReadMap = new Map(
-      myParticipations.map((p) => [p.conversationId, p.lastReadMessageId]),
-    );
-
-    // 2. Fetch conversations details
+    // Apply pagination before loading participant details so users with many
+    // conversations do not create an unbounded IN list.
     const convRows = await this.db
       .select({
         id: conversations.id,
@@ -161,13 +144,27 @@ export class ConversationPgRepository implements ConversationRepository {
         lastMessagePreview: conversations.lastMessagePreview,
         lastMessageAt: conversations.lastMessageAt,
         createdAt: conversations.createdAt,
+        lastReadMessageId: conversationParticipants.lastReadMessageId,
       })
-      .from(conversations)
-      .where(and(inArray(conversations.id, convIds), isNull(conversations.deletedAt)))
+      .from(conversationParticipants)
+      .innerJoin(conversations, eq(conversationParticipants.conversationId, conversations.id))
+      .where(
+        and(
+          eq(conversationParticipants.userId, userId),
+          isNull(conversationParticipants.leftAt),
+          isNull(conversations.deletedAt),
+        ),
+      )
       .orderBy(desc(sql`COALESCE(${conversations.lastMessageAt}, ${conversations.createdAt})`))
       .limit(limit);
+    if (convRows.length === 0) return [];
 
-    // 3. For DIRECT conversations, find partner info
+    const directIds = convRows.filter((conv) => conv.kind === "DIRECT").map((conv) => conv.id);
+    if (directIds.length === 0) {
+      return convRows.map((conv) => ({ ...conv, lastReadMessageId: conv.lastReadMessageId }));
+    }
+
+    // Fetch partners in one query for the paginated direct conversations.
     const otherParticipants = await this.db
       .select({
         conversationId: conversationParticipants.conversationId,
@@ -182,8 +179,9 @@ export class ConversationPgRepository implements ConversationRepository {
       .innerJoin(users, eq(conversationParticipants.userId, users.id))
       .where(
         and(
-          inArray(conversationParticipants.conversationId, convIds),
+          inArray(conversationParticipants.conversationId, directIds),
           ne(conversationParticipants.userId, userId),
+          isNull(conversationParticipants.leftAt),
         ),
       );
 
@@ -192,7 +190,6 @@ export class ConversationPgRepository implements ConversationRepository {
     return convRows.map((conv) => ({
       ...conv,
       partner: partnerMap.get(conv.id),
-      lastReadMessageId: lastReadMap.get(conv.id),
     }));
   }
 
@@ -333,5 +330,39 @@ export class ConversationPgRepository implements ConversationRepository {
       );
 
     return row?.count ?? 0;
+  }
+
+  async countUnreadByConversationIds(
+    conversationIds: string[],
+    userId: string,
+  ): Promise<Map<string, number>> {
+    if (conversationIds.length === 0) return new Map();
+    const rows = await this.db
+      .select({
+        conversationId: messages.conversationId,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(messages)
+      .innerJoin(
+        conversationParticipants,
+        and(
+          eq(conversationParticipants.conversationId, messages.conversationId),
+          eq(conversationParticipants.userId, userId),
+          isNull(conversationParticipants.leftAt),
+        ),
+      )
+      .where(
+        and(
+          inArray(messages.conversationId, conversationIds),
+          isNull(messages.deletedAt),
+          ne(messages.senderId, userId),
+          or(
+            isNull(conversationParticipants.lastReadMessageId),
+            gt(messages.id, conversationParticipants.lastReadMessageId),
+          ),
+        ),
+      )
+      .groupBy(messages.conversationId);
+    return new Map(rows.map((row) => [row.conversationId, Number(row.count)]));
   }
 }

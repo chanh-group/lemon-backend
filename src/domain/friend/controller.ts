@@ -5,11 +5,23 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Inject,
+  Optional,
   Param,
   ParseUUIDPipe,
   Post,
   Req,
 } from "@nestjs/common";
+import {
+  MemoryRateLimiter,
+  RATE_LIMITER,
+  RATE_LIMIT_FRIEND_REQUEST_IP_MAX,
+  RATE_LIMIT_FRIEND_REQUEST_USER_MAX,
+  RATE_LIMIT_FRIEND_REQUEST_WINDOW_SECS,
+  extractClientIp,
+  type RateLimiter,
+} from "../../middleware/ratelimit.js";
+import { BusinessError } from "../../utils/errors/business.js";
 import { Lang } from "../../utils/decorators.js";
 import { t } from "../../utils/i18n/index.js";
 import { created, messageOnly, ok } from "../../utils/response.js";
@@ -19,16 +31,33 @@ import { FriendService } from "./service.js";
 
 @Controller("friends")
 export class FriendController {
-  constructor(private readonly service: FriendService) {}
+  constructor(
+    private readonly service: FriendService,
+    @Optional()
+    @Inject(RATE_LIMITER)
+    private readonly rateLimiter: RateLimiter = new MemoryRateLimiter(),
+  ) {}
 
   @Post("requests")
   @HttpCode(HttpStatus.CREATED)
   async sendRequest(
-    @Req() req: { user?: unknown },
+    @Req() req: { user?: unknown; ip?: string; socket?: { remoteAddress?: string | null } },
     @Body({ schema: friendRequestSchema }) dto: { userId: string },
     @Lang() lang: string,
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
+    if (
+      !(await this.rateLimiter.checkMixedLimit(
+        "friend-request",
+        userId,
+        extractClientIp(req),
+        RATE_LIMIT_FRIEND_REQUEST_USER_MAX,
+        RATE_LIMIT_FRIEND_REQUEST_IP_MAX,
+        RATE_LIMIT_FRIEND_REQUEST_WINDOW_SECS,
+      ))
+    ) {
+      throw new BusinessError("TOO_MANY_REQUESTS");
+    }
     await this.service.sendRequest(userId, dto.userId);
     return created(undefined, t("FRIEND_REQUEST_SENT", lang));
   }

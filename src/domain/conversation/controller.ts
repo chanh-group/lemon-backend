@@ -15,6 +15,7 @@ import { t } from "../../utils/i18n/index.js";
 import { created, messageOnly, ok } from "../../utils/response.js";
 import { getAuthUser, type AuthUser } from "../shared.js";
 import { ConversationService } from "./service.js";
+import { DEFAULT_CONVERSATION_PAGE_SIZE, MAX_CONVERSATION_PAGE_SIZE } from "./constants.js";
 import {
   createDirectSchema,
   type CreateDirectDto,
@@ -41,7 +42,10 @@ export class ConversationController {
   @Get()
   async listConversations(@Req() req: { user?: unknown }, @Query("limit") limit?: string) {
     const { id: userId }: AuthUser = getAuthUser(req);
-    const parsedLimit = limit ? parseInt(limit, 10) : 20;
+    const requestedLimit = limit === undefined ? DEFAULT_CONVERSATION_PAGE_SIZE : Number(limit);
+    const parsedLimit = Number.isInteger(requestedLimit)
+      ? Math.min(Math.max(requestedLimit, 1), MAX_CONVERSATION_PAGE_SIZE)
+      : DEFAULT_CONVERSATION_PAGE_SIZE;
     const data = await this.service.listConversations(userId, parsedLimit);
     return ok(data);
   }
