@@ -1,3 +1,4 @@
+import type { StoryPreview } from "../story/dto/response.js";
 import type { Message } from "./schema.js";
 
 export interface MessageTimelineResult {
@@ -21,10 +22,20 @@ export interface MessageRepository {
     conversationId: string;
     senderId: string;
     body?: string | null;
-    kind?: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "FILE" | "SYSTEM";
+    kind?:
+      | "TEXT"
+      | "IMAGE"
+      | "VIDEO"
+      | "AUDIO"
+      | "FILE"
+      | "SYSTEM"
+      | "STORY_REPLY"
+      | "STORY_REACTION";
     clientMsgId?: string | null;
     replyToId?: string | null;
     requiredFriendship?: { userAId: string; userBId: string };
+    storyId?: string | null;
+    storyPreview?: StoryPreview | null;
   }): Promise<CreatedMessageResult>;
   findTimeline(
     conversationId: string,

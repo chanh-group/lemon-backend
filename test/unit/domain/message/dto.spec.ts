@@ -91,6 +91,25 @@ describe("Message DTOs", () => {
       expect(result.success).toBe(true);
     });
 
+    it("strips client-supplied storyId and storyPreview from the parsed payload", () => {
+      const result = sendMessageSchema.safeParse({
+        body: "Spoofed story quote",
+        storyId: "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b",
+        storyPreview: {
+          id: "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b",
+          kind: "IMAGE",
+          bucket: "lemon-stories",
+          objectKey: "stories/attacker/secret.jpg",
+          caption: "spoofed",
+        },
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data).not.toHaveProperty("storyId");
+        expect(result.data).not.toHaveProperty("storyPreview");
+      }
+    });
+
     it("rejects invalid kind enum value", () => {
       const result = sendMessageSchema.safeParse({
         body: "Hello",

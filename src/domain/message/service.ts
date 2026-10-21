@@ -18,8 +18,22 @@ import { SystemError } from "../../utils/errors/system.js";
 import { RedisHealthService } from "../../configs/redis-health.js";
 import { RedisMetricsService } from "../../configs/redis-metrics.js";
 import { MESSAGE_MAX_BODY_LENGTH } from "./constants.js";
+import type { StoryPreview } from "../story/dto/response.js";
 
 export type { SendMessageDto };
+
+/**
+ * Server-derived reference to the story a message quotes. Never accepted from
+ * an HTTP body: the snapshot is captured by the story domain, so a client can
+ * never attach a story (or a fabricated preview) it is not allowed to see.
+ * The kind is decided here as well — the public API cannot ask for a
+ * `STORY_REPLY` / `STORY_REACTION` message.
+ */
+export interface StoryReplyRef {
+  kind: "STORY_REPLY" | "STORY_REACTION";
+  storyId: string;
+  storyPreview: StoryPreview;
+}
 
 export const INCREMENT_UNREAD_WITH_TTL_LUA = `
   local value = redis.call('INCR', KEYS[1])
@@ -45,6 +59,7 @@ export class MessageService {
     senderId: string,
     conversationId: string,
     dto: SendMessageDto,
+    story?: StoryReplyRef,
   ): Promise<MessageResponse> {
     // 1. Verify that sender is a member of this conversation
     const participantIds = await this.convRepo.getParticipantUserIds(conversationId);
@@ -73,12 +88,14 @@ export class MessageService {
       conversationId,
       senderId,
       body: dto.body,
-      kind: dto.kind ?? "TEXT",
+      kind: story?.kind ?? dto.kind ?? "TEXT",
       clientMsgId: dto.clientMsgId,
       replyToId: dto.replyToId,
       ...(directPartnerId
         ? { requiredFriendship: { userAId: senderId, userBId: directPartnerId } }
         : {}),
+      storyId: story?.storyId ?? null,
+      storyPreview: story?.storyPreview ?? null,
     });
 
     const response = toMessageResponse(message);

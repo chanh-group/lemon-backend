@@ -10,6 +10,8 @@ export function toMessageResponse(message: Message): MessageResponse {
     kind: message.kind,
     body: message.deletedAt ? null : message.body,
     replyToId: message.replyToId,
+    storyId: message.storyId ?? null,
+    storyPreview: message.storyPreview ?? null,
     createdAt: message.createdAt,
     editedAt: message.editedAt,
     deletedAt: message.deletedAt,

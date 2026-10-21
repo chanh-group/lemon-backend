@@ -1,8 +1,21 @@
 import { Injectable, Logger } from "@nestjs/common";
+import type { UserSummary } from "../user/dto/response.js";
 import { ChatGateway } from "./chat.gateway.js";
 import { convRoom, userRoom } from "./rooms.js";
 
 const logger = new Logger("RealtimeService");
+
+export interface StoryReactionEvent {
+  storyId: string;
+  user: UserSummary;
+  emoji: string;
+  createdAt: Date;
+}
+
+export interface StoryReactionRemovedEvent {
+  storyId: string;
+  user: UserSummary;
+}
 
 @Injectable()
 export class RealtimeService {
@@ -92,6 +105,30 @@ export class RealtimeService {
       }
     } catch (err) {
       logger.warn(`Failed to join participants to conv ${conversationId}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Broadcast a story reaction to the story author's personal room
+   */
+  emitStoryReaction(userId: string, payload: StoryReactionEvent): void {
+    if (!this.gateway?.server) return;
+    try {
+      this.gateway.server.to(userRoom(userId)).emit("story:reaction", payload);
+    } catch (err) {
+      logger.warn(`Failed to emit story:reaction for user ${userId}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Broadcast the removal of a story reaction to the story author's room
+   */
+  emitStoryReactionRemoved(userId: string, payload: StoryReactionRemovedEvent): void {
+    if (!this.gateway?.server) return;
+    try {
+      this.gateway.server.to(userRoom(userId)).emit("story:reaction:removed", payload);
+    } catch (err) {
+      logger.warn(`Failed to emit story:reaction:removed for user ${userId}: ${String(err)}`);
     }
   }
 }

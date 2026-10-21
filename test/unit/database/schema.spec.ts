@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import * as schema from "../../../src/configs/schema.js";
 
 describe("Database Schema Exports", () => {
-  it("should export all 10 domain tables", () => {
+  it("should export all 11 domain tables", () => {
     expect(schema.users).toBeDefined();
     expect(schema.friendships).toBeDefined();
     expect(schema.conversations).toBeDefined();
@@ -14,6 +14,7 @@ describe("Database Schema Exports", () => {
     expect(schema.calls).toBeDefined();
     expect(schema.stories).toBeDefined();
     expect(schema.storyViews).toBeDefined();
+    expect(schema.storyReactions).toBeDefined();
     expect(schema.notes).toBeDefined();
   });
 

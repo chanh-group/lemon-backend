@@ -4,7 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { DrizzleDb } from "../../../../src/configs/database.js";
 import { conversations } from "../../../../src/domain/conversation/schema.js";
 import { MessagePgRepository } from "../../../../src/domain/message/pg.js";
-import { ATTACHMENT_PREVIEW_TOKEN } from "../../../../src/domain/message/constants.js";
+import {
+  ATTACHMENT_PREVIEW_TOKEN,
+  STORY_REACTION_PREVIEW_TOKEN,
+} from "../../../../src/domain/message/constants.js";
 import { type Message, messages } from "../../../../src/domain/message/schema.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
 
@@ -66,6 +69,8 @@ const existingRow: Message = {
   kind: "TEXT",
   body: "Hello from the first attempt",
   replyToId: null,
+  storyId: null,
+  storyPreview: null,
   clientMsgId,
   editedAt: null,
   deletedAt: null,
@@ -122,7 +127,7 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
 
   it("rethrows a non-unique-violation error unchanged", async () => {
     const { db, transactionMock } = makeDb();
-    const infraError = { code: "23503", constraint: "messages_client_msg_uq" };
+    const infraError = { code: "08006", message: "connection failure" };
     transactionMock.mockRejectedValueOnce(infraError);
     const repo = new MessagePgRepository(db);
 
@@ -134,6 +139,25 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
         clientMsgId,
       }),
     ).rejects.toBe(infraError);
+  });
+
+  it("maps a foreign-key violation to BAD_REQUEST instead of an opaque 500", async () => {
+    const { db, transactionMock } = makeDb();
+    const fkViolation = { code: "23503", constraint: "messages_story_id_stories_id_fk" };
+    transactionMock.mockRejectedValueOnce(fkViolation);
+    const repo = new MessagePgRepository(db);
+
+    const error = await repo
+      .createMessageWithConversationUpdate({
+        conversationId,
+        senderId,
+        body: "Hello from the first attempt",
+        clientMsgId,
+      })
+      .catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(BusinessError);
+    expect((error as BusinessError).code).toBe("BAD_REQUEST");
   });
 
   it("rethrows a 23505 from a different constraint unchanged", async () => {
@@ -214,6 +238,26 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
     );
   });
 
+  it("uses the story reaction marker as the conversation preview", async () => {
+    const { db, txSelect, returningMock, setMock } = makeDb();
+    txSelect.limitMock.mockResolvedValueOnce([]);
+    const reactionRow: Message = { ...existingRow, body: "🔥", kind: "STORY_REACTION" };
+    returningMock.mockResolvedValueOnce([reactionRow]);
+    const repo = new MessagePgRepository(db);
+
+    await repo.createMessageWithConversationUpdate({
+      conversationId,
+      senderId,
+      body: "🔥",
+      kind: "STORY_REACTION",
+      clientMsgId,
+    });
+
+    expect(setMock).toHaveBeenCalledWith(
+      expect.objectContaining({ lastMessagePreview: STORY_REACTION_PREVIEW_TOKEN }),
+    );
+  });
+
   it("locks the accepted friendship until a direct message transaction commits", async () => {
     const { db, txSelect, returningMock } = makeDb();
     txSelect.limitMock.mockResolvedValueOnce([{ status: "ACCEPTED" }]).mockResolvedValueOnce([]);
@@ -248,6 +292,43 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
       }),
     ).rejects.toMatchObject({ code: "USER_BLOCKED" });
     expect(insertMock).not.toHaveBeenCalled();
+  });
+
+  it("inserts message with storyId and storyPreview", async () => {
+    const { db, txSelect, valuesMock, returningMock } = makeDb();
+    txSelect.limitMock.mockResolvedValueOnce([]);
+    const storyId = "0193a2b1-0000-7000-8000-000000000099";
+    const storyPreview = {
+      id: storyId,
+      kind: "IMAGE" as const,
+      bucket: "lemon-stories",
+      objectKey: "stories/u/a.jpg",
+      caption: "Sunset",
+      background: null,
+    };
+    const storyReplyRow: Message = {
+      ...existingRow,
+      storyId,
+      storyPreview,
+    };
+    returningMock.mockResolvedValueOnce([storyReplyRow]);
+    const repo = new MessagePgRepository(db);
+
+    const result = await repo.createMessageWithConversationUpdate({
+      conversationId,
+      senderId,
+      body: "Nice photo!",
+      storyId,
+      storyPreview,
+    });
+
+    expect(result).toEqual({ message: storyReplyRow, isNew: true });
+    expect(valuesMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        storyId,
+        storyPreview,
+      }),
+    );
   });
 });
 
