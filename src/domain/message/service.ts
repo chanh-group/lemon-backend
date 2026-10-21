@@ -18,7 +18,7 @@ import { SystemError } from "../../utils/errors/system.js";
 import { RedisHealthService } from "../../configs/redis-health.js";
 import { RedisMetricsService } from "../../configs/redis-metrics.js";
 import { MESSAGE_MAX_BODY_LENGTH } from "./constants.js";
-import type { StoryPreview } from "./schema.js";
+import type { StoryPreview } from "../story/dto/response.js";
 
 export type { SendMessageDto };
 

@@ -1,6 +1,17 @@
 import type { Story } from "../schema.js";
 import type { UserSummary } from "../../user/dto/response.js";
-import type { StoryItemResponse, UserStoryFeedResponse } from "./response.js";
+import type { StoryItemResponse, StoryPreview, UserStoryFeedResponse } from "./response.js";
+
+export function toStoryPreview(story: Story): StoryPreview {
+  return {
+    id: story.id,
+    kind: story.kind,
+    bucket: story.bucket,
+    objectKey: story.objectKey,
+    caption: story.caption,
+    background: story.background,
+  };
+}
 
 export function toStoryItemResponse(
   story: Story,

@@ -36,9 +36,23 @@ export interface StoryReactionResponse {
   createdAt: Date;
 }
 
-export interface UserReactionResponse {
+/** Reaction of the calling user on a story. */
+export interface MyStoryReactionResponse {
   storyId: string;
   emoji: string;
   createdAt: Date;
 }
 
+/**
+ * Immutable snapshot of a story, embedded in messages that quote it. The
+ * snapshot outlives the story row (`messages.story_id` is `ON DELETE SET
+ * NULL`), so it must stay self-contained.
+ */
+export interface StoryPreview {
+  id: string;
+  kind: "IMAGE" | "VIDEO" | "TEXT";
+  bucket: string | null;
+  objectKey: string | null;
+  caption: string | null;
+  background: string | null;
+}

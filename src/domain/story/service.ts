@@ -14,19 +14,23 @@ import { BusinessError } from "../../utils/errors/business.js";
 import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.js";
 import { ConversationService } from "../conversation/service.js";
 import type { MessageResponse } from "../message/dto/response.js";
-import type { StoryPreview } from "../message/schema.js";
 import { MessageService } from "../message/service.js";
 import { RealtimeService } from "../realtime/realtime.service.js";
-import { groupStoriesByUser, reviveUserStoryFeed, toStoryItemResponse } from "./dto/mapper.js";
+import {
+  groupStoriesByUser,
+  reviveUserStoryFeed,
+  toStoryItemResponse,
+  toStoryPreview,
+} from "./dto/mapper.js";
 import { ALLOWED_STORY_EMOJIS, type CreateStoryDto, type ReplyStoryDto } from "./dto/request.js";
 import type {
+  MyStoryReactionResponse,
   StoryItemResponse,
   StoryReactionResponse,
-  UserReactionResponse,
   UserStoryFeedResponse,
 } from "./dto/response.js";
 import { STORY_REPOSITORY, type StoryRepository } from "./repository.js";
-import type { NewStory } from "./schema.js";
+import type { NewStory, Story } from "./schema.js";
 
 const BYTES_PER_MB = 1024 * 1024;
 
@@ -238,7 +242,11 @@ export class StoryService {
     this.logger.log("Story deleted", { storyId, userId });
   }
 
-  async reactStory(userId: string, storyId: string, emoji: string): Promise<UserReactionResponse> {
+  async reactStory(
+    userId: string,
+    storyId: string,
+    emoji: string,
+  ): Promise<MyStoryReactionResponse> {
     if (!ALLOWED_STORY_EMOJIS.includes(emoji as (typeof ALLOWED_STORY_EMOJIS)[number])) {
       throw new BusinessError("INVALID_EMOJI");
     }
@@ -258,7 +266,7 @@ export class StoryService {
     }
 
     await this.storyRepo.markAsViewed(storyId, userId);
-    const reaction = await this.storyRepo.addOrUpdateReaction(storyId, userId, emoji);
+    const { reaction, isNew } = await this.storyRepo.addOrUpdateReaction(storyId, userId, emoji);
 
     await Promise.all([
       this.cache.deleteBestEffort(storyFeedKey(userId)),
@@ -268,12 +276,18 @@ export class StoryService {
     const usersMap = await this.storyRepo.findUsersByIds([userId]);
     const userSummary = usersMap.get(userId);
     if (userSummary) {
-      this.realtimeService.emitStoryReaction(story.userId, {
+      const payload = {
         storyId,
         user: userSummary,
         emoji,
         createdAt: reaction.createdAt,
-      });
+      };
+      this.realtimeService.emitStoryReaction(story.userId, payload);
+      this.realtimeService.emitStoryReaction(userId, payload);
+    }
+
+    if (isNew) {
+      await this.sendReactionToDirectConversation(userId, story, emoji);
     }
 
     return {
@@ -281,6 +295,25 @@ export class StoryService {
       emoji: reaction.emoji,
       createdAt: reaction.createdAt,
     };
+  }
+
+  /**
+   * A story reaction is routed into the author's direct conversation (Meta /
+   * Signal behaviour, `docs/STORIES_NOTES.md` §5.2.A): the author sees the
+   * reaction inside the chat thread, not only in the story UI.
+   */
+  private async sendReactionToDirectConversation(
+    userId: string,
+    story: Story,
+    emoji: string,
+  ): Promise<void> {
+    const conv = await this.conversationService.getOrCreateDirect(userId, story.userId);
+    await this.messageService.sendMessage(
+      userId,
+      conv.id,
+      { kind: "TEXT", body: emoji },
+      { storyId: story.id, storyPreview: toStoryPreview(story) },
+    );
   }
 
   async unreactStory(userId: string, storyId: string): Promise<void> {
@@ -342,14 +375,7 @@ export class StoryService {
 
     const conv = await this.conversationService.getOrCreateDirect(userId, story.userId);
 
-    const storyPreview: StoryPreview = {
-      id: story.id,
-      kind: story.kind,
-      bucket: story.bucket,
-      objectKey: story.objectKey,
-      caption: story.caption,
-      background: story.background,
-    };
+    const storyPreview = toStoryPreview(story);
 
     const message = await this.messageService.sendMessage(
       userId,

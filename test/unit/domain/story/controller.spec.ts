@@ -14,7 +14,7 @@ import type {
   StoryItemResponse,
   StoryReactionResponse,
   StoryViewerResponse,
-  UserReactionResponse,
+  MyStoryReactionResponse,
   UserStoryFeedResponse,
 } from "../../../../src/domain/story/dto/response.js";
 import type { MessageResponse } from "../../../../src/domain/message/dto/response.js";
@@ -37,7 +37,7 @@ describe("StoryController", () => {
   >;
   let deleteStoryMock: Mock<(userId: string, storyId: string) => Promise<void>>;
   let reactStoryMock: Mock<
-    (userId: string, storyId: string, emoji: string) => Promise<UserReactionResponse>
+    (userId: string, storyId: string, emoji: string) => Promise<MyStoryReactionResponse>
   >;
   let unreactStoryMock: Mock<(userId: string, storyId: string) => Promise<void>>;
   let getReactionsMock: Mock<(userId: string, storyId: string) => Promise<StoryReactionResponse[]>>;
@@ -109,7 +109,7 @@ describe("StoryController", () => {
       .fn<(userId: string, storyId: string) => Promise<void>>()
       .mockResolvedValue(undefined);
     reactStoryMock = vi
-      .fn<(userId: string, storyId: string, emoji: string) => Promise<UserReactionResponse>>()
+      .fn<(userId: string, storyId: string, emoji: string) => Promise<MyStoryReactionResponse>>()
       .mockResolvedValue({
         storyId: mockStoryItem.id,
         emoji: "❤️",

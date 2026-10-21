@@ -6,11 +6,10 @@ import { friendships } from "../friend/schema.js";
 import { users } from "../user/schema.js";
 import type { StoryReactionResponse } from "./dto/response.js";
 import type { UserSummary } from "../user/dto/response.js";
-import type { PurgeableStory, StoryRepository } from "./repository.js";
+import type { PurgeableStory, StoryReactionResult, StoryRepository } from "./repository.js";
 import {
   type NewStory,
   type Story,
-  type StoryReaction,
   stories,
   storyReactions,
   storyViews,
@@ -207,16 +206,32 @@ export class StoryPgRepository implements StoryRepository {
     storyId: string,
     userId: string,
     emoji: string,
-  ): Promise<StoryReaction> {
-    const [reaction] = await this.db
+  ): Promise<StoryReactionResult> {
+    const [row] = await this.db
       .insert(storyReactions)
       .values({ storyId, userId, emoji, createdAt: new Date() })
       .onConflictDoUpdate({
         target: [storyReactions.storyId, storyReactions.userId],
         set: { emoji, createdAt: new Date() },
       })
-      .returning();
-    return reaction;
+      .returning({
+        storyId: storyReactions.storyId,
+        userId: storyReactions.userId,
+        emoji: storyReactions.emoji,
+        createdAt: storyReactions.createdAt,
+        // `xmax = 0` is true only for a freshly inserted row; an upsert that
+        // updated an existing reaction sets xmax to the writing xid.
+        isNew: sql<boolean>`xmax = 0`,
+      });
+    return {
+      reaction: {
+        storyId: row.storyId,
+        userId: row.userId,
+        emoji: row.emoji,
+        createdAt: row.createdAt,
+      },
+      isNew: row.isNew,
+    };
   }
 
   async deleteReaction(storyId: string, userId: string): Promise<boolean> {

@@ -1,4 +1,4 @@
-import type { StoryPreview } from "../schema.js";
+import type { StoryPreview } from "../../story/dto/response.js";
 
 export interface MessageResponse {
   id: string;

@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { CacheStoreExt } from "../../../../src/utils/cache/store.js";
 import type { PurgeableStory, StoryRepository } from "../../../../src/domain/story/repository.js";
 import { StoryService } from "../../../../src/domain/story/service.js";
-import type { NewStory, Story, StoryReaction } from "../../../../src/domain/story/schema.js";
+import type { NewStory, Story } from "../../../../src/domain/story/schema.js";
+import type { StoryReactionResult } from "../../../../src/domain/story/repository.js";
 import type { CreateStoryDto } from "../../../../src/domain/story/dto/request.js";
 import type {
   StoryReactionResponse,
@@ -48,7 +49,7 @@ describe("StoryService", () => {
   let findPurgeableMock: Mock<(limit: number) => Promise<PurgeableStory[]>>;
   let deleteByIdsMock: Mock<(ids: string[]) => Promise<number>>;
   let addOrUpdateReactionMock: Mock<
-    (storyId: string, userId: string, emoji: string) => Promise<StoryReaction>
+    (storyId: string, userId: string, emoji: string) => Promise<StoryReactionResult>
   >;
   let deleteReactionMock: Mock<(storyId: string, userId: string) => Promise<boolean>>;
   let findReactionsByStoryIdMock: Mock<(storyId: string) => Promise<StoryReactionResponse[]>>;
@@ -172,12 +173,15 @@ describe("StoryService", () => {
     findPurgeableMock = vi.fn<(limit: number) => Promise<PurgeableStory[]>>().mockResolvedValue([]);
     deleteByIdsMock = vi.fn<(ids: string[]) => Promise<number>>().mockResolvedValue(0);
     addOrUpdateReactionMock = vi
-      .fn<(storyId: string, userId: string, emoji: string) => Promise<StoryReaction>>()
+      .fn<(storyId: string, userId: string, emoji: string) => Promise<StoryReactionResult>>()
       .mockResolvedValue({
-        storyId: "story-1",
-        userId: "user-1",
-        emoji: "❤️",
-        createdAt: new Date(),
+        reaction: {
+          storyId: "story-1",
+          userId: "user-1",
+          emoji: "❤️",
+          createdAt: new Date(),
+        },
+        isNew: true,
       });
     deleteReactionMock = vi
       .fn<(storyId: string, userId: string) => Promise<boolean>>()
@@ -672,10 +676,13 @@ describe("StoryService", () => {
     it("saves reaction, marks viewed, invalidates feeds, and emits realtime event", async () => {
       const now = new Date("2026-10-14T02:00:00Z");
       addOrUpdateReactionMock.mockResolvedValueOnce({
-        storyId: mockStory.id,
-        userId: "friend-1",
-        emoji: "🔥",
-        createdAt: now,
+        reaction: {
+          storyId: mockStory.id,
+          userId: "friend-1",
+          emoji: "🔥",
+          createdAt: now,
+        },
+        isNew: true,
       });
       findUsersByIdsMock.mockResolvedValueOnce(
         new Map([
@@ -706,11 +713,48 @@ describe("StoryService", () => {
           user: expect.objectContaining({ id: "friend-1" }),
         }),
       );
+      expect(emitStoryReactionMock).toHaveBeenCalledWith(
+        "friend-1",
+        expect.objectContaining({ storyId: mockStory.id }),
+      );
       expect(result).toEqual({
         storyId: mockStory.id,
         emoji: "🔥",
         createdAt: now,
       });
+    });
+
+    it("mirrors the reaction into the author's direct conversation", async () => {
+      getOrCreateDirectMock.mockResolvedValueOnce({ id: "conv-direct-1" });
+
+      await service.reactStory("friend-1", mockStory.id, "🔥");
+
+      expect(getOrCreateDirectMock).toHaveBeenCalledWith("friend-1", "user-owner-1");
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        "friend-1",
+        "conv-direct-1",
+        expect.objectContaining({ kind: "TEXT", body: "🔥" }),
+        {
+          storyId: mockStory.id,
+          storyPreview: expect.objectContaining({ id: mockStory.id, kind: mockStory.kind }),
+        },
+      );
+    });
+
+    it("does not send another direct message when the reaction is only changed", async () => {
+      addOrUpdateReactionMock.mockResolvedValueOnce({
+        reaction: {
+          storyId: mockStory.id,
+          userId: "friend-1",
+          emoji: "😂",
+          createdAt: new Date(),
+        },
+        isNew: false,
+      });
+
+      await service.reactStory("friend-1", mockStory.id, "😂");
+
+      expect(sendMessageMock).not.toHaveBeenCalled();
     });
   });
 

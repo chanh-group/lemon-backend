@@ -1,4 +1,5 @@
-import type { Message, StoryPreview } from "./schema.js";
+import type { StoryPreview } from "../story/dto/response.js";
+import type { Message } from "./schema.js";
 
 export interface MessageTimelineResult {
   items: Message[];

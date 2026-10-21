@@ -15,18 +15,10 @@ import {
 } from "drizzle-orm/pg-core";
 import { created, uuidV7 } from "../../utils/database.js";
 import { conversations } from "../conversation/schema.js";
+import type { StoryPreview } from "../story/dto/response.js";
 import { stories } from "../story/schema.js";
 import { users } from "../user/schema.js";
 import { MESSAGE_MAX_BODY_LENGTH } from "./constants.js";
-
-export interface StoryPreview {
-  id: string;
-  kind: "IMAGE" | "VIDEO" | "TEXT";
-  bucket: string | null;
-  objectKey: string | null;
-  caption: string | null;
-  background: string | null;
-}
 
 export const messageKindEnum = pgEnum("message_kind", [
   "TEXT",

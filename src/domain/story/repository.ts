@@ -5,6 +5,11 @@ import type { CursorPage } from "../shared.js";
 
 export type PurgeableStory = { id: string; objectKey: string | null };
 
+export interface StoryReactionResult {
+  reaction: StoryReaction;
+  isNew: boolean;
+}
+
 export interface StoryRepository {
   create(data: NewStory): Promise<Story>;
   findById(id: string): Promise<Story | null>;
@@ -23,7 +28,11 @@ export interface StoryRepository {
   getFriendUserIds(userId: string): Promise<string[]>;
   findPurgeable(limit: number): Promise<PurgeableStory[]>;
   deleteByIds(ids: string[]): Promise<number>;
-  addOrUpdateReaction(storyId: string, userId: string, emoji: string): Promise<StoryReaction>;
+  addOrUpdateReaction(
+    storyId: string,
+    userId: string,
+    emoji: string,
+  ): Promise<StoryReactionResult>;
   deleteReaction(storyId: string, userId: string): Promise<boolean>;
   findReactionsByStoryId(storyId: string): Promise<StoryReactionResponse[]>;
   findUserReactions(userId: string, storyIds: string[]): Promise<Map<string, string>>;

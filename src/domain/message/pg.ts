@@ -13,7 +13,8 @@ import type {
   MessageRepository,
   MessageTimelineResult,
 } from "./repository.js";
-import { type Message, type StoryPreview, messages } from "./schema.js";
+import type { StoryPreview } from "../story/dto/response.js";
+import { type Message, messages } from "./schema.js";
 
 @Injectable()
 export class MessagePgRepository implements MessageRepository {
