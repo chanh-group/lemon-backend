@@ -28,11 +28,7 @@ export interface StoryRepository {
   getFriendUserIds(userId: string): Promise<string[]>;
   findPurgeable(limit: number): Promise<PurgeableStory[]>;
   deleteByIds(ids: string[]): Promise<number>;
-  addOrUpdateReaction(
-    storyId: string,
-    userId: string,
-    emoji: string,
-  ): Promise<StoryReactionResult>;
+  addOrUpdateReaction(storyId: string, userId: string, emoji: string): Promise<StoryReactionResult>;
   deleteReaction(storyId: string, userId: string): Promise<boolean>;
   findReactionsByStoryId(
     storyId: string,
@@ -44,4 +40,3 @@ export interface StoryRepository {
 }
 
 export const STORY_REPOSITORY: unique symbol = Symbol("STORY_REPOSITORY");
-

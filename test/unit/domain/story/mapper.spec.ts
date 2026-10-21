@@ -118,4 +118,3 @@ describe("groupStoriesByUser", () => {
     expect(feed[0].stories[0].reactionsCount).toBe(3);
   });
 });
-

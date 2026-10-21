@@ -7,13 +7,7 @@ import { users } from "../user/schema.js";
 import type { StoryReactionResponse } from "./dto/response.js";
 import type { UserSummary } from "../user/dto/response.js";
 import type { PurgeableStory, StoryReactionResult, StoryRepository } from "./repository.js";
-import {
-  type NewStory,
-  type Story,
-  stories,
-  storyReactions,
-  storyViews,
-} from "./schema.js";
+import { type NewStory, type Story, stories, storyReactions, storyViews } from "./schema.js";
 import { toCursorPage, type CursorPage } from "../shared.js";
 
 @Injectable()

@@ -366,11 +366,7 @@ export class StoryService {
     return this.storyRepo.findReactionsByStoryId(storyId, cursor, limit);
   }
 
-  async replyStory(
-    userId: string,
-    storyId: string,
-    dto: ReplyStoryDto,
-  ): Promise<MessageResponse> {
+  async replyStory(userId: string, storyId: string, dto: ReplyStoryDto): Promise<MessageResponse> {
     const story = await this.storyRepo.findActiveById(storyId);
     if (!story) {
       throw new BusinessError("STORY_NOT_FOUND");
@@ -403,4 +399,3 @@ export class StoryService {
     return message;
   }
 }
-

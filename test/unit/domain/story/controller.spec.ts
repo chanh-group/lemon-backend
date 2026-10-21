@@ -6,10 +6,7 @@ import type { App } from "supertest/types.js";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { StoryController } from "../../../../src/domain/story/controller.js";
 import { StoryService } from "../../../../src/domain/story/service.js";
-import type {
-  CreateStoryDto,
-  ReplyStoryDto,
-} from "../../../../src/domain/story/dto/request.js";
+import type { CreateStoryDto, ReplyStoryDto } from "../../../../src/domain/story/dto/request.js";
 import type {
   StoryItemResponse,
   StoryReactionResponse,

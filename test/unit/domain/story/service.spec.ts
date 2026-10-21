@@ -54,7 +54,11 @@ describe("StoryService", () => {
   >;
   let deleteReactionMock: Mock<(storyId: string, userId: string) => Promise<boolean>>;
   let findReactionsByStoryIdMock: Mock<
-    (storyId: string, cursor: string | undefined, limit: number) => Promise<CursorPage<StoryReactionResponse>>
+    (
+      storyId: string,
+      cursor: string | undefined,
+      limit: number,
+    ) => Promise<CursorPage<StoryReactionResponse>>
   >;
   let findUserReactionsMock: Mock<
     (userId: string, storyIds: string[]) => Promise<Map<string, string>>
@@ -652,17 +656,13 @@ describe("StoryService", () => {
     it("throws STORY_NOT_FOUND if the story is inactive or missing", async () => {
       findActiveByIdMock.mockResolvedValueOnce(null);
 
-      await expect(
-        service.reactStory("friend-1", "non-existent", "❤️"),
-      ).rejects.toMatchObject({
+      await expect(service.reactStory("friend-1", "non-existent", "❤️")).rejects.toMatchObject({
         code: "STORY_NOT_FOUND",
       });
     });
 
     it("throws CANNOT_REACT_OWN_STORY when reacting to own story", async () => {
-      await expect(
-        service.reactStory("user-owner-1", mockStory.id, "❤️"),
-      ).rejects.toMatchObject({
+      await expect(service.reactStory("user-owner-1", mockStory.id, "❤️")).rejects.toMatchObject({
         code: "CANNOT_REACT_OWN_STORY",
       });
     });
@@ -670,9 +670,7 @@ describe("StoryService", () => {
     it("throws STORY_REACT_FORBIDDEN when user is not a friend of the author", async () => {
       getFriendUserIdsMock.mockResolvedValueOnce(["friend-99"]);
 
-      await expect(
-        service.reactStory("stranger-user", mockStory.id, "❤️"),
-      ).rejects.toMatchObject({
+      await expect(service.reactStory("stranger-user", mockStory.id, "❤️")).rejects.toMatchObject({
         code: "STORY_REACT_FORBIDDEN",
       });
     });
@@ -766,17 +764,13 @@ describe("StoryService", () => {
     it("throws STORY_NOT_FOUND when story does not exist", async () => {
       findActiveByIdMock.mockResolvedValueOnce(null);
 
-      await expect(
-        service.unreactStory("friend-1", "non-existent"),
-      ).rejects.toMatchObject({
+      await expect(service.unreactStory("friend-1", "non-existent")).rejects.toMatchObject({
         code: "STORY_NOT_FOUND",
       });
     });
 
     it("throws CANNOT_REACT_OWN_STORY when unreacting own story", async () => {
-      await expect(
-        service.unreactStory("user-owner-1", mockStory.id),
-      ).rejects.toMatchObject({
+      await expect(service.unreactStory("user-owner-1", mockStory.id)).rejects.toMatchObject({
         code: "CANNOT_REACT_OWN_STORY",
       });
     });
@@ -784,9 +778,7 @@ describe("StoryService", () => {
     it("throws STORY_REACT_FORBIDDEN when caller is not a friend", async () => {
       getFriendUserIdsMock.mockResolvedValueOnce(["friend-99"]);
 
-      await expect(
-        service.unreactStory("stranger-user", mockStory.id),
-      ).rejects.toMatchObject({
+      await expect(service.unreactStory("stranger-user", mockStory.id)).rejects.toMatchObject({
         code: "STORY_REACT_FORBIDDEN",
       });
     });
@@ -881,9 +873,7 @@ describe("StoryService", () => {
     it("throws STORY_NOT_FOUND when replying to missing or expired story", async () => {
       findActiveByIdMock.mockResolvedValueOnce(null);
 
-      await expect(
-        service.replyStory("friend-1", "non-existent", replyDto),
-      ).rejects.toMatchObject({
+      await expect(service.replyStory("friend-1", "non-existent", replyDto)).rejects.toMatchObject({
         code: "STORY_NOT_FOUND",
       });
     });
@@ -899,9 +889,7 @@ describe("StoryService", () => {
     it("throws STORY_REPLY_FORBIDDEN when user is not a friend", async () => {
       getFriendUserIdsMock.mockResolvedValueOnce(["friend-99"]);
 
-      await expect(
-        service.replyStory("stranger", mockStory.id, replyDto),
-      ).rejects.toMatchObject({
+      await expect(service.replyStory("stranger", mockStory.id, replyDto)).rejects.toMatchObject({
         code: "STORY_REPLY_FORBIDDEN",
       });
     });
@@ -954,4 +942,3 @@ describe("StoryService", () => {
     });
   });
 });
-

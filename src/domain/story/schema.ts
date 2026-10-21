@@ -102,4 +102,3 @@ export type StoryView = typeof storyViews.$inferSelect;
 export type NewStoryView = typeof storyViews.$inferInsert;
 export type StoryReaction = typeof storyReactions.$inferSelect;
 export type NewStoryReaction = typeof storyReactions.$inferInsert;
-
