@@ -102,19 +102,17 @@ describe("groupStoriesByUser", () => {
     expect(feed[0].stories).toHaveLength(1);
   });
 
-  it("populates myReaction and reactionsCount from lookup maps", () => {
+  it("populates myReaction from the lookup map and leaves the global count out", () => {
     const userReactions = new Map([["s1", "🔥"]]);
-    const reactionCounts = new Map([["s1", 3]]);
 
     const feed = groupStoriesByUser(
       users,
       [makeStory({ id: "s1", userId: "u1" })],
       new Set(),
       userReactions,
-      reactionCounts,
     );
 
     expect(feed[0].stories[0].myReaction).toBe("🔥");
-    expect(feed[0].stories[0].reactionsCount).toBe(3);
+    expect(feed[0].stories[0]).not.toHaveProperty("reactionsCount");
   });
 });

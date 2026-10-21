@@ -49,7 +49,7 @@ describe("StoryService", () => {
   let isAcceptedFriendMock: Mock<(userAId: string, userBId: string) => Promise<boolean>>;
   let findPurgeableMock: Mock<(limit: number) => Promise<PurgeableStory[]>>;
   let deleteByIdsMock: Mock<(ids: string[]) => Promise<number>>;
-  let addOrUpdateReactionMock: Mock<
+  let addReactionWithViewMock: Mock<
     (storyId: string, userId: string, emoji: string) => Promise<StoryReactionResult>
   >;
   let deleteReactionMock: Mock<(storyId: string, userId: string) => Promise<boolean>>;
@@ -180,7 +180,7 @@ describe("StoryService", () => {
       .mockResolvedValue(true);
     findPurgeableMock = vi.fn<(limit: number) => Promise<PurgeableStory[]>>().mockResolvedValue([]);
     deleteByIdsMock = vi.fn<(ids: string[]) => Promise<number>>().mockResolvedValue(0);
-    addOrUpdateReactionMock = vi
+    addReactionWithViewMock = vi
       .fn<(storyId: string, userId: string, emoji: string) => Promise<StoryReactionResult>>()
       .mockResolvedValue({
         reaction: {
@@ -188,6 +188,7 @@ describe("StoryService", () => {
           userId: "user-1",
           emoji: "❤️",
           createdAt: new Date(),
+          updatedAt: new Date(),
         },
         isNew: true,
       });
@@ -242,7 +243,7 @@ describe("StoryService", () => {
       isAcceptedFriend: isAcceptedFriendMock,
       findPurgeable: findPurgeableMock,
       deleteByIds: deleteByIdsMock,
-      addOrUpdateReaction: addOrUpdateReactionMock,
+      addReactionWithView: addReactionWithViewMock,
       deleteReaction: deleteReactionMock,
       findReactionsByStoryId: findReactionsByStoryIdMock,
       findUserReactions: findUserReactionsMock,
@@ -485,6 +486,25 @@ describe("StoryService", () => {
       expect(findActiveByUserIdsMock).not.toHaveBeenCalled();
     });
 
+    it("keeps the global reaction count out of the cached feed", async () => {
+      getFriendUserIdsMock.mockResolvedValueOnce(["u1"]);
+      getBestEffortMock.mockResolvedValueOnce(null);
+      findActiveByUserIdsMock.mockResolvedValueOnce([mockStory]);
+      findUsersByIdsMock.mockResolvedValueOnce(
+        new Map([
+          [
+            "user-owner-1",
+            { id: "user-owner-1", username: "owner", fullName: "Owner", avatarUrl: null },
+          ],
+        ]),
+      );
+
+      const result = await service.getFeed("user-viewer-1");
+
+      expect(countReactionsMock).not.toHaveBeenCalled();
+      expect(result[0].stories[0]).not.toHaveProperty("reactionsCount");
+    });
+
     it("revives Date objects from a JSON round-tripped cached feed", async () => {
       const feed: UserStoryFeedResponse[] = [
         {
@@ -677,12 +697,13 @@ describe("StoryService", () => {
 
     it("saves reaction, marks viewed, invalidates feeds, and emits realtime event", async () => {
       const now = new Date("2026-10-14T02:00:00Z");
-      addOrUpdateReactionMock.mockResolvedValueOnce({
+      addReactionWithViewMock.mockResolvedValueOnce({
         reaction: {
           storyId: mockStory.id,
           userId: "friend-1",
           emoji: "🔥",
           createdAt: now,
+          updatedAt: now,
         },
         isNew: true,
       });
@@ -702,8 +723,7 @@ describe("StoryService", () => {
 
       const result = await service.reactStory("friend-1", mockStory.id, "🔥");
 
-      expect(markAsViewedMock).toHaveBeenCalledWith(mockStory.id, "friend-1");
-      expect(addOrUpdateReactionMock).toHaveBeenCalledWith(mockStory.id, "friend-1", "🔥");
+      expect(addReactionWithViewMock).toHaveBeenCalledWith(mockStory.id, "friend-1", "🔥");
       expect(deleteBestEffortMock).toHaveBeenCalledWith("stories:feed:friend-1");
       expect(deleteBestEffortMock).toHaveBeenCalledWith("stories:feed:user-owner-1");
       expect(emitStoryReactionMock).toHaveBeenCalledWith(
@@ -737,19 +757,42 @@ describe("StoryService", () => {
         "conv-direct-1",
         expect.objectContaining({ kind: "TEXT", body: "🔥" }),
         {
+          kind: "STORY_REACTION",
           storyId: mockStory.id,
           storyPreview: expect.objectContaining({ id: mockStory.id, kind: mockStory.kind }),
         },
       );
     });
 
+    it("keeps the reaction when the direct conversation mirror fails", async () => {
+      const now = new Date("2026-10-14T02:00:00Z");
+      addReactionWithViewMock.mockResolvedValueOnce({
+        reaction: {
+          storyId: mockStory.id,
+          userId: "friend-1",
+          emoji: "🔥",
+          createdAt: now,
+          updatedAt: now,
+        },
+        isNew: true,
+      });
+      getOrCreateDirectMock.mockRejectedValueOnce(new Error("chat unavailable"));
+
+      await expect(service.reactStory("friend-1", mockStory.id, "🔥")).resolves.toMatchObject({
+        storyId: mockStory.id,
+        emoji: "🔥",
+      });
+      expect(addReactionWithViewMock).toHaveBeenCalledWith(mockStory.id, "friend-1", "🔥");
+    });
+
     it("does not send another direct message when the reaction is only changed", async () => {
-      addOrUpdateReactionMock.mockResolvedValueOnce({
+      addReactionWithViewMock.mockResolvedValueOnce({
         reaction: {
           storyId: mockStory.id,
           userId: "friend-1",
           emoji: "😂",
           createdAt: new Date(),
+          updatedAt: new Date(),
         },
         isNew: false,
       });
@@ -930,6 +973,7 @@ describe("StoryService", () => {
           body: "Looking great!",
         }),
         {
+          kind: "STORY_REPLY",
           storyId: mockStory.id,
           storyPreview: expect.objectContaining({
             id: mockStory.id,

@@ -10,7 +10,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
-import { created, uuidV7 } from "../../utils/database.js";
+import { created, updated, uuidV7 } from "../../utils/database.js";
 import { users } from "../user/schema.js";
 import { STORY_MAX_CAPTION_LENGTH } from "./constants.js";
 
@@ -87,7 +87,10 @@ export const storyReactions = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     emoji: text("emoji").notNull(),
+    // `created_at` stays immutable: it is the moment the reaction was first
+    // made and the stable sort key of the reaction list.
     createdAt: created("created_at"),
+    updatedAt: updated("updated_at"),
   },
   (table) => [
     primaryKey({ columns: [table.storyId, table.userId] }),

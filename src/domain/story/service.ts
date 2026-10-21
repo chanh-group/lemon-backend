@@ -146,19 +146,16 @@ export class StoryService {
     ]);
 
     const storyIds = stories.map((s) => s.id);
-    const [viewedStoryIds, userReactionsMap, reactionsCountMap] = await Promise.all([
+    // The feed is cached per viewer for 60s: only viewer-specific data
+    // (`hasViewed`, `myReaction`) belongs in it. The global reaction count
+    // changes with other people's reactions, so it is served fresh by
+    // `GET /stories/:id` instead of being cached here.
+    const [viewedStoryIds, userReactionsMap] = await Promise.all([
       this.storyRepo.findViewedStoryIds(userId, storyIds),
       this.storyRepo.findUserReactions(userId, storyIds),
-      this.storyRepo.countReactions(storyIds),
     ]);
 
-    const feed = groupStoriesByUser(
-      usersMap,
-      stories,
-      viewedStoryIds,
-      userReactionsMap,
-      reactionsCountMap,
-    );
+    const feed = groupStoriesByUser(usersMap, stories, viewedStoryIds, userReactionsMap);
 
     await this.cache.setBestEffort(cacheKey, feed, STORY_FEED_TTL_SECS);
 
@@ -263,8 +260,7 @@ export class StoryService {
       throw new BusinessError("STORY_REACT_FORBIDDEN");
     }
 
-    await this.storyRepo.markAsViewed(storyId, userId);
-    const { reaction, isNew } = await this.storyRepo.addOrUpdateReaction(storyId, userId, emoji);
+    const { reaction, isNew } = await this.storyRepo.addReactionWithView(storyId, userId, emoji);
 
     await Promise.all([
       this.cache.deleteBestEffort(storyFeedKey(userId)),
@@ -285,7 +281,7 @@ export class StoryService {
     }
 
     if (isNew) {
-      await this.sendReactionToDirectConversation(userId, story, emoji);
+      await this.mirrorReactionToDirectConversation(userId, story, emoji);
     }
 
     return {
@@ -297,21 +293,32 @@ export class StoryService {
 
   /**
    * A story reaction is routed into the author's direct conversation (Meta /
-   * Signal behaviour, `docs/STORIES_NOTES.md` §5.2.A): the author sees the
+   * WhatsApp behaviour, `docs/STORIES_NOTES.md` §5.2.A): the author sees the
    * reaction inside the chat thread, not only in the story UI.
+   *
+   * Best effort: the reaction is already stored, so a failing chat must not
+   * turn a successful reaction into an error.
    */
-  private async sendReactionToDirectConversation(
+  private async mirrorReactionToDirectConversation(
     userId: string,
     story: Story,
     emoji: string,
   ): Promise<void> {
-    const conv = await this.conversationService.getOrCreateDirect(userId, story.userId);
-    await this.messageService.sendMessage(
-      userId,
-      conv.id,
-      { kind: "TEXT", body: emoji },
-      { storyId: story.id, storyPreview: toStoryPreview(story) },
-    );
+    try {
+      const conv = await this.conversationService.getOrCreateDirect(userId, story.userId);
+      await this.messageService.sendMessage(
+        userId,
+        conv.id,
+        { kind: "TEXT", body: emoji },
+        { kind: "STORY_REACTION", storyId: story.id, storyPreview: toStoryPreview(story) },
+      );
+    } catch (err) {
+      this.logger.warn("Failed to mirror the story reaction into the direct conversation", {
+        storyId: story.id,
+        userId,
+        err,
+      });
+    }
   }
 
   async unreactStory(userId: string, storyId: string): Promise<void> {
@@ -391,7 +398,7 @@ export class StoryService {
       userId,
       conv.id,
       { kind: "TEXT", body: dto.body },
-      { storyId: story.id, storyPreview },
+      { kind: "STORY_REPLY", storyId: story.id, storyPreview },
     );
 
     await this.cache.deleteBestEffort(storyFeedKey(userId));

@@ -3,7 +3,7 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
 import type { DrizzleDb } from "../../../../src/configs/database.js";
 import { StoryPgRepository } from "../../../../src/domain/story/pg.js";
-import { stories, storyReactions } from "../../../../src/domain/story/schema.js";
+import { stories, storyReactions, storyViews } from "../../../../src/domain/story/schema.js";
 import { friendships } from "../../../../src/domain/friend/schema.js";
 
 function makeDb(rows: unknown[] = []) {
@@ -21,15 +21,24 @@ function makeDb(rows: unknown[] = []) {
   const fromMock = vi.fn(() => ({ where: whereMock, innerJoin: joinMock }));
   const selectMock = vi.fn(() => ({ from: fromMock }));
   const returningMock = vi.fn();
-  const onConflictMock = vi.fn(() => ({ returning: returningMock }));
-  const valuesMock = vi.fn(() => ({ onConflictDoUpdate: onConflictMock }));
+  const onConflictMock = vi.fn<(conflict: unknown) => unknown>(() => ({
+    returning: returningMock,
+  }));
+  const onConflictDoNothingMock = vi.fn(() => Promise.resolve());
+  const valuesMock = vi.fn(() => ({
+    onConflictDoUpdate: onConflictMock,
+    onConflictDoNothing: onConflictDoNothingMock,
+  }));
   const insertMock = vi.fn(() => ({ values: valuesMock }));
   const deleteWhereMock = vi.fn<(condition: SQL) => unknown>(() => ({ returning: returningMock }));
   const deleteMock = vi.fn(() => ({ where: deleteWhereMock }));
+  const tx = { select: selectMock, insert: insertMock };
+  const transactionMock = vi.fn((cb: (t: typeof tx) => Promise<unknown>) => cb(tx));
   const db = {
     select: selectMock,
     delete: deleteMock,
     insert: insertMock,
+    transaction: transactionMock,
   } as unknown as DrizzleDb;
   return {
     db,
@@ -44,6 +53,7 @@ function makeDb(rows: unknown[] = []) {
     valuesMock,
     onConflictMock,
     returningMock,
+    transactionMock,
   };
 }
 
@@ -117,16 +127,26 @@ describe("StoryPgRepository purge queries", () => {
   });
 
   describe("reaction queries", () => {
-    it("addOrUpdateReaction upserts on the story+user pair and reports a new row", async () => {
-      const { db, insertMock, valuesMock, onConflictMock, returningMock } = makeDb();
+    it("addReactionWithView stores the view and the reaction in one transaction", async () => {
+      const { db, insertMock, valuesMock, onConflictMock, returningMock, transactionMock } =
+        makeDb();
       const createdAt = new Date("2026-10-14T02:00:00Z");
       returningMock.mockResolvedValue([
-        { storyId: "s1", userId: "u1", emoji: "🔥", createdAt, isNew: true },
+        {
+          storyId: "s1",
+          userId: "u1",
+          emoji: "🔥",
+          createdAt,
+          updatedAt: createdAt,
+          isNew: true,
+        },
       ]);
       const repo = new StoryPgRepository(db);
 
-      const result = await repo.addOrUpdateReaction("s1", "u1", "🔥");
+      const result = await repo.addReactionWithView("s1", "u1", "🔥");
 
+      expect(transactionMock).toHaveBeenCalledTimes(1);
+      expect(insertMock).toHaveBeenCalledWith(storyViews);
       expect(insertMock).toHaveBeenCalledWith(storyReactions);
       expect(valuesMock).toHaveBeenCalledWith(
         expect.objectContaining({ storyId: "s1", userId: "u1", emoji: "🔥" }),
@@ -137,10 +157,39 @@ describe("StoryPgRepository purge queries", () => {
         }),
       );
       expect(result.isNew).toBe(true);
-      expect(result.reaction).toEqual({ storyId: "s1", userId: "u1", emoji: "🔥", createdAt });
+      expect(result.reaction).toEqual({
+        storyId: "s1",
+        userId: "u1",
+        emoji: "🔥",
+        createdAt,
+        updatedAt: createdAt,
+      });
     });
 
-    it("addOrUpdateReaction reports an updated row when the reaction already existed", async () => {
+    it("addReactionWithView keeps the original created_at when the emoji changes", async () => {
+      const { db, onConflictMock, returningMock } = makeDb();
+      returningMock.mockResolvedValue([
+        {
+          storyId: "s1",
+          userId: "u1",
+          emoji: "😂",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          isNew: false,
+        },
+      ]);
+      const repo = new StoryPgRepository(db);
+
+      await repo.addReactionWithView("s1", "u1", "😂");
+
+      const conflict = onConflictMock.mock.calls[0][0] as {
+        set: Record<string, unknown>;
+      };
+      expect(conflict.set).not.toHaveProperty("createdAt");
+      expect(conflict.set).toHaveProperty("updatedAt");
+    });
+
+    it("addReactionWithView reports an updated row when the reaction already existed", async () => {
       const { db, returningMock } = makeDb();
       returningMock.mockResolvedValue([
         {
@@ -148,12 +197,13 @@ describe("StoryPgRepository purge queries", () => {
           userId: "u1",
           emoji: "😂",
           createdAt: new Date(),
+          updatedAt: new Date(),
           isNew: false,
         },
       ]);
       const repo = new StoryPgRepository(db);
 
-      const result = await repo.addOrUpdateReaction("s1", "u1", "😂");
+      const result = await repo.addReactionWithView("s1", "u1", "😂");
 
       expect(result.isNew).toBe(false);
       expect(result.reaction.emoji).toBe("😂");

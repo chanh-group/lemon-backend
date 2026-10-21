@@ -27,6 +27,8 @@ export const messageKindEnum = pgEnum("message_kind", [
   "AUDIO",
   "FILE",
   "SYSTEM",
+  "STORY_REPLY",
+  "STORY_REACTION",
 ]);
 
 export const attachmentKindEnum = pgEnum("attachment_kind", ["IMAGE", "VIDEO", "AUDIO", "FILE"]);

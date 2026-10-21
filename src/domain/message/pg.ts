@@ -7,7 +7,7 @@ import { isForeignKeyViolation, isUniqueViolation } from "../../utils/errors/pg.
 import { conversations } from "../conversation/schema.js";
 import { friendships } from "../friend/schema.js";
 import { DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE } from "../pagination.constants.js";
-import { ATTACHMENT_PREVIEW_TOKEN } from "./constants.js";
+import { ATTACHMENT_PREVIEW_TOKEN, STORY_REACTION_PREVIEW_TOKEN } from "./constants.js";
 import type {
   CreatedMessageResult,
   MessageRepository,
@@ -15,6 +15,16 @@ import type {
 } from "./repository.js";
 import type { StoryPreview } from "../story/dto/response.js";
 import { type Message, messages } from "./schema.js";
+
+/**
+ * Conversation inbox preview. A story reaction carries the emoji as its body,
+ * which is meaningless out of context — it is stored as a stable marker the
+ * client localizes, like the attachment marker.
+ */
+function toConversationPreview(kind: Message["kind"], body: string | null): string {
+  if (kind === "STORY_REACTION") return STORY_REACTION_PREVIEW_TOKEN;
+  return body ? body.slice(0, 80) : ATTACHMENT_PREVIEW_TOKEN;
+}
 
 @Injectable()
 export class MessagePgRepository implements MessageRepository {
@@ -43,7 +53,15 @@ export class MessagePgRepository implements MessageRepository {
     conversationId: string;
     senderId: string;
     body?: string | null;
-    kind?: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "FILE" | "SYSTEM";
+    kind?:
+      | "TEXT"
+      | "IMAGE"
+      | "VIDEO"
+      | "AUDIO"
+      | "FILE"
+      | "SYSTEM"
+      | "STORY_REPLY"
+      | "STORY_REACTION";
     clientMsgId?: string | null;
     replyToId?: string | null;
     requiredFriendship?: { userAId: string; userBId: string };
@@ -100,7 +118,7 @@ export class MessagePgRepository implements MessageRepository {
           .returning();
 
         // 3. Atomically update parent conversation inbox fields
-        const preview = newMsg.body ? newMsg.body.slice(0, 80) : ATTACHMENT_PREVIEW_TOKEN;
+        const preview = toConversationPreview(newMsg.kind, newMsg.body);
         await tx
           .update(conversations)
           .set({

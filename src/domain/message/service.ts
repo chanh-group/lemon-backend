@@ -26,8 +26,11 @@ export type { SendMessageDto };
  * Server-derived reference to the story a message quotes. Never accepted from
  * an HTTP body: the snapshot is captured by the story domain, so a client can
  * never attach a story (or a fabricated preview) it is not allowed to see.
+ * The kind is decided here as well — the public API cannot ask for a
+ * `STORY_REPLY` / `STORY_REACTION` message.
  */
 export interface StoryReplyRef {
+  kind: "STORY_REPLY" | "STORY_REACTION";
   storyId: string;
   storyPreview: StoryPreview;
 }
@@ -85,7 +88,7 @@ export class MessageService {
       conversationId,
       senderId,
       body: dto.body,
-      kind: dto.kind ?? "TEXT",
+      kind: story?.kind ?? dto.kind ?? "TEXT",
       clientMsgId: dto.clientMsgId,
       replyToId: dto.replyToId,
       ...(directPartnerId

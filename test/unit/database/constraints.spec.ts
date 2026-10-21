@@ -65,7 +65,7 @@ describe("Drizzle Table Constraints and Schema Metadata Verification", () => {
       expect(schema.participantRoleEnum.enumValues).toEqual(["MEMBER", "ADMIN", "OWNER"]);
     });
 
-    it("messageKindEnum should contain all 6 message types", () => {
+    it("messageKindEnum should contain all 8 message types", () => {
       expect(schema.messageKindEnum.enumValues).toEqual([
         "TEXT",
         "IMAGE",
@@ -73,6 +73,8 @@ describe("Drizzle Table Constraints and Schema Metadata Verification", () => {
         "AUDIO",
         "FILE",
         "SYSTEM",
+        "STORY_REPLY",
+        "STORY_REACTION",
       ]);
     });
 

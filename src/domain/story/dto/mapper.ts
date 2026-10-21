@@ -60,7 +60,6 @@ export function groupStoriesByUser(
   stories: Story[],
   viewedStoryIds: Set<string>,
   userReactionsMap?: Map<string, string>,
-  reactionsCountMap?: Map<string, number>,
 ): UserStoryFeedResponse[] {
   const userStoriesMap = new Map<string, StoryItemResponse[]>();
 
@@ -71,7 +70,6 @@ export function groupStoriesByUser(
         story,
         viewedStoryIds.has(story.id),
         userReactionsMap?.get(story.id) ?? null,
-        reactionsCountMap?.get(story.id) ?? 0,
       ),
     );
     userStoriesMap.set(story.userId, list);

@@ -196,36 +196,45 @@ export class StoryPgRepository implements StoryRepository {
     return rows.length;
   }
 
-  async addOrUpdateReaction(
+  async addReactionWithView(
     storyId: string,
     userId: string,
     emoji: string,
   ): Promise<StoryReactionResult> {
-    const [row] = await this.db
-      .insert(storyReactions)
-      .values({ storyId, userId, emoji, createdAt: new Date() })
-      .onConflictDoUpdate({
-        target: [storyReactions.storyId, storyReactions.userId],
-        set: { emoji, createdAt: new Date() },
-      })
-      .returning({
-        storyId: storyReactions.storyId,
-        userId: storyReactions.userId,
-        emoji: storyReactions.emoji,
-        createdAt: storyReactions.createdAt,
-        // `xmax = 0` is true only for a freshly inserted row; an upsert that
-        // updated an existing reaction sets xmax to the writing xid.
-        isNew: sql<boolean>`xmax = 0`,
-      });
-    return {
-      reaction: {
-        storyId: row.storyId,
-        userId: row.userId,
-        emoji: row.emoji,
-        createdAt: row.createdAt,
-      },
-      isNew: row.isNew,
-    };
+    const now = new Date();
+    return this.db.transaction(async (tx) => {
+      await tx.insert(storyViews).values({ storyId, userId, viewedAt: now }).onConflictDoNothing();
+
+      const [row] = await tx
+        .insert(storyReactions)
+        .values({ storyId, userId, emoji, createdAt: now, updatedAt: now })
+        .onConflictDoUpdate({
+          target: [storyReactions.storyId, storyReactions.userId],
+          // `created_at` is kept: it is the moment of the first reaction and
+          // the stable sort key of the reaction list.
+          set: { emoji, updatedAt: now },
+        })
+        .returning({
+          storyId: storyReactions.storyId,
+          userId: storyReactions.userId,
+          emoji: storyReactions.emoji,
+          createdAt: storyReactions.createdAt,
+          updatedAt: storyReactions.updatedAt,
+          // `xmax = 0` is true only for a freshly inserted row; an upsert that
+          // updated an existing reaction sets xmax to the writing xid.
+          isNew: sql<boolean>`xmax = 0`,
+        });
+      return {
+        reaction: {
+          storyId: row.storyId,
+          userId: row.userId,
+          emoji: row.emoji,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+        },
+        isNew: row.isNew,
+      };
+    });
   }
 
   async deleteReaction(storyId: string, userId: string): Promise<boolean> {

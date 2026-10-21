@@ -28,7 +28,8 @@ export interface StoryRepository {
   getFriendUserIds(userId: string): Promise<string[]>;
   findPurgeable(limit: number): Promise<PurgeableStory[]>;
   deleteByIds(ids: string[]): Promise<number>;
-  addOrUpdateReaction(storyId: string, userId: string, emoji: string): Promise<StoryReactionResult>;
+  /** Marks the story as viewed and upserts the reaction in one transaction. */
+  addReactionWithView(storyId: string, userId: string, emoji: string): Promise<StoryReactionResult>;
   deleteReaction(storyId: string, userId: string): Promise<boolean>;
   findReactionsByStoryId(
     storyId: string,
