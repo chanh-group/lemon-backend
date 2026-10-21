@@ -14,7 +14,7 @@ import {
   storyReactions,
   storyViews,
 } from "./schema.js";
-import { toCursorPage } from "../shared.js";
+import { toCursorPage, type CursorPage } from "../shared.js";
 
 @Injectable()
 export class StoryPgRepository implements StoryRepository {
@@ -242,7 +242,23 @@ export class StoryPgRepository implements StoryRepository {
     return rows.length > 0;
   }
 
-  async findReactionsByStoryId(storyId: string): Promise<StoryReactionResponse[]> {
+  async findReactionsByStoryId(
+    storyId: string,
+    cursor: string | undefined,
+    limit: number,
+  ): Promise<CursorPage<StoryReactionResponse>> {
+    const cursorCreatedAt = cursor
+      ? sql`(SELECT sr.created_at FROM story_reactions sr WHERE sr.story_id = ${storyId} AND sr.user_id = ${cursor})`
+      : undefined;
+    const conditions = [eq(storyReactions.storyId, storyId)];
+    if (cursor && cursorCreatedAt) {
+      conditions.push(
+        or(
+          lt(storyReactions.createdAt, cursorCreatedAt),
+          and(eq(storyReactions.createdAt, cursorCreatedAt), lt(users.id, cursor)),
+        )!,
+      );
+    }
     const rows = await this.db
       .select({
         userId: users.id,
@@ -254,10 +270,11 @@ export class StoryPgRepository implements StoryRepository {
       })
       .from(storyReactions)
       .innerJoin(users, eq(storyReactions.userId, users.id))
-      .where(eq(storyReactions.storyId, storyId))
-      .orderBy(desc(storyReactions.createdAt));
+      .where(and(...conditions))
+      .orderBy(desc(storyReactions.createdAt), desc(users.id))
+      .limit(limit + 1);
 
-    return rows.map((r) => ({
+    const reactions = rows.map((r) => ({
       user: {
         id: r.userId,
         username: r.username,
@@ -267,6 +284,7 @@ export class StoryPgRepository implements StoryRepository {
       emoji: r.emoji,
       createdAt: r.createdAt,
     }));
+    return toCursorPage(reactions, limit, (reaction) => reaction.user.id);
   }
 
   async findUserReactions(userId: string, storyIds: string[]): Promise<Map<string, string>> {

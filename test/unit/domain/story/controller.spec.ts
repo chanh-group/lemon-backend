@@ -17,7 +17,9 @@ import type {
   MyStoryReactionResponse,
   UserStoryFeedResponse,
 } from "../../../../src/domain/story/dto/response.js";
+import type { CursorPage } from "../../../../src/domain/shared.js";
 import type { MessageResponse } from "../../../../src/domain/message/dto/response.js";
+import { MemoryRateLimiter, RATE_LIMITER } from "../../../../src/middleware/ratelimit.js";
 import { standardSchemaPipe } from "../../../../src/utils/validation.js";
 
 describe("StoryController", () => {
@@ -40,7 +42,14 @@ describe("StoryController", () => {
     (userId: string, storyId: string, emoji: string) => Promise<MyStoryReactionResponse>
   >;
   let unreactStoryMock: Mock<(userId: string, storyId: string) => Promise<void>>;
-  let getReactionsMock: Mock<(userId: string, storyId: string) => Promise<StoryReactionResponse[]>>;
+  let getReactionsMock: Mock<
+    (
+      userId: string,
+      storyId: string,
+      cursor: string | undefined,
+      limit: number,
+    ) => Promise<CursorPage<StoryReactionResponse>>
+  >;
   let replyStoryMock: Mock<
     (userId: string, storyId: string, dto: ReplyStoryDto) => Promise<MessageResponse>
   >;
@@ -119,19 +128,29 @@ describe("StoryController", () => {
       .fn<(userId: string, storyId: string) => Promise<void>>()
       .mockResolvedValue(undefined);
     getReactionsMock = vi
-      .fn<(userId: string, storyId: string) => Promise<StoryReactionResponse[]>>()
-      .mockResolvedValue([
-        {
-          user: {
-            id: "viewer-1",
-            username: "friend1",
-            fullName: "Friend One",
-            avatarUrl: null,
+      .fn<
+        (
+          userId: string,
+          storyId: string,
+          cursor: string | undefined,
+          limit: number,
+        ) => Promise<CursorPage<StoryReactionResponse>>
+      >()
+      .mockResolvedValue({
+        items: [
+          {
+            user: {
+              id: "viewer-1",
+              username: "friend1",
+              fullName: "Friend One",
+              avatarUrl: null,
+            },
+            emoji: "❤️",
+            createdAt: new Date("2026-10-14T01:00:00Z"),
           },
-          emoji: "❤️",
-          createdAt: new Date("2026-10-14T01:00:00Z"),
-        },
-      ]);
+        ],
+        hasMore: false,
+      });
     replyStoryMock = vi
       .fn<(userId: string, storyId: string, dto: ReplyStoryDto) => Promise<MessageResponse>>()
       .mockResolvedValue({
@@ -168,7 +187,7 @@ describe("StoryController", () => {
       replyStory: replyStoryMock,
     } as unknown as StoryService;
 
-    controller = new StoryController(mockService);
+    controller = new StoryController(mockService, new MemoryRateLimiter());
   });
 
   describe("createStory", () => {
@@ -357,12 +376,14 @@ describe("StoryController", () => {
       const result = await controller.getReactions(
         { user: { id: "user-1" } },
         mockStoryItem.id,
+        undefined,
+        "25",
       );
 
-      expect(getReactionsMock).toHaveBeenCalledWith("user-1", mockStoryItem.id);
+      expect(getReactionsMock).toHaveBeenCalledWith("user-1", mockStoryItem.id, undefined, 25);
       expect(result.success).toBe(true);
       expect(result.message).toBe("OK");
-      expect(result.data).toHaveLength(1);
+      expect(result.data.items).toHaveLength(1);
     });
   });
 
@@ -432,7 +453,10 @@ describe("StoryController", () => {
 
       const moduleRef = await Test.createTestingModule({
         controllers: [StoryController],
-        providers: [{ provide: StoryService, useValue: mockService }],
+        providers: [
+          { provide: StoryService, useValue: mockService },
+          { provide: RATE_LIMITER, useValue: new MemoryRateLimiter() },
+        ],
       }).compile();
 
       app = moduleRef.createNestApplication();

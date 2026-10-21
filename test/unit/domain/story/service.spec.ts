@@ -10,6 +10,7 @@ import type {
   StoryViewerResponse,
   UserStoryFeedResponse,
 } from "../../../../src/domain/story/dto/response.js";
+import type { CursorPage } from "../../../../src/domain/shared.js";
 import { StorageError } from "../../../../src/utils/storage/error.js";
 import type { StorageService } from "../../../../src/utils/storage/store.js";
 import type { ConversationService } from "../../../../src/domain/conversation/service.js";
@@ -52,7 +53,9 @@ describe("StoryService", () => {
     (storyId: string, userId: string, emoji: string) => Promise<StoryReactionResult>
   >;
   let deleteReactionMock: Mock<(storyId: string, userId: string) => Promise<boolean>>;
-  let findReactionsByStoryIdMock: Mock<(storyId: string) => Promise<StoryReactionResponse[]>>;
+  let findReactionsByStoryIdMock: Mock<
+    (storyId: string, cursor: string | undefined, limit: number) => Promise<CursorPage<StoryReactionResponse>>
+  >;
   let findUserReactionsMock: Mock<
     (userId: string, storyIds: string[]) => Promise<Map<string, string>>
   >;
@@ -187,8 +190,14 @@ describe("StoryService", () => {
       .fn<(storyId: string, userId: string) => Promise<boolean>>()
       .mockResolvedValue(true);
     findReactionsByStoryIdMock = vi
-      .fn<(storyId: string) => Promise<StoryReactionResponse[]>>()
-      .mockResolvedValue([]);
+      .fn<
+        (
+          storyId: string,
+          cursor: string | undefined,
+          limit: number,
+        ) => Promise<CursorPage<StoryReactionResponse>>
+      >()
+      .mockResolvedValue({ items: [], hasMore: false });
     findUserReactionsMock = vi
       .fn<(userId: string, storyIds: string[]) => Promise<Map<string, string>>>()
       .mockResolvedValue(new Map());
@@ -637,14 +646,6 @@ describe("StoryService", () => {
   });
 
   describe("reactStory", () => {
-    it("rejects an invalid emoji", async () => {
-      await expect(
-        service.reactStory("friend-1", mockStory.id, "🎉"),
-      ).rejects.toMatchObject({
-        code: "INVALID_EMOJI",
-      });
-    });
-
     it("throws STORY_NOT_FOUND if the story is inactive or missing", async () => {
       findActiveByIdMock.mockResolvedValueOnce(null);
 
@@ -797,38 +798,41 @@ describe("StoryService", () => {
   });
 
   describe("getReactions", () => {
-    it("throws STORY_NOT_FOUND when story does not exist", async () => {
-      findByIdMock.mockResolvedValueOnce(null);
+    it("throws STORY_NOT_FOUND when the story is missing or expired", async () => {
+      findActiveByIdMock.mockResolvedValueOnce(null);
 
       await expect(
-        service.getReactions("user-owner-1", "non-existent"),
+        service.getReactions("user-owner-1", "non-existent", undefined, 20),
       ).rejects.toMatchObject({
         code: "STORY_NOT_FOUND",
       });
     });
 
-    it("throws STORY_VIEWERS_FORBIDDEN when non-owner requests reactions", async () => {
+    it("throws STORY_REACTIONS_FORBIDDEN when a non-owner requests reactions", async () => {
       await expect(
-        service.getReactions("intruder", mockStory.id),
+        service.getReactions("intruder", mockStory.id, undefined, 20),
       ).rejects.toMatchObject({
-        code: "STORY_VIEWERS_FORBIDDEN",
+        code: "STORY_REACTIONS_FORBIDDEN",
       });
     });
 
-    it("returns reactions list for story owner", async () => {
-      const reactions = [
-        {
-          user: { id: "friend-1", username: "f1", fullName: "F1", avatarUrl: null },
-          emoji: "❤️",
-          createdAt: new Date(),
-        },
-      ];
-      findReactionsByStoryIdMock.mockResolvedValueOnce(reactions);
+    it("returns the paginated reactions for the story owner", async () => {
+      const page: CursorPage<StoryReactionResponse> = {
+        items: [
+          {
+            user: { id: "friend-1", username: "f1", fullName: "F1", avatarUrl: null },
+            emoji: "❤️",
+            createdAt: new Date(),
+          },
+        ],
+        hasMore: false,
+      };
+      findReactionsByStoryIdMock.mockResolvedValueOnce(page);
 
-      const result = await service.getReactions("user-owner-1", mockStory.id);
+      const result = await service.getReactions("user-owner-1", mockStory.id, undefined, 20);
 
-      expect(findReactionsByStoryIdMock).toHaveBeenCalledWith(mockStory.id);
-      expect(result).toEqual(reactions);
+      expect(findReactionsByStoryIdMock).toHaveBeenCalledWith(mockStory.id, undefined, 20);
+      expect(result).toEqual(page);
     });
   });
 

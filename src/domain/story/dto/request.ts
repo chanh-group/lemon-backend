@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { vmsg } from "../../../utils/validation.js";
-import { STORY_MAX_BACKGROUND_LENGTH, STORY_MAX_CAPTION_LENGTH } from "../constants.js";
+import { MESSAGE_MAX_BODY_LENGTH } from "../../message/constants.js";
+import {
+  ALLOWED_STORY_EMOJIS,
+  STORY_MAX_BACKGROUND_LENGTH,
+  STORY_MAX_CAPTION_LENGTH,
+} from "../constants.js";
 
 export const createStorySchema = z.object({
   kind: z.enum(["IMAGE", "VIDEO", "TEXT"]),
@@ -14,25 +19,8 @@ export const createStorySchema = z.object({
 
 export type CreateStoryDto = z.infer<typeof createStorySchema>;
 
-export const ALLOWED_STORY_EMOJIS = [
-  "👍",
-  "❤️",
-  "🥰",
-  "😆",
-  "😂",
-  "😮",
-  "😢",
-  "😡",
-  "🔥",
-  "👏",
-] as const;
-
 export const reactStorySchema = z.object({
-  emoji: z
-    .string()
-    .trim()
-    .min(1, vmsg("VALIDATION_REQUIRED"))
-    .max(32, vmsg("VALIDATION_MAX", { max: "32" })),
+  emoji: z.enum(ALLOWED_STORY_EMOJIS),
 });
 
 export type ReactStoryDto = z.infer<typeof reactStorySchema>;
@@ -42,7 +30,10 @@ export const replyStorySchema = z.object({
     .string()
     .trim()
     .min(1, vmsg("VALIDATION_MESSAGE_BODY_REQUIRED"))
-    .max(4000, vmsg("VALIDATION_BODY_MAX", { max: "4000" })),
+    .max(
+      MESSAGE_MAX_BODY_LENGTH,
+      vmsg("VALIDATION_BODY_MAX", { max: String(MESSAGE_MAX_BODY_LENGTH) }),
+    ),
 });
 
 export type ReplyStoryDto = z.infer<typeof replyStorySchema>;

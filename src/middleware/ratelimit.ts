@@ -19,6 +19,10 @@ export const RATE_LIMIT_PRESIGN_IP_MAX = 60;
 export const RATE_LIMIT_FRIEND_REQUEST_USER_MAX = 10;
 export const RATE_LIMIT_FRIEND_REQUEST_IP_MAX = 60;
 export const RATE_LIMIT_FRIEND_REQUEST_WINDOW_SECS = 3600;
+export const RATE_LIMIT_STORY_REACT_USER_MAX = 30;
+export const RATE_LIMIT_STORY_REACT_IP_MAX = 120;
+export const RATE_LIMIT_STORY_REPLY_USER_MAX = 20;
+export const RATE_LIMIT_STORY_REPLY_IP_MAX = 60;
 
 export interface RateLimiter {
   checkIpLimit(action: string, ip: string, max: number, windowSecs: number): Promise<boolean>;

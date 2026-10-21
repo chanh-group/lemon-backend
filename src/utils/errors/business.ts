@@ -44,7 +44,7 @@ export const BUSINESS_STATUS: Record<BusinessCode, HttpStatus> = {
   CANNOT_REPLY_OWN_STORY: HttpStatus.BAD_REQUEST,
   STORY_REACT_FORBIDDEN: HttpStatus.FORBIDDEN,
   CANNOT_REACT_OWN_STORY: HttpStatus.BAD_REQUEST,
-  INVALID_EMOJI: HttpStatus.BAD_REQUEST,
+  STORY_REACTIONS_FORBIDDEN: HttpStatus.FORBIDDEN,
 };
 
 export interface ValidationIssue {

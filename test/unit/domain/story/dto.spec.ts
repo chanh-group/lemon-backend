@@ -84,20 +84,20 @@ describe("reactStorySchema", () => {
     expect(result.data.emoji).toBe("❤️");
   });
 
-  it("trims whitespace from emoji", () => {
+  it("rejects an emoji outside the allowlist", () => {
+    const result = reactStorySchema.safeParse({ emoji: "🎉" });
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("expected failure");
+    expect(result.error.issues[0]?.message).toBe("VALIDATION_ENUM");
+  });
+
+  it("rejects an emoji padded with whitespace", () => {
     const result = reactStorySchema.safeParse({ emoji: "  🔥  " });
-    expect(result.success).toBe(true);
-    if (!result.success) throw new Error("expected success");
-    expect(result.data.emoji).toBe("🔥");
+    expect(result.success).toBe(false);
   });
 
   it("rejects empty emoji string", () => {
     const result = reactStorySchema.safeParse({ emoji: "   " });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects emoji exceeding max length", () => {
-    const result = reactStorySchema.safeParse({ emoji: "a".repeat(33) });
     expect(result.success).toBe(false);
   });
 });

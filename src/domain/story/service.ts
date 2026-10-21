@@ -22,7 +22,8 @@ import {
   toStoryItemResponse,
   toStoryPreview,
 } from "./dto/mapper.js";
-import { ALLOWED_STORY_EMOJIS, type CreateStoryDto, type ReplyStoryDto } from "./dto/request.js";
+import type { StoryEmoji } from "./constants.js";
+import type { CreateStoryDto, ReplyStoryDto } from "./dto/request.js";
 import type {
   MyStoryReactionResponse,
   StoryItemResponse,
@@ -31,6 +32,7 @@ import type {
 } from "./dto/response.js";
 import { STORY_REPOSITORY, type StoryRepository } from "./repository.js";
 import type { NewStory, Story } from "./schema.js";
+import type { CursorPage } from "../shared.js";
 
 const BYTES_PER_MB = 1024 * 1024;
 
@@ -245,12 +247,8 @@ export class StoryService {
   async reactStory(
     userId: string,
     storyId: string,
-    emoji: string,
+    emoji: StoryEmoji,
   ): Promise<MyStoryReactionResponse> {
-    if (!ALLOWED_STORY_EMOJIS.includes(emoji as (typeof ALLOWED_STORY_EMOJIS)[number])) {
-      throw new BusinessError("INVALID_EMOJI");
-    }
-
     const story = await this.storyRepo.findActiveById(storyId);
     if (!story) {
       throw new BusinessError("STORY_NOT_FOUND");
@@ -331,25 +329,41 @@ export class StoryService {
       throw new BusinessError("STORY_REACT_FORBIDDEN");
     }
 
-    await this.storyRepo.deleteReaction(storyId, userId);
+    const removed = await this.storyRepo.deleteReaction(storyId, userId);
+    if (!removed) {
+      return;
+    }
 
     await Promise.all([
       this.cache.deleteBestEffort(storyFeedKey(userId)),
       this.cache.deleteBestEffort(storyFeedKey(story.userId)),
     ]);
+
+    const usersMap = await this.storyRepo.findUsersByIds([userId]);
+    const userSummary = usersMap.get(userId);
+    if (userSummary) {
+      const payload = { storyId, user: userSummary };
+      this.realtimeService.emitStoryReactionRemoved(story.userId, payload);
+      this.realtimeService.emitStoryReactionRemoved(userId, payload);
+    }
   }
 
-  async getReactions(userId: string, storyId: string): Promise<StoryReactionResponse[]> {
-    const story = await this.storyRepo.findById(storyId);
+  async getReactions(
+    userId: string,
+    storyId: string,
+    cursor: string | undefined,
+    limit: number,
+  ): Promise<CursorPage<StoryReactionResponse>> {
+    const story = await this.storyRepo.findActiveById(storyId);
     if (!story) {
       throw new BusinessError("STORY_NOT_FOUND");
     }
 
     if (story.userId !== userId) {
-      throw new BusinessError("STORY_VIEWERS_FORBIDDEN");
+      throw new BusinessError("STORY_REACTIONS_FORBIDDEN");
     }
 
-    return this.storyRepo.findReactionsByStoryId(storyId);
+    return this.storyRepo.findReactionsByStoryId(storyId, cursor, limit);
   }
 
   async replyStory(

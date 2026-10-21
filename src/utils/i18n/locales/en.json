@@ -99,7 +99,7 @@
   "CANNOT_REPLY_OWN_STORY": "You cannot reply to your own story",
   "STORY_REACT_FORBIDDEN": "You can only react to friends' stories",
   "CANNOT_REACT_OWN_STORY": "You cannot react to your own story",
-  "INVALID_EMOJI": "Invalid emoji",
+  "STORY_REACTIONS_FORBIDDEN": "Only the story owner can view the reactions",
   "STORY_REACTION_ADDED": "Story reaction added",
   "STORY_REACTION_REMOVED": "Story reaction removed",
   "STORY_REPLIED": "Story reply sent"
