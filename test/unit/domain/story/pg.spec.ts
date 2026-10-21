@@ -3,30 +3,46 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
 import type { DrizzleDb } from "../../../../src/configs/database.js";
 import { StoryPgRepository } from "../../../../src/domain/story/pg.js";
-import { stories } from "../../../../src/domain/story/schema.js";
+import { stories, storyReactions } from "../../../../src/domain/story/schema.js";
 import { friendships } from "../../../../src/domain/friend/schema.js";
 
-function makeDb() {
+function makeDb(rows: unknown[] = []) {
   const limitMock = vi.fn<(limit: number) => Promise<unknown>>();
+  const groupByMock = vi.fn<(column: unknown) => Promise<unknown>>();
   const orderByMock = vi.fn<(condition: SQL) => unknown>(() => ({ limit: limitMock }));
-  const whereMock = vi.fn<(condition: SQL) => unknown>(() => ({
-    orderBy: orderByMock,
-    limit: limitMock,
-  }));
-  const fromMock = vi.fn(() => ({ where: whereMock }));
+  const whereMock = vi.fn<(condition: SQL) => unknown>(() =>
+    Object.assign(Promise.resolve(rows), {
+      orderBy: orderByMock,
+      limit: limitMock,
+      groupBy: groupByMock,
+    }),
+  );
+  const joinMock = vi.fn(() => ({ where: whereMock }));
+  const fromMock = vi.fn(() => ({ where: whereMock, innerJoin: joinMock }));
   const selectMock = vi.fn(() => ({ from: fromMock }));
   const returningMock = vi.fn();
+  const onConflictMock = vi.fn(() => ({ returning: returningMock }));
+  const valuesMock = vi.fn(() => ({ onConflictDoUpdate: onConflictMock }));
+  const insertMock = vi.fn(() => ({ values: valuesMock }));
   const deleteWhereMock = vi.fn<(condition: SQL) => unknown>(() => ({ returning: returningMock }));
   const deleteMock = vi.fn(() => ({ where: deleteWhereMock }));
-  const db = { select: selectMock, delete: deleteMock } as unknown as DrizzleDb;
+  const db = {
+    select: selectMock,
+    delete: deleteMock,
+    insert: insertMock,
+  } as unknown as DrizzleDb;
   return {
     db,
     selectMock,
     whereMock,
     orderByMock,
+    groupByMock,
     limitMock,
     deleteMock,
     deleteWhereMock,
+    insertMock,
+    valuesMock,
+    onConflictMock,
     returningMock,
   };
 }
@@ -101,6 +117,48 @@ describe("StoryPgRepository purge queries", () => {
   });
 
   describe("reaction queries", () => {
+    it("addOrUpdateReaction upserts on the story+user pair and reports a new row", async () => {
+      const { db, insertMock, valuesMock, onConflictMock, returningMock } = makeDb();
+      const createdAt = new Date("2026-10-14T02:00:00Z");
+      returningMock.mockResolvedValue([
+        { storyId: "s1", userId: "u1", emoji: "🔥", createdAt, isNew: true },
+      ]);
+      const repo = new StoryPgRepository(db);
+
+      const result = await repo.addOrUpdateReaction("s1", "u1", "🔥");
+
+      expect(insertMock).toHaveBeenCalledWith(storyReactions);
+      expect(valuesMock).toHaveBeenCalledWith(
+        expect.objectContaining({ storyId: "s1", userId: "u1", emoji: "🔥" }),
+      );
+      expect(onConflictMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: [storyReactions.storyId, storyReactions.userId],
+        }),
+      );
+      expect(result.isNew).toBe(true);
+      expect(result.reaction).toEqual({ storyId: "s1", userId: "u1", emoji: "🔥", createdAt });
+    });
+
+    it("addOrUpdateReaction reports an updated row when the reaction already existed", async () => {
+      const { db, returningMock } = makeDb();
+      returningMock.mockResolvedValue([
+        {
+          storyId: "s1",
+          userId: "u1",
+          emoji: "😂",
+          createdAt: new Date(),
+          isNew: false,
+        },
+      ]);
+      const repo = new StoryPgRepository(db);
+
+      const result = await repo.addOrUpdateReaction("s1", "u1", "😂");
+
+      expect(result.isNew).toBe(false);
+      expect(result.reaction.emoji).toBe("😂");
+    });
+
     it("deleteReaction returns true when row is deleted", async () => {
       const { db, returningMock } = makeDb();
       returningMock.mockResolvedValue([{ storyId: "s1" }]);
@@ -119,6 +177,50 @@ describe("StoryPgRepository purge queries", () => {
       expect(result).toBe(false);
     });
 
+    it("findReactionsByStoryId maps the rows and bounds the query to one page", async () => {
+      const { db, selectMock, limitMock } = makeDb();
+      const createdAt = new Date("2026-10-14T01:00:00Z");
+      limitMock.mockResolvedValue([
+        {
+          userId: "u1",
+          username: "f1",
+          fullName: "F1",
+          avatarUrl: null,
+          emoji: "❤️",
+          createdAt,
+        },
+      ]);
+      const repo = new StoryPgRepository(db);
+
+      const page = await repo.findReactionsByStoryId("s1", undefined, 20);
+
+      expect(selectMock).toHaveBeenCalledWith(
+        expect.objectContaining({ emoji: storyReactions.emoji }),
+      );
+      expect(limitMock).toHaveBeenCalledWith(21);
+      expect(page.hasMore).toBe(false);
+      expect(page.items).toEqual([
+        {
+          user: { id: "u1", username: "f1", fullName: "F1", avatarUrl: null },
+          emoji: "❤️",
+          createdAt,
+        },
+      ]);
+    });
+
+    it("findReactionsByStoryId pages with the cursor of the previous item", async () => {
+      const { db, whereMock, limitMock } = makeDb();
+      limitMock.mockResolvedValue([]);
+      const repo = new StoryPgRepository(db);
+
+      await repo.findReactionsByStoryId("s1", "u1", 20);
+
+      const whereSql = render(whereMock.mock.calls[0][0]);
+      expect(whereSql).toContain("SELECT sr.created_at FROM story_reactions sr");
+      expect(whereSql).toContain('"story_reactions"."created_at" <');
+      expect(whereSql).toContain('"users"."id" <');
+    });
+
     it("findUserReactions returns empty map when storyIds is empty", async () => {
       const { db, selectMock } = makeDb();
       const repo = new StoryPgRepository(db);
@@ -126,6 +228,15 @@ describe("StoryPgRepository purge queries", () => {
       const result = await repo.findUserReactions("u1", []);
       expect(result.size).toBe(0);
       expect(selectMock).not.toHaveBeenCalled();
+    });
+
+    it("findUserReactions maps rows to a story id -> emoji map", async () => {
+      const { db } = makeDb([{ storyId: "s1", emoji: "🔥" }]);
+      const repo = new StoryPgRepository(db);
+
+      const result = await repo.findUserReactions("u1", ["s1"]);
+
+      expect(result.get("s1")).toBe("🔥");
     });
 
     it("countReactions returns empty map when storyIds is empty", async () => {
@@ -136,6 +247,16 @@ describe("StoryPgRepository purge queries", () => {
       expect(result.size).toBe(0);
       expect(selectMock).not.toHaveBeenCalled();
     });
+
+    it("countReactions groups by story and returns numeric counts", async () => {
+      const { db, groupByMock } = makeDb();
+      groupByMock.mockResolvedValue([{ storyId: "s1", count: 3 }]);
+      const repo = new StoryPgRepository(db);
+
+      const result = await repo.countReactions(["s1"]);
+
+      expect(groupByMock).toHaveBeenCalledWith(storyReactions.storyId);
+      expect(result.get("s1")).toBe(3);
+    });
   });
 });
-

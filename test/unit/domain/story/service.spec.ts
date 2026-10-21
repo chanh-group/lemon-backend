@@ -77,6 +77,7 @@ describe("StoryService", () => {
   let sendMessageMock: Mock;
   let messageServiceMock: MessageService;
   let emitStoryReactionMock: Mock;
+  let emitStoryReactionRemovedMock: Mock;
   let realtimeServiceMock: RealtimeService;
 
   const mockStory: Story = {
@@ -262,8 +263,10 @@ describe("StoryService", () => {
     } as unknown as MessageService;
 
     emitStoryReactionMock = vi.fn();
+    emitStoryReactionRemovedMock = vi.fn();
     realtimeServiceMock = {
       emitStoryReaction: emitStoryReactionMock,
+      emitStoryReactionRemoved: emitStoryReactionRemovedMock,
     } as unknown as RealtimeService;
 
     service = new StoryService(
@@ -794,6 +797,42 @@ describe("StoryService", () => {
       expect(deleteReactionMock).toHaveBeenCalledWith(mockStory.id, "friend-1");
       expect(deleteBestEffortMock).toHaveBeenCalledWith("stories:feed:friend-1");
       expect(deleteBestEffortMock).toHaveBeenCalledWith("stories:feed:user-owner-1");
+    });
+
+    it("emits the removal event to the author and to the reactor", async () => {
+      findUsersByIdsMock.mockResolvedValueOnce(
+        new Map([
+          [
+            "friend-1",
+            {
+              id: "friend-1",
+              username: "friendone",
+              fullName: "Friend One",
+              avatarUrl: null,
+            },
+          ],
+        ]),
+      );
+
+      await service.unreactStory("friend-1", mockStory.id);
+
+      expect(emitStoryReactionRemovedMock).toHaveBeenCalledWith(
+        "user-owner-1",
+        expect.objectContaining({ storyId: mockStory.id }),
+      );
+      expect(emitStoryReactionRemovedMock).toHaveBeenCalledWith(
+        "friend-1",
+        expect.objectContaining({ storyId: mockStory.id }),
+      );
+    });
+
+    it("keeps the caches and the event untouched when there was no reaction to remove", async () => {
+      deleteReactionMock.mockResolvedValueOnce(false);
+
+      await service.unreactStory("friend-1", mockStory.id);
+
+      expect(deleteBestEffortMock).not.toHaveBeenCalled();
+      expect(emitStoryReactionRemovedMock).not.toHaveBeenCalled();
     });
   });
 
