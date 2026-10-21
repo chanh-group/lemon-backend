@@ -2,15 +2,6 @@ import { z } from "zod";
 import { vmsg } from "../../../utils/validation.js";
 import { MESSAGE_MAX_BODY_LENGTH } from "../constants.js";
 
-export const storyPreviewSchema = z.object({
-  id: z.string().uuid(),
-  kind: z.enum(["IMAGE", "VIDEO", "TEXT"]),
-  bucket: z.string().nullable().optional(),
-  objectKey: z.string().nullable().optional(),
-  caption: z.string().nullable().optional(),
-  background: z.string().nullable().optional(),
-});
-
 export const sendMessageSchema = z
   .object({
     body: z
@@ -23,8 +14,6 @@ export const sendMessageSchema = z
     kind: z.enum(["TEXT", "IMAGE", "VIDEO", "AUDIO", "FILE", "SYSTEM"]).default("TEXT"),
     clientMsgId: z.string().uuid(vmsg("VALIDATION_UUID_CLIENT_MSG")).optional(),
     replyToId: z.string().uuid(vmsg("VALIDATION_UUID_REPLY_TO")).optional(),
-    storyId: z.string().uuid().optional(),
-    storyPreview: storyPreviewSchema.optional(),
   })
   .refine(
     (data) => {

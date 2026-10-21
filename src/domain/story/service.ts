@@ -351,12 +351,12 @@ export class StoryService {
       background: story.background,
     };
 
-    const message = await this.messageService.sendMessage(userId, conv.id, {
-      kind: "TEXT",
-      body: dto.body,
-      storyId: story.id,
-      storyPreview,
-    });
+    const message = await this.messageService.sendMessage(
+      userId,
+      conv.id,
+      { kind: "TEXT", body: dto.body },
+      { storyId: story.id, storyPreview },
+    );
 
     await this.cache.deleteBestEffort(storyFeedKey(userId));
 

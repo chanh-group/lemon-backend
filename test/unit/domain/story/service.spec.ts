@@ -853,12 +853,14 @@ describe("StoryService", () => {
         expect.objectContaining({
           kind: "TEXT",
           body: "Looking great!",
+        }),
+        {
           storyId: mockStory.id,
           storyPreview: expect.objectContaining({
             id: mockStory.id,
             kind: mockStory.kind,
           }),
-        }),
+        },
       );
       expect(deleteBestEffortMock).toHaveBeenCalledWith("stories:feed:friend-1");
       expect(result).toEqual(mockMsgResponse);

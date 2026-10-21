@@ -124,7 +124,7 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
 
   it("rethrows a non-unique-violation error unchanged", async () => {
     const { db, transactionMock } = makeDb();
-    const infraError = { code: "23503", constraint: "messages_client_msg_uq" };
+    const infraError = { code: "08006", message: "connection failure" };
     transactionMock.mockRejectedValueOnce(infraError);
     const repo = new MessagePgRepository(db);
 
@@ -136,6 +136,25 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
         clientMsgId,
       }),
     ).rejects.toBe(infraError);
+  });
+
+  it("maps a foreign-key violation to BAD_REQUEST instead of an opaque 500", async () => {
+    const { db, transactionMock } = makeDb();
+    const fkViolation = { code: "23503", constraint: "messages_story_id_stories_id_fk" };
+    transactionMock.mockRejectedValueOnce(fkViolation);
+    const repo = new MessagePgRepository(db);
+
+    const error = await repo
+      .createMessageWithConversationUpdate({
+        conversationId,
+        senderId,
+        body: "Hello from the first attempt",
+        clientMsgId,
+      })
+      .catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(BusinessError);
+    expect((error as BusinessError).code).toBe("BAD_REQUEST");
   });
 
   it("rethrows a 23505 from a different constraint unchanged", async () => {

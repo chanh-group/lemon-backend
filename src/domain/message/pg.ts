@@ -3,7 +3,7 @@ import { InjectDrizzle } from "@nestjs/drizzle";
 import { and, asc, desc, eq, gt, isNull, lt, or } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
-import { isUniqueViolation } from "../../utils/errors/pg.js";
+import { isForeignKeyViolation, isUniqueViolation } from "../../utils/errors/pg.js";
 import { conversations } from "../conversation/schema.js";
 import { friendships } from "../friend/schema.js";
 import { DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE } from "../pagination.constants.js";
@@ -133,6 +133,9 @@ export class MessagePgRepository implements MessageRepository {
         );
         if (existing) return { message: existing, isNew: false };
         throw new BusinessError("CONFLICT");
+      }
+      if (isForeignKeyViolation(err)) {
+        throw new BusinessError("BAD_REQUEST");
       }
       throw err;
     }
