@@ -30,6 +30,7 @@ describe("Drizzle Table Constraints and Schema Metadata Verification", () => {
       const cols = getTableColumns(schema.storyViews);
       expect(cols.storyId.notNull).toBe(true);
       expect(cols.userId.notNull).toBe(true);
+      expect(cols.anonymous.default).toBe(false);
       expect(cols.viewedAt.notNull).toBe(true);
     });
 
@@ -38,7 +39,20 @@ describe("Drizzle Table Constraints and Schema Metadata Verification", () => {
       expect(cols.storyId.notNull).toBe(true);
       expect(cols.userId.notNull).toBe(true);
       expect(cols.emoji.notNull).toBe(true);
+      expect(cols.kind.default).toBe("REACTION");
       expect(cols.createdAt.notNull).toBe(true);
+    });
+
+    it("story_audiences should have composite PK columns", () => {
+      const cols = getTableColumns(schema.storyAudiences);
+      expect(cols.storyId.notNull).toBe(true);
+      expect(cols.userId.notNull).toBe(true);
+    });
+
+    it("story_mutes should have composite PK columns", () => {
+      const cols = getTableColumns(schema.storyMutes);
+      expect(cols.userId.notNull).toBe(true);
+      expect(cols.authorId.notNull).toBe(true);
     });
   });
 
@@ -98,6 +112,14 @@ describe("Drizzle Table Constraints and Schema Metadata Verification", () => {
 
     it("storyKindEnum should contain IMAGE, VIDEO, TEXT", () => {
       expect(schema.storyKindEnum.enumValues).toEqual(["IMAGE", "VIDEO", "TEXT"]);
+    });
+
+    it("storyReactionKindEnum should contain REACTION, LIKE", () => {
+      expect(schema.storyReactionKindEnum.enumValues).toEqual(["REACTION", "LIKE"]);
+    });
+
+    it("storyAudienceModeEnum should contain ALL_FRIENDS, CUSTOM, EXCLUDE", () => {
+      expect(schema.storyAudienceModeEnum.enumValues).toEqual(["ALL_FRIENDS", "CUSTOM", "EXCLUDE"]);
     });
   });
 });

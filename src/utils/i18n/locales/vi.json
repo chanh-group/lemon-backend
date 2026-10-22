@@ -102,5 +102,12 @@
   "STORY_REACTIONS_FORBIDDEN": "Chỉ chủ story mới được xem danh sách biểu cảm",
   "STORY_REACTION_ADDED": "Đã bày tỏ cảm xúc về story",
   "STORY_REACTION_REMOVED": "Đã gỡ cảm xúc khỏi story",
-  "STORY_REPLIED": "Đã trả lời story"
+  "STORY_REPLIED": "Đã trả lời story",
+  "STORY_INTERACTIONS_DISABLED": "Tính năng tương tác đã bị tắt cho story này",
+  "CANNOT_MUTE_SELF": "Bạn không thể tự tắt story của chính mình",
+  "STORY_MUTED": "Đã ẩn story của người dùng này",
+  "STORY_UNMUTED": "Đã bỏ ẩn story của người dùng này",
+  "STORY_SETTINGS_UPDATED": "Đã cập nhật cài đặt story",
+  "STORY_LIKED": "Đã thích story",
+  "STORY_UNLIKED": "Đã bỏ thích story"
 }

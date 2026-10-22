@@ -17,9 +17,13 @@ function makeStory(overrides: Partial<Story> & { id: string; userId: string }): 
     durationMs: null,
     caption: null,
     background: null,
+    allowReplies: true,
+    allowReactions: true,
+    audienceMode: "ALL_FRIENDS",
     createdAt: new Date("2026-10-14T00:00:00Z"),
     expiresAt: new Date("2026-10-15T00:00:00Z"),
     deletedAt: null,
+    archivedAt: null,
     ...overrides,
   };
 }
@@ -40,6 +44,10 @@ describe("toStoryItemResponse", () => {
       durationMs: null,
       caption: null,
       background: null,
+      allowReplies: true,
+      allowReactions: true,
+      audienceMode: "ALL_FRIENDS",
+      archivedAt: null,
       createdAt: new Date("2026-10-14T00:00:00Z"),
       expiresAt: new Date("2026-10-15T00:00:00Z"),
       hasViewed: true,
@@ -55,10 +63,11 @@ describe("toStoryItemResponse", () => {
   });
 
   it("includes myReaction and reactionsCount when provided", () => {
-    const item = toStoryItemResponse(makeStory({ id: "s1", userId: "u1" }), false, "❤️", 5);
+    const item = toStoryItemResponse(makeStory({ id: "s1", userId: "u1" }), false, "❤️", 5, "LIKE");
 
     expect(item.myReaction).toBe("❤️");
     expect(item.reactionsCount).toBe(5);
+    expect(item.myReactionKind).toBe("LIKE");
   });
 });
 
@@ -103,7 +112,7 @@ describe("groupStoriesByUser", () => {
   });
 
   it("populates myReaction from the lookup map and leaves the global count out", () => {
-    const userReactions = new Map([["s1", "🔥"]]);
+    const userReactions = new Map([["s1", { emoji: "🔥", kind: "REACTION" as const }]]);
 
     const feed = groupStoriesByUser(
       users,
@@ -113,6 +122,7 @@ describe("groupStoriesByUser", () => {
     );
 
     expect(feed[0].stories[0].myReaction).toBe("🔥");
+    expect(feed[0].stories[0].myReactionKind).toBe("REACTION");
     expect(feed[0].stories[0]).not.toHaveProperty("reactionsCount");
   });
 });

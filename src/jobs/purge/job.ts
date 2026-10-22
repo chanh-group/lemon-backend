@@ -95,7 +95,7 @@ export class PurgeJob {
         .map((row) => row.id);
       const ids = [...textIds, ...confirmedIds];
       if (ids.length === 0) return { stories: 0, objects: 0 };
-      const stories = await this.storyRepo.deleteByIds(ids);
+      const stories = await this.storyRepo.archiveStories(ids);
       return { stories, objects: confirmedIds.length };
     } catch (err) {
       this.logger.error("Purge story phase failed", { err });

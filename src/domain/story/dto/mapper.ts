@@ -1,5 +1,6 @@
 import type { Story } from "../schema.js";
 import type { UserSummary } from "../../user/dto/response.js";
+import type { StoryReactionKind } from "../constants.js";
 import type { StoryItemResponse, StoryPreview, UserStoryFeedResponse } from "./response.js";
 
 export function toStoryPreview(story: Story): StoryPreview {
@@ -18,6 +19,7 @@ export function toStoryItemResponse(
   hasViewed?: boolean,
   myReaction?: string | null,
   reactionsCount?: number,
+  myReactionKind?: StoryReactionKind | null,
 ): StoryItemResponse {
   return {
     id: story.id,
@@ -31,10 +33,15 @@ export function toStoryItemResponse(
     durationMs: story.durationMs,
     caption: story.caption,
     background: story.background,
+    allowReplies: story.allowReplies,
+    allowReactions: story.allowReactions,
+    audienceMode: story.audienceMode,
+    archivedAt: story.archivedAt ?? null,
     createdAt: story.createdAt,
     expiresAt: story.expiresAt,
     ...(hasViewed !== undefined && { hasViewed }),
     ...(myReaction !== undefined && { myReaction }),
+    ...(myReactionKind !== undefined && { myReactionKind }),
     ...(reactionsCount !== undefined && { reactionsCount }),
   };
 }
@@ -51,6 +58,7 @@ export function reviveUserStoryFeed(feed: UserStoryFeedResponse[]): UserStoryFee
       ...story,
       createdAt: new Date(story.createdAt),
       expiresAt: new Date(story.expiresAt),
+      archivedAt: story.archivedAt ? new Date(story.archivedAt) : null,
     })),
   }));
 }
@@ -59,19 +67,17 @@ export function groupStoriesByUser(
   usersMap: Map<string, UserSummary>,
   stories: Story[],
   viewedStoryIds: Set<string>,
-  userReactionsMap?: Map<string, string>,
+  userReactionsMap?: Map<string, { emoji: string; kind: StoryReactionKind } | string>,
 ): UserStoryFeedResponse[] {
   const userStoriesMap = new Map<string, StoryItemResponse[]>();
 
   for (const story of stories) {
     const list = userStoriesMap.get(story.userId) ?? [];
-    list.push(
-      toStoryItemResponse(
-        story,
-        viewedStoryIds.has(story.id),
-        userReactionsMap?.get(story.id) ?? null,
-      ),
-    );
+    const reactionInfo = userReactionsMap?.get(story.id);
+    const emoji = typeof reactionInfo === "string" ? reactionInfo : (reactionInfo?.emoji ?? null);
+    const kind = typeof reactionInfo === "object" ? reactionInfo.kind : null;
+
+    list.push(toStoryItemResponse(story, viewedStoryIds.has(story.id), emoji, undefined, kind));
     userStoriesMap.set(story.userId, list);
   }
 

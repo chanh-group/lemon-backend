@@ -22,13 +22,15 @@ import {
   toStoryItemResponse,
   toStoryPreview,
 } from "./dto/mapper.js";
-import type { StoryEmoji } from "./constants.js";
-import type { CreateStoryDto, ReplyStoryDto } from "./dto/request.js";
+import { STORY_SILENT_LIKE_EMOJI, type StoryEmoji, type StoryReactionKind } from "./constants.js";
+import type { CreateStoryDto, ReplyStoryDto, UpdateStorySettingsDto } from "./dto/request.js";
 import type {
   MyStoryReactionResponse,
   StoryItemResponse,
   StoryReactionResponse,
+  StoryViewersListResponse,
   UserStoryFeedResponse,
+  UserStorySettingsResponse,
 } from "./dto/response.js";
 import { STORY_REPOSITORY, type StoryRepository } from "./repository.js";
 import type { NewStory, Story } from "./schema.js";
@@ -99,6 +101,19 @@ export class StoryService {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + STORY_TTL_MS);
 
+    const audienceMode = dto.audienceMode ?? "ALL_FRIENDS";
+    let audienceUserIds: string[] | undefined = undefined;
+
+    const friendIds = await this.storyRepo.getFriendUserIds(userId);
+
+    if (audienceMode !== "ALL_FRIENDS" && dto.audienceUserIds) {
+      // Validate that all audience IDs are accepted friends and not self
+      const friendSet = new Set(friendIds);
+      audienceUserIds = Array.from(
+        new Set(dto.audienceUserIds.filter((id) => id !== userId && friendSet.has(id))),
+      );
+    }
+
     const newStoryData: NewStory = {
       userId,
       kind: dto.kind,
@@ -110,15 +125,25 @@ export class StoryService {
       durationMs: dto.durationMs ?? null,
       caption,
       background,
+      allowReplies: dto.allowReplies ?? true,
+      allowReactions: dto.allowReactions ?? true,
+      audienceMode,
       createdAt: now,
       expiresAt,
     };
 
-    const created = await this.storyRepo.create(newStoryData);
+    const created = await this.storyRepo.create(newStoryData, audienceUserIds);
 
-    // Invalidate feed cache for owner and all accepted friends in 1 round trip
-    const friendIds = await this.storyRepo.getFriendUserIds(userId);
-    await this.cache.deleteManyBestEffort([userId, ...friendIds].map(storyFeedKey));
+    // Invalidate feed cache for affected viewers only
+    if (audienceMode === "CUSTOM" && audienceUserIds) {
+      await this.cache.deleteManyBestEffort([userId, ...audienceUserIds].map(storyFeedKey));
+    } else if (audienceMode === "EXCLUDE" && audienceUserIds) {
+      const excludedSet = new Set(audienceUserIds);
+      const targetFriendIds = friendIds.filter((id) => !excludedSet.has(id));
+      await this.cache.deleteManyBestEffort([userId, ...targetFriendIds].map(storyFeedKey));
+    } else {
+      await this.cache.deleteManyBestEffort([userId, ...friendIds].map(storyFeedKey));
+    }
 
     this.logger.log("Story created successfully", { storyId: created.id, userId, kind: dto.kind });
 
@@ -139,17 +164,13 @@ export class StoryService {
 
     const targetUserIds = [userId, ...friendIds];
 
-    // Parallel fetch: active stories and user profile summaries
+    // Fetch active stories with mute & audience filtering applied for viewer
     const [stories, usersMap] = await Promise.all([
-      this.storyRepo.findActiveByUserIds(targetUserIds),
+      this.storyRepo.findActiveByUserIds(targetUserIds, userId),
       this.storyRepo.findUsersByIds(targetUserIds),
     ]);
 
     const storyIds = stories.map((s) => s.id);
-    // The feed is cached per viewer for 60s: only viewer-specific data
-    // (`hasViewed`, `myReaction`) belongs in it. The global reaction count
-    // changes with other people's reactions, so it is served fresh by
-    // `GET /stories/:id` instead of being cached here.
     const [viewedStoryIds, userReactionsMap] = await Promise.all([
       this.storyRepo.findViewedStoryIds(userId, storyIds),
       this.storyRepo.findUserReactions(userId, storyIds),
@@ -168,22 +189,22 @@ export class StoryService {
       throw new BusinessError("STORY_NOT_FOUND");
     }
 
-    if (story.userId !== userId) {
-      if (!(await this.storyRepo.isAcceptedFriend(story.userId, userId))) {
-        throw new BusinessError("STORY_VIEW_FORBIDDEN");
-      }
-    }
+    await this.assertCanViewStory(story, userId);
 
     const [viewedIds, userReactionsMap, reactionsCountMap] = await Promise.all([
       this.storyRepo.findViewedStoryIds(userId, [storyId]),
       this.storyRepo.findUserReactions(userId, [storyId]),
       this.storyRepo.countReactions([storyId]),
     ]);
+
+    const myReaction = userReactionsMap.get(storyId);
+
     return toStoryItemResponse(
       story,
       viewedIds.has(storyId),
-      userReactionsMap.get(storyId) ?? null,
+      myReaction?.emoji ?? null,
       reactionsCountMap.get(storyId) ?? 0,
+      myReaction?.kind ?? null,
     );
   }
 
@@ -194,20 +215,24 @@ export class StoryService {
     }
 
     if (story.userId === userId) {
-      // Self-views are a no-op: the owner already knows the content and must
-      // not appear in their own viewers list.
       return;
     }
 
-    if (!(await this.storyRepo.isAcceptedFriend(story.userId, userId))) {
-      throw new BusinessError("STORY_VIEW_FORBIDDEN");
-    }
+    await this.assertCanViewStory(story, userId);
 
-    await this.storyRepo.markAsViewed(storyId, userId);
+    const settings = await this.storyRepo.getUserStorySettings(userId);
+    const anonymous = !settings.viewedReceiptsEnabled;
+
+    await this.storyRepo.markAsViewed(storyId, userId, anonymous);
     await this.cache.deleteBestEffort(storyFeedKey(userId));
   }
 
-  async getViewers(userId: string, storyId: string, cursor: string | undefined, limit: number) {
+  async getViewers(
+    userId: string,
+    storyId: string,
+    cursor: string | undefined,
+    limit: number,
+  ): Promise<StoryViewersListResponse> {
     const story = await this.storyRepo.findById(storyId);
     if (!story) {
       throw new BusinessError("STORY_NOT_FOUND");
@@ -255,12 +280,22 @@ export class StoryService {
       throw new BusinessError("CANNOT_REACT_OWN_STORY");
     }
 
-    const friendIds = await this.storyRepo.getFriendUserIds(story.userId);
-    if (!friendIds.includes(userId)) {
-      throw new BusinessError("STORY_REACT_FORBIDDEN");
+    await this.assertCanViewStory(story, userId);
+
+    if (!story.allowReactions) {
+      throw new BusinessError("STORY_INTERACTIONS_DISABLED");
     }
 
-    const { reaction, isNew } = await this.storyRepo.addReactionWithView(storyId, userId, emoji);
+    const settings = await this.storyRepo.getUserStorySettings(userId);
+    const anonymous = !settings.viewedReceiptsEnabled;
+
+    const { reaction, isNew } = await this.storyRepo.addReactionWithView(
+      storyId,
+      userId,
+      emoji,
+      "REACTION",
+      anonymous,
+    );
 
     await Promise.all([
       this.cache.deleteBestEffort(storyFeedKey(userId)),
@@ -274,6 +309,7 @@ export class StoryService {
         storyId,
         user: userSummary,
         emoji,
+        kind: "REACTION",
         createdAt: reaction.createdAt,
       };
       this.realtimeService.emitStoryReaction(story.userId, payload);
@@ -287,18 +323,71 @@ export class StoryService {
     return {
       storyId: reaction.storyId,
       emoji: reaction.emoji,
+      kind: reaction.kind,
       createdAt: reaction.createdAt,
     };
   }
 
-  /**
-   * A story reaction is routed into the author's direct conversation (Meta /
-   * WhatsApp behaviour, `docs/STORIES_NOTES.md` §5.2.A): the author sees the
-   * reaction inside the chat thread, not only in the story UI.
-   *
-   * Best effort: the reaction is already stored, so a failing chat must not
-   * turn a successful reaction into an error.
-   */
+  async likeStory(userId: string, storyId: string): Promise<MyStoryReactionResponse> {
+    const story = await this.storyRepo.findActiveById(storyId);
+    if (!story) {
+      throw new BusinessError("STORY_NOT_FOUND");
+    }
+
+    if (story.userId === userId) {
+      throw new BusinessError("CANNOT_REACT_OWN_STORY");
+    }
+
+    await this.assertCanViewStory(story, userId);
+
+    if (!story.allowReactions) {
+      throw new BusinessError("STORY_INTERACTIONS_DISABLED");
+    }
+
+    const settings = await this.storyRepo.getUserStorySettings(userId);
+    const anonymous = !settings.viewedReceiptsEnabled;
+
+    const { reaction } = await this.storyRepo.addReactionWithView(
+      storyId,
+      userId,
+      STORY_SILENT_LIKE_EMOJI,
+      "LIKE",
+      anonymous,
+    );
+
+    await Promise.all([
+      this.cache.deleteBestEffort(storyFeedKey(userId)),
+      this.cache.deleteBestEffort(storyFeedKey(story.userId)),
+    ]);
+
+    const usersMap = await this.storyRepo.findUsersByIds([userId]);
+    const userSummary = usersMap.get(userId);
+    if (userSummary) {
+      const payload = {
+        storyId,
+        user: userSummary,
+        emoji: STORY_SILENT_LIKE_EMOJI,
+        kind: "LIKE",
+        createdAt: reaction.createdAt,
+      };
+      this.realtimeService.emitStoryReaction(story.userId, payload);
+      this.realtimeService.emitStoryReaction(userId, payload);
+    }
+
+    // Silent like: do NOT mirror to direct conversation!
+
+    return {
+      storyId: reaction.storyId,
+      emoji: reaction.emoji,
+      kind: reaction.kind,
+      createdAt: reaction.createdAt,
+    };
+  }
+
+  async unlikeStory(userId: string, storyId: string): Promise<void> {
+    return this.unreactStory(userId, storyId);
+  }
+
   private async mirrorReactionToDirectConversation(
     userId: string,
     story: Story,
@@ -331,10 +420,7 @@ export class StoryService {
       throw new BusinessError("CANNOT_REACT_OWN_STORY");
     }
 
-    const friendIds = await this.storyRepo.getFriendUserIds(story.userId);
-    if (!friendIds.includes(userId)) {
-      throw new BusinessError("STORY_REACT_FORBIDDEN");
-    }
+    await this.assertCanViewStory(story, userId);
 
     const removed = await this.storyRepo.deleteReaction(storyId, userId);
     if (!removed) {
@@ -360,6 +446,7 @@ export class StoryService {
     storyId: string,
     cursor: string | undefined,
     limit: number,
+    kind?: StoryReactionKind,
   ): Promise<CursorPage<StoryReactionResponse>> {
     const story = await this.storyRepo.findActiveById(storyId);
     if (!story) {
@@ -370,7 +457,7 @@ export class StoryService {
       throw new BusinessError("STORY_REACTIONS_FORBIDDEN");
     }
 
-    return this.storyRepo.findReactionsByStoryId(storyId, cursor, limit);
+    return this.storyRepo.findReactionsByStoryId(storyId, cursor, limit, kind);
   }
 
   async replyStory(userId: string, storyId: string, dto: ReplyStoryDto): Promise<MessageResponse> {
@@ -383,15 +470,18 @@ export class StoryService {
       throw new BusinessError("CANNOT_REPLY_OWN_STORY");
     }
 
-    const friendIds = await this.storyRepo.getFriendUserIds(story.userId);
-    if (!friendIds.includes(userId)) {
-      throw new BusinessError("STORY_REPLY_FORBIDDEN");
+    await this.assertCanViewStory(story, userId);
+
+    if (!story.allowReplies) {
+      throw new BusinessError("STORY_INTERACTIONS_DISABLED");
     }
 
-    await this.storyRepo.markAsViewed(storyId, userId);
+    const settings = await this.storyRepo.getUserStorySettings(userId);
+    const anonymous = !settings.viewedReceiptsEnabled;
+
+    await this.storyRepo.markAsViewed(storyId, userId, anonymous);
 
     const conv = await this.conversationService.getOrCreateDirect(userId, story.userId);
-
     const storyPreview = toStoryPreview(story);
 
     const message = await this.messageService.sendMessage(
@@ -404,5 +494,86 @@ export class StoryService {
     await this.cache.deleteBestEffort(storyFeedKey(userId));
 
     return message;
+  }
+
+  // Settings
+  async getStorySettings(userId: string): Promise<UserStorySettingsResponse> {
+    const s = await this.storyRepo.getUserStorySettings(userId);
+    return {
+      viewedReceiptsEnabled: s.viewedReceiptsEnabled,
+      archiveEnabled: s.archiveEnabled,
+      archiveDurationSecs: s.archiveDurationSecs,
+    };
+  }
+
+  async updateStorySettings(
+    userId: string,
+    dto: UpdateStorySettingsDto,
+  ): Promise<UserStorySettingsResponse> {
+    const s = await this.storyRepo.upsertUserStorySettings(userId, dto);
+    return {
+      viewedReceiptsEnabled: s.viewedReceiptsEnabled,
+      archiveEnabled: s.archiveEnabled,
+      archiveDurationSecs: s.archiveDurationSecs,
+    };
+  }
+
+  // Mutes
+  async muteAuthor(userId: string, authorId: string): Promise<void> {
+    if (userId === authorId) {
+      throw new BusinessError("CANNOT_MUTE_SELF");
+    }
+    await this.storyRepo.muteAuthor(userId, authorId);
+    await this.cache.deleteBestEffort(storyFeedKey(userId));
+  }
+
+  async unmuteAuthor(userId: string, authorId: string): Promise<void> {
+    await this.storyRepo.unmuteAuthor(userId, authorId);
+    await this.cache.deleteBestEffort(storyFeedKey(userId));
+  }
+
+  async getMutedAuthorIds(userId: string): Promise<string[]> {
+    return this.storyRepo.getMutedAuthorIds(userId);
+  }
+
+  // Archives
+  async getArchivedStories(
+    userId: string,
+    cursor: string | undefined,
+    limit: number,
+  ): Promise<CursorPage<StoryItemResponse>> {
+    return this.storyRepo.findArchivedStoriesByUserId(userId, cursor, limit);
+  }
+
+  private async assertCanViewStory(story: Story, viewerId: string): Promise<void> {
+    if (story.userId === viewerId) return;
+
+    if (story.audienceMode === "ALL_FRIENDS") {
+      const isFriend = await this.storyRepo.isAcceptedFriend(story.userId, viewerId);
+      if (!isFriend) {
+        throw new BusinessError("STORY_VIEW_FORBIDDEN");
+      }
+      return;
+    }
+
+    if (story.audienceMode === "CUSTOM") {
+      const isAudience = await this.storyRepo.isStoryAudience(story.id, viewerId);
+      if (!isAudience) {
+        throw new BusinessError("STORY_VIEW_FORBIDDEN");
+      }
+      return;
+    }
+
+    if (story.audienceMode === "EXCLUDE") {
+      const isFriend = await this.storyRepo.isAcceptedFriend(story.userId, viewerId);
+      if (!isFriend) {
+        throw new BusinessError("STORY_VIEW_FORBIDDEN");
+      }
+      const isExcluded = await this.storyRepo.isStoryAudience(story.id, viewerId);
+      if (isExcluded) {
+        throw new BusinessError("STORY_VIEW_FORBIDDEN");
+      }
+      return;
+    }
   }
 }

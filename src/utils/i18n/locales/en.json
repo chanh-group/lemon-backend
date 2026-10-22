@@ -102,5 +102,12 @@
   "STORY_REACTIONS_FORBIDDEN": "Only the story owner can view the reactions",
   "STORY_REACTION_ADDED": "Story reaction added",
   "STORY_REACTION_REMOVED": "Story reaction removed",
-  "STORY_REPLIED": "Story reply sent"
+  "STORY_REPLIED": "Story reply sent",
+  "STORY_INTERACTIONS_DISABLED": "Interactions are disabled for this story",
+  "CANNOT_MUTE_SELF": "You cannot mute your own stories",
+  "STORY_MUTED": "Story muted",
+  "STORY_UNMUTED": "Story unmuted",
+  "STORY_SETTINGS_UPDATED": "Story settings updated",
+  "STORY_LIKED": "Story liked",
+  "STORY_UNLIKED": "Story like removed"
 }

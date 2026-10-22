@@ -17,8 +17,15 @@ function makeDb(rows: unknown[] = []) {
       groupBy: groupByMock,
     }),
   );
-  const joinMock = vi.fn(() => ({ where: whereMock }));
-  const fromMock = vi.fn(() => ({ where: whereMock, innerJoin: joinMock }));
+  const joinMock = vi.fn(() => ({
+    where: whereMock,
+    leftJoin: vi.fn(() => ({ where: whereMock })),
+  }));
+  const fromMock = vi.fn(() => ({
+    where: whereMock,
+    innerJoin: joinMock,
+    leftJoin: vi.fn(() => ({ where: whereMock })),
+  }));
   const selectMock = vi.fn(() => ({ from: fromMock }));
   const returningMock = vi.fn();
   const onConflictMock = vi.fn<(conflict: unknown) => unknown>(() => ({
@@ -32,12 +39,15 @@ function makeDb(rows: unknown[] = []) {
   const insertMock = vi.fn(() => ({ values: valuesMock }));
   const deleteWhereMock = vi.fn<(condition: SQL) => unknown>(() => ({ returning: returningMock }));
   const deleteMock = vi.fn(() => ({ where: deleteWhereMock }));
-  const tx = { select: selectMock, insert: insertMock };
+  const updateSetMock = vi.fn(() => ({ where: vi.fn(() => ({ returning: returningMock })) }));
+  const updateMock = vi.fn(() => ({ set: updateSetMock }));
+  const tx = { select: selectMock, insert: insertMock, update: updateMock };
   const transactionMock = vi.fn((cb: (t: typeof tx) => Promise<unknown>) => cb(tx));
   const db = {
     select: selectMock,
     delete: deleteMock,
     insert: insertMock,
+    update: updateMock,
     transaction: transactionMock,
   } as unknown as DrizzleDb;
   return {
@@ -80,20 +90,24 @@ describe("StoryPgRepository purge queries", () => {
   describe("findPurgeable", () => {
     it("findPurgeable selects id and object_key with the batch limit", async () => {
       const { db, selectMock, whereMock, orderByMock, limitMock } = makeDb();
-      const rows = [{ id: "s1", objectKey: "k1" }];
+      const rows = [{ id: "s1", objectKey: "k1", userId: "u1" }];
       limitMock.mockResolvedValue(rows);
       const repo = new StoryPgRepository(db);
 
       const result = await repo.findPurgeable(500);
 
-      expect(selectMock).toHaveBeenCalledWith({ id: stories.id, objectKey: stories.objectKey });
+      expect(selectMock).toHaveBeenCalledWith({
+        id: stories.id,
+        objectKey: stories.objectKey,
+        userId: stories.userId,
+      });
       expect(limitMock).toHaveBeenCalledWith(500);
       expect(result).toEqual(rows);
 
       const whereSql = render(whereMock.mock.calls[0][0]);
       expect(whereSql).toContain('"stories"."expires_at" < now()');
       expect(whereSql).toContain('"stories"."deleted_at" is not null');
-      expect(whereSql).toContain(" or ");
+      expect(whereSql).toContain('"stories"."archived_at" is null');
 
       const orderBySql = render(orderByMock.mock.calls[0][0]);
       expect(orderBySql).toContain('"stories"."expires_at" asc');
@@ -136,6 +150,7 @@ describe("StoryPgRepository purge queries", () => {
           storyId: "s1",
           userId: "u1",
           emoji: "🔥",
+          kind: "REACTION",
           createdAt,
           updatedAt: createdAt,
           isNew: true,
@@ -161,6 +176,7 @@ describe("StoryPgRepository purge queries", () => {
         storyId: "s1",
         userId: "u1",
         emoji: "🔥",
+        kind: "REACTION",
         createdAt,
         updatedAt: createdAt,
       });
@@ -173,6 +189,7 @@ describe("StoryPgRepository purge queries", () => {
           storyId: "s1",
           userId: "u1",
           emoji: "😂",
+          kind: "REACTION",
           createdAt: new Date(),
           updatedAt: new Date(),
           isNew: false,
@@ -196,6 +213,7 @@ describe("StoryPgRepository purge queries", () => {
           storyId: "s1",
           userId: "u1",
           emoji: "😂",
+          kind: "REACTION",
           createdAt: new Date(),
           updatedAt: new Date(),
           isNew: false,
@@ -237,6 +255,7 @@ describe("StoryPgRepository purge queries", () => {
           fullName: "F1",
           avatarUrl: null,
           emoji: "❤️",
+          kind: "REACTION",
           createdAt,
         },
       ]);
@@ -253,6 +272,7 @@ describe("StoryPgRepository purge queries", () => {
         {
           user: { id: "u1", username: "f1", fullName: "F1", avatarUrl: null },
           emoji: "❤️",
+          kind: "REACTION",
           createdAt,
         },
       ]);
@@ -280,13 +300,13 @@ describe("StoryPgRepository purge queries", () => {
       expect(selectMock).not.toHaveBeenCalled();
     });
 
-    it("findUserReactions maps rows to a story id -> emoji map", async () => {
-      const { db } = makeDb([{ storyId: "s1", emoji: "🔥" }]);
+    it("findUserReactions maps rows to a story id -> detail map", async () => {
+      const { db } = makeDb([{ storyId: "s1", emoji: "🔥", kind: "REACTION" }]);
       const repo = new StoryPgRepository(db);
 
       const result = await repo.findUserReactions("u1", ["s1"]);
 
-      expect(result.get("s1")).toBe("🔥");
+      expect(result.get("s1")).toEqual({ emoji: "🔥", kind: "REACTION" });
     });
 
     it("countReactions returns empty map when storyIds is empty", async () => {

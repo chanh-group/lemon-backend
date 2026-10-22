@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import * as schema from "../../../src/configs/schema.js";
 
 describe("Database Schema Exports", () => {
-  it("should export all 11 domain tables", () => {
+  it("should export all 14 domain tables", () => {
     expect(schema.users).toBeDefined();
     expect(schema.friendships).toBeDefined();
     expect(schema.conversations).toBeDefined();
@@ -15,10 +15,13 @@ describe("Database Schema Exports", () => {
     expect(schema.stories).toBeDefined();
     expect(schema.storyViews).toBeDefined();
     expect(schema.storyReactions).toBeDefined();
+    expect(schema.userStorySettings).toBeDefined();
+    expect(schema.storyAudiences).toBeDefined();
+    expect(schema.storyMutes).toBeDefined();
     expect(schema.notes).toBeDefined();
   });
 
-  it("should export all 8 enums", () => {
+  it("should export all 10 enums", () => {
     expect(schema.friendshipStatusEnum).toBeDefined();
     expect(schema.conversationKindEnum).toBeDefined();
     expect(schema.participantRoleEnum).toBeDefined();
@@ -27,6 +30,8 @@ describe("Database Schema Exports", () => {
     expect(schema.callMediaEnum).toBeDefined();
     expect(schema.callStatusEnum).toBeDefined();
     expect(schema.storyKindEnum).toBeDefined();
+    expect(schema.storyReactionKindEnum).toBeDefined();
+    expect(schema.storyAudienceModeEnum).toBeDefined();
   });
 
   it("should export custom types and helpers", () => {

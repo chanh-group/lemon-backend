@@ -1,22 +1,68 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { friendships } from "../friend/schema.js";
+import { messages } from "../message/schema.js";
 import { users } from "../user/schema.js";
-import type { StoryReactionResponse } from "./dto/response.js";
+import type { StoryReactionKind } from "./constants.js";
+import type {
+  StoryItemResponse,
+  StoryReactionResponse,
+  StoryViewersListResponse,
+} from "./dto/response.js";
 import type { UserSummary } from "../user/dto/response.js";
-import type { PurgeableStory, StoryReactionResult, StoryRepository } from "./repository.js";
-import { type NewStory, type Story, stories, storyReactions, storyViews } from "./schema.js";
+import type {
+  PurgeableStory,
+  StoryReactionResult,
+  StoryRepository,
+  UserReactionDetail,
+} from "./repository.js";
+import {
+  type NewStory,
+  type Story,
+  type UserStorySettings,
+  stories,
+  storyAudiences,
+  storyMutes,
+  storyReactions,
+  storyViews,
+  userStorySettings,
+} from "./schema.js";
 import { toCursorPage, type CursorPage } from "../shared.js";
+import { toStoryItemResponse } from "./dto/mapper.js";
 
 @Injectable()
 export class StoryPgRepository implements StoryRepository {
   constructor(@InjectDrizzle() private readonly db: DrizzleDb) {}
 
-  async create(data: NewStory): Promise<Story> {
-    const [created] = await this.db.insert(stories).values(data).returning();
-    return created;
+  async create(data: NewStory, audienceUserIds?: string[]): Promise<Story> {
+    return this.db.transaction(async (tx) => {
+      const [created] = await tx.insert(stories).values(data).returning();
+      if (data.audienceMode !== "ALL_FRIENDS" && audienceUserIds && audienceUserIds.length > 0) {
+        await tx.insert(storyAudiences).values(
+          audienceUserIds.map((userId) => ({
+            storyId: created.id,
+            userId,
+          })),
+        );
+      }
+      return created;
+    });
   }
 
   async findById(id: string): Promise<Story | null> {
@@ -32,23 +78,72 @@ export class StoryPgRepository implements StoryRepository {
     const [story] = await this.db
       .select()
       .from(stories)
-      .where(and(eq(stories.id, id), gt(stories.expiresAt, now), isNull(stories.deletedAt)));
+      .where(
+        and(
+          eq(stories.id, id),
+          gt(stories.expiresAt, now),
+          isNull(stories.deletedAt),
+          isNull(stories.archivedAt),
+        ),
+      );
     return story ?? null;
   }
 
-  async findActiveByUserIds(userIds: string[]): Promise<Story[]> {
+  async findActiveByUserIds(userIds: string[], viewerId?: string): Promise<Story[]> {
     if (userIds.length === 0) return [];
     const now = new Date();
+
+    const conditions = [
+      inArray(stories.userId, userIds),
+      gt(stories.expiresAt, now),
+      isNull(stories.deletedAt),
+      isNull(stories.archivedAt),
+    ];
+
+    if (viewerId) {
+      // Exclude muted authors
+      const mutedRows = await this.db
+        .select({ authorId: storyMutes.authorId })
+        .from(storyMutes)
+        .where(eq(storyMutes.userId, viewerId));
+      const mutedAuthorIds = mutedRows.map((r) => r.authorId);
+      if (mutedAuthorIds.length > 0) {
+        conditions.push(notInArray(stories.userId, mutedAuthorIds));
+      }
+
+      // Filter audience: author always sees their own; for others, check audienceMode
+      conditions.push(
+        or(
+          eq(stories.userId, viewerId),
+          and(eq(stories.audienceMode, "ALL_FRIENDS")),
+          and(
+            eq(stories.audienceMode, "CUSTOM"),
+            inArray(
+              stories.id,
+              this.db
+                .select({ storyId: storyAudiences.storyId })
+                .from(storyAudiences)
+                .where(eq(storyAudiences.userId, viewerId)),
+            ),
+          ),
+          and(
+            eq(stories.audienceMode, "EXCLUDE"),
+            notInArray(
+              stories.id,
+              this.db
+                .select({ storyId: storyAudiences.storyId })
+                .from(storyAudiences)
+                .where(eq(storyAudiences.userId, viewerId)),
+            ),
+          ),
+        )!,
+      );
+    }
+
     return this.db
       .select()
       .from(stories)
-      .where(
-        and(
-          inArray(stories.userId, userIds),
-          gt(stories.expiresAt, now),
-          isNull(stories.deletedAt),
-        ),
-      )
+      .where(and(...conditions))
       .orderBy(asc(stories.createdAt));
   }
 
@@ -71,11 +166,22 @@ export class StoryPgRepository implements StoryRepository {
     return map;
   }
 
-  async findViewersByStoryId(storyId: string, cursor: string | undefined, limit: number) {
+  async findViewersByStoryId(
+    storyId: string,
+    cursor: string | undefined,
+    limit: number,
+  ): Promise<StoryViewersListResponse> {
     const cursorViewedAt = cursor
       ? sql`(SELECT sv.viewed_at FROM story_views sv WHERE sv.story_id = ${storyId} AND sv.user_id = ${cursor})`
       : undefined;
-    const conditions = [eq(storyViews.storyId, storyId)];
+
+    // Viewers list filters anonymous=false and retains identities for 24h
+    const conditions = [
+      eq(storyViews.storyId, storyId),
+      eq(storyViews.anonymous, false),
+      gte(storyViews.viewedAt, sql`now() - interval '24 hours'`),
+    ];
+
     if (cursor && cursorViewedAt) {
       conditions.push(
         or(
@@ -84,27 +190,37 @@ export class StoryPgRepository implements StoryRepository {
         )!,
       );
     }
-    const rows = await this.db
-      .select({
-        userId: users.id,
-        username: users.username,
-        fullName: users.fullName,
-        avatarUrl: users.avatarUrl,
-        viewedAt: storyViews.viewedAt,
-        reaction: storyReactions.emoji,
-      })
-      .from(storyViews)
-      .innerJoin(users, eq(storyViews.userId, users.id))
-      .leftJoin(
-        storyReactions,
-        and(
-          eq(storyViews.storyId, storyReactions.storyId),
-          eq(storyViews.userId, storyReactions.userId),
-        ),
-      )
-      .where(and(...conditions))
-      .orderBy(desc(storyViews.viewedAt), desc(users.id))
-      .limit(limit + 1);
+
+    const [rows, countResult] = await Promise.all([
+      this.db
+        .select({
+          userId: users.id,
+          username: users.username,
+          fullName: users.fullName,
+          avatarUrl: users.avatarUrl,
+          viewedAt: storyViews.viewedAt,
+          reaction: storyReactions.emoji,
+          reactionKind: storyReactions.kind,
+        })
+        .from(storyViews)
+        .innerJoin(users, eq(storyViews.userId, users.id))
+        .leftJoin(
+          storyReactions,
+          and(
+            eq(storyViews.storyId, storyReactions.storyId),
+            eq(storyViews.userId, storyReactions.userId),
+          ),
+        )
+        .where(and(...conditions))
+        .orderBy(desc(storyViews.viewedAt), desc(users.id))
+        .limit(limit + 1),
+      this.db
+        .select({ total: sql<number>`count(*)::int` })
+        .from(storyViews)
+        .where(eq(storyViews.storyId, storyId)),
+    ]);
+
+    const totalViewsCount = Number(countResult[0]?.total ?? 0);
 
     const viewers = rows.map((r) => ({
       user: {
@@ -115,8 +231,16 @@ export class StoryPgRepository implements StoryRepository {
       },
       viewedAt: r.viewedAt,
       reaction: r.reaction ?? null,
+      reactionKind: r.reactionKind ?? null,
     }));
-    return toCursorPage(viewers, limit, (viewer) => viewer.user.id);
+
+    const page = toCursorPage(viewers, limit, (viewer) => viewer.user.id);
+    return {
+      items: page.items,
+      nextCursor: page.nextCursor ?? null,
+      hasMore: page.hasMore,
+      totalViewsCount,
+    };
   }
 
   async findViewedStoryIds(userId: string, storyIds: string[]): Promise<Set<string>> {
@@ -129,10 +253,10 @@ export class StoryPgRepository implements StoryRepository {
     return new Set(rows.map((r) => r.storyId));
   }
 
-  async markAsViewed(storyId: string, userId: string): Promise<void> {
+  async markAsViewed(storyId: string, userId: string, anonymous: boolean = false): Promise<void> {
     await this.db
       .insert(storyViews)
-      .values({ storyId, userId, viewedAt: new Date() })
+      .values({ storyId, userId, anonymous, viewedAt: new Date() })
       .onConflictDoNothing();
   }
 
@@ -180,9 +304,18 @@ export class StoryPgRepository implements StoryRepository {
 
   async findPurgeable(limit: number): Promise<PurgeableStory[]> {
     return this.db
-      .select({ id: stories.id, objectKey: stories.objectKey })
+      .select({
+        id: stories.id,
+        objectKey: stories.objectKey,
+        userId: stories.userId,
+      })
       .from(stories)
-      .where(or(lt(stories.expiresAt, sql`now()`), isNotNull(stories.deletedAt)))
+      .where(
+        and(
+          isNull(stories.archivedAt),
+          or(lt(stories.expiresAt, sql`now()`), isNotNull(stories.deletedAt)),
+        ),
+      )
       .orderBy(asc(stories.expiresAt))
       .limit(limit);
   }
@@ -196,32 +329,54 @@ export class StoryPgRepository implements StoryRepository {
     return rows.length;
   }
 
+  async archiveStories(ids: string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    return this.db.transaction(async (tx) => {
+      // Set messages.story_id to null so snapshot is preserved without dangling FK
+      await tx.update(messages).set({ storyId: null }).where(inArray(messages.storyId, ids));
+
+      // Mark stories as archived and clear S3 pointers
+      const rows = await tx
+        .update(stories)
+        .set({
+          archivedAt: new Date(),
+          objectKey: null,
+          bucket: null,
+        })
+        .where(inArray(stories.id, ids))
+        .returning({ id: stories.id });
+      return rows.length;
+    });
+  }
+
   async addReactionWithView(
     storyId: string,
     userId: string,
     emoji: string,
+    kind: StoryReactionKind = "REACTION",
+    anonymous: boolean = false,
   ): Promise<StoryReactionResult> {
     const now = new Date();
     return this.db.transaction(async (tx) => {
-      await tx.insert(storyViews).values({ storyId, userId, viewedAt: now }).onConflictDoNothing();
+      await tx
+        .insert(storyViews)
+        .values({ storyId, userId, anonymous, viewedAt: now })
+        .onConflictDoNothing();
 
       const [row] = await tx
         .insert(storyReactions)
-        .values({ storyId, userId, emoji, createdAt: now, updatedAt: now })
+        .values({ storyId, userId, emoji, kind, createdAt: now, updatedAt: now })
         .onConflictDoUpdate({
           target: [storyReactions.storyId, storyReactions.userId],
-          // `created_at` is kept: it is the moment of the first reaction and
-          // the stable sort key of the reaction list.
-          set: { emoji, updatedAt: now },
+          set: { emoji, kind, updatedAt: now },
         })
         .returning({
           storyId: storyReactions.storyId,
           userId: storyReactions.userId,
           emoji: storyReactions.emoji,
+          kind: storyReactions.kind,
           createdAt: storyReactions.createdAt,
           updatedAt: storyReactions.updatedAt,
-          // `xmax = 0` is true only for a freshly inserted row; an upsert that
-          // updated an existing reaction sets xmax to the writing xid.
           isNew: sql<boolean>`xmax = 0`,
         });
       return {
@@ -229,6 +384,7 @@ export class StoryPgRepository implements StoryRepository {
           storyId: row.storyId,
           userId: row.userId,
           emoji: row.emoji,
+          kind: row.kind,
           createdAt: row.createdAt,
           updatedAt: row.updatedAt,
         },
@@ -249,11 +405,15 @@ export class StoryPgRepository implements StoryRepository {
     storyId: string,
     cursor: string | undefined,
     limit: number,
+    kind?: StoryReactionKind,
   ): Promise<CursorPage<StoryReactionResponse>> {
     const cursorCreatedAt = cursor
       ? sql`(SELECT sr.created_at FROM story_reactions sr WHERE sr.story_id = ${storyId} AND sr.user_id = ${cursor})`
       : undefined;
     const conditions = [eq(storyReactions.storyId, storyId)];
+    if (kind) {
+      conditions.push(eq(storyReactions.kind, kind));
+    }
     if (cursor && cursorCreatedAt) {
       conditions.push(
         or(
@@ -269,6 +429,7 @@ export class StoryPgRepository implements StoryRepository {
         fullName: users.fullName,
         avatarUrl: users.avatarUrl,
         emoji: storyReactions.emoji,
+        kind: storyReactions.kind,
         createdAt: storyReactions.createdAt,
       })
       .from(storyReactions)
@@ -285,24 +446,29 @@ export class StoryPgRepository implements StoryRepository {
         avatarUrl: r.avatarUrl,
       },
       emoji: r.emoji,
+      kind: r.kind,
       createdAt: r.createdAt,
     }));
     return toCursorPage(reactions, limit, (reaction) => reaction.user.id);
   }
 
-  async findUserReactions(userId: string, storyIds: string[]): Promise<Map<string, string>> {
+  async findUserReactions(
+    userId: string,
+    storyIds: string[],
+  ): Promise<Map<string, UserReactionDetail>> {
     if (storyIds.length === 0) return new Map();
     const rows = await this.db
       .select({
         storyId: storyReactions.storyId,
         emoji: storyReactions.emoji,
+        kind: storyReactions.kind,
       })
       .from(storyReactions)
       .where(and(eq(storyReactions.userId, userId), inArray(storyReactions.storyId, storyIds)));
 
-    const map = new Map<string, string>();
+    const map = new Map<string, UserReactionDetail>();
     for (const r of rows) {
-      map.set(r.storyId, r.emoji);
+      map.set(r.storyId, { emoji: r.emoji, kind: r.kind });
     }
     return map;
   }
@@ -323,5 +489,151 @@ export class StoryPgRepository implements StoryRepository {
       map.set(r.storyId, Number(r.count));
     }
     return map;
+  }
+
+  // Settings
+  async getUserStorySettings(userId: string): Promise<UserStorySettings> {
+    const [settings] = await this.db
+      .select()
+      .from(userStorySettings)
+      .where(eq(userStorySettings.userId, userId));
+
+    if (settings) {
+      return settings;
+    }
+
+    return {
+      userId,
+      viewedReceiptsEnabled: true,
+      archiveEnabled: true,
+      archiveDurationSecs: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+  }
+
+  async upsertUserStorySettings(
+    userId: string,
+    data: {
+      viewedReceiptsEnabled?: boolean;
+      archiveEnabled?: boolean;
+      archiveDurationSecs?: number | null;
+    },
+  ): Promise<UserStorySettings> {
+    const now = new Date();
+    const [row] = await this.db
+      .insert(userStorySettings)
+      .values({
+        userId,
+        viewedReceiptsEnabled: data.viewedReceiptsEnabled ?? true,
+        archiveEnabled: data.archiveEnabled ?? true,
+        archiveDurationSecs: data.archiveDurationSecs ?? null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [userStorySettings.userId],
+        set: {
+          ...(data.viewedReceiptsEnabled !== undefined && {
+            viewedReceiptsEnabled: data.viewedReceiptsEnabled,
+          }),
+          ...(data.archiveEnabled !== undefined && {
+            archiveEnabled: data.archiveEnabled,
+          }),
+          ...(data.archiveDurationSecs !== undefined && {
+            archiveDurationSecs: data.archiveDurationSecs,
+          }),
+          updatedAt: now,
+        },
+      })
+      .returning();
+    return row;
+  }
+
+  // Audience
+  async findStoryAudienceUserIds(storyId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ userId: storyAudiences.userId })
+      .from(storyAudiences)
+      .where(eq(storyAudiences.storyId, storyId));
+    return rows.map((r) => r.userId);
+  }
+
+  async isStoryAudience(storyId: string, userId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ userId: storyAudiences.userId })
+      .from(storyAudiences)
+      .where(and(eq(storyAudiences.storyId, storyId), eq(storyAudiences.userId, userId)))
+      .limit(1);
+    return Boolean(row);
+  }
+
+  // Mutes
+  async muteAuthor(userId: string, authorId: string): Promise<void> {
+    await this.db
+      .insert(storyMutes)
+      .values({ userId, authorId, createdAt: new Date() })
+      .onConflictDoNothing();
+  }
+
+  async unmuteAuthor(userId: string, authorId: string): Promise<boolean> {
+    const rows = await this.db
+      .delete(storyMutes)
+      .where(and(eq(storyMutes.userId, userId), eq(storyMutes.authorId, authorId)))
+      .returning({ userId: storyMutes.userId });
+    return rows.length > 0;
+  }
+
+  async getMutedAuthorIds(userId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ authorId: storyMutes.authorId })
+      .from(storyMutes)
+      .where(eq(storyMutes.userId, userId));
+    return rows.map((r) => r.authorId);
+  }
+
+  async isAuthorMuted(userId: string, authorId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ authorId: storyMutes.authorId })
+      .from(storyMutes)
+      .where(and(eq(storyMutes.userId, userId), eq(storyMutes.authorId, authorId)))
+      .limit(1);
+    return Boolean(row);
+  }
+
+  // Archives
+  async findArchivedStoriesByUserId(
+    userId: string,
+    cursor: string | undefined,
+    limit: number,
+  ): Promise<CursorPage<StoryItemResponse>> {
+    const cursorCreatedAt = cursor
+      ? sql`(SELECT s.created_at FROM stories s WHERE s.id = ${cursor} AND s.user_id = ${userId})`
+      : undefined;
+
+    const conditions = [
+      eq(stories.userId, userId),
+      isNotNull(stories.archivedAt),
+      isNull(stories.deletedAt),
+    ];
+
+    if (cursor && cursorCreatedAt) {
+      conditions.push(
+        or(
+          lt(stories.createdAt, cursorCreatedAt),
+          and(eq(stories.createdAt, cursorCreatedAt), lt(stories.id, cursor)),
+        )!,
+      );
+    }
+
+    const rows = await this.db
+      .select()
+      .from(stories)
+      .where(and(...conditions))
+      .orderBy(desc(stories.createdAt), desc(stories.id))
+      .limit(limit + 1);
+
+    const items = rows.map((s) => toStoryItemResponse(s));
+    return toCursorPage(items, limit, (s) => s.id);
   }
 }
