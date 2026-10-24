@@ -521,6 +521,24 @@ describe("StoryController", () => {
       expect(result.message).toBe("OK");
       expect(result.data.items).toHaveLength(1);
     });
+
+    it("throws TOO_MANY_REQUESTS when read rate limit is exceeded", async () => {
+      const rejectingLimiter = {
+        checkIpLimit: vi.fn(),
+        checkEmailLimit: vi.fn(),
+        checkMixedLimit: vi.fn().mockResolvedValue(false),
+      };
+      const limitedController = new StoryController(
+        { getReactions: getReactionsMock } as unknown as StoryService,
+        rejectingLimiter,
+      );
+
+      await expect(
+        limitedController.getReactions({ user: { id: "user-1" } }, mockStoryItem.id),
+      ).rejects.toMatchObject({
+        code: "TOO_MANY_REQUESTS",
+      });
+    });
   });
 
   describe("replyStory", () => {

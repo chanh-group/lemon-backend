@@ -19,6 +19,8 @@ import {
   RATE_LIMIT_STORY_REACT_USER_MAX,
   RATE_LIMIT_STORY_REPLY_IP_MAX,
   RATE_LIMIT_STORY_REPLY_USER_MAX,
+  RATE_LIMIT_STORY_REACTIONS_READ_IP_MAX,
+  RATE_LIMIT_STORY_REACTIONS_READ_USER_MAX,
   RATE_LIMIT_WINDOW_SECS,
   extractClientIp,
   type RateLimiter,
@@ -212,13 +214,14 @@ export class StoryController {
 
   @Get(":id/reactions")
   async getReactions(
-    @Req() req: { user?: unknown },
+    @Req() req: { user?: unknown; ip?: string; socket?: { remoteAddress?: string | null } },
     @Param("id", ParseUUIDPipe) storyId: string,
     @Query("cursor") cursor?: string,
     @Query("limit") limit?: string,
     @Query("kind") kind?: string,
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
+    await this.assertReactionsReadRateLimit(req, userId);
     const page = parseCursorPage(cursor, limit);
     const validKind =
       kind === "REACTION" || kind === "LIKE" ? (kind as StoryReactionKind) : undefined;
@@ -266,6 +269,23 @@ export class StoryController {
       extractClientIp(req),
       RATE_LIMIT_STORY_REACT_USER_MAX,
       RATE_LIMIT_STORY_REACT_IP_MAX,
+      RATE_LIMIT_WINDOW_SECS,
+    );
+    if (!allowed) {
+      throw new BusinessError("TOO_MANY_REQUESTS");
+    }
+  }
+
+  private async assertReactionsReadRateLimit(
+    req: { ip?: string; socket?: { remoteAddress?: string | null } },
+    userId: string,
+  ): Promise<void> {
+    const allowed = await this.rateLimiter.checkMixedLimit(
+      "story-reactions-read",
+      userId,
+      extractClientIp(req),
+      RATE_LIMIT_STORY_REACTIONS_READ_USER_MAX,
+      RATE_LIMIT_STORY_REACTIONS_READ_IP_MAX,
       RATE_LIMIT_WINDOW_SECS,
     );
     if (!allowed) {
