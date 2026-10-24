@@ -1,4 +1,5 @@
 import type { UserSummary } from "../../user/dto/response.js";
+import type { StoryAudienceMode, StoryReactionKind } from "../constants.js";
 
 export interface StoryItemResponse {
   id: string;
@@ -12,10 +13,15 @@ export interface StoryItemResponse {
   durationMs: number | null;
   caption: string | null;
   background: string | null;
+  allowReplies?: boolean;
+  allowReactions?: boolean;
+  audienceMode?: StoryAudienceMode;
+  archivedAt?: Date | null;
   createdAt: Date;
   expiresAt: Date;
   hasViewed?: boolean;
   myReaction?: string | null;
+  myReactionKind?: StoryReactionKind | null;
   reactionsCount?: number;
 }
 
@@ -28,11 +34,20 @@ export interface StoryViewerResponse {
   user: UserSummary;
   viewedAt: Date;
   reaction?: string | null;
+  reactionKind?: StoryReactionKind | null;
+}
+
+export interface StoryViewersListResponse {
+  items: StoryViewerResponse[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  totalViewsCount: number;
 }
 
 export interface StoryReactionResponse {
   user: UserSummary;
   emoji: string;
+  kind: StoryReactionKind;
   createdAt: Date;
 }
 
@@ -40,7 +55,14 @@ export interface StoryReactionResponse {
 export interface MyStoryReactionResponse {
   storyId: string;
   emoji: string;
+  kind: StoryReactionKind;
   createdAt: Date;
+}
+
+export interface UserStorySettingsResponse {
+  viewedReceiptsEnabled: boolean;
+  archiveEnabled: boolean;
+  archiveDurationSecs: number | null;
 }
 
 /**

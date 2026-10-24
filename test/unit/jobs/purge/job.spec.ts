@@ -11,6 +11,7 @@ import type { StorageService } from "../../../../src/utils/storage/store.js";
 
 type StoryStub = {
   findPurgeable: ReturnType<typeof vi.fn>;
+  archiveStories: ReturnType<typeof vi.fn>;
   deleteByIds: ReturnType<typeof vi.fn>;
 };
 
@@ -38,6 +39,7 @@ function setup(opts?: {
   const cache = new MemoryCacheService();
   const storyRepo: StoryStub = {
     findPurgeable: vi.fn().mockResolvedValue(opts?.stories ?? []),
+    archiveStories: vi.fn().mockImplementation((ids: string[]) => Promise.resolve(ids.length)),
     deleteByIds: vi.fn().mockImplementation((ids: string[]) => Promise.resolve(ids.length)),
   };
   const noteRepo: NoteStub = {
@@ -61,41 +63,43 @@ function setup(opts?: {
 
 describe("PurgeJob", () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
-  it("purges stories and notes and releases the lock", async () => {
-    const { job, cache, storyRepo, noteRepo, storage } = setup({
-      stories: [{ id: "s1", objectKey: null }],
+  it("acquires the distributed lock and cleans up stories and notes", async () => {
+    const { job, cache, storyRepo, noteRepo } = setup({
+      stories: [{ id: "s1", objectKey: null, userId: "u1" }],
       noteIds: ["n1"],
     });
+    const acquireSpy = vi.spyOn(cache, "tryAcquireLock");
+    const releaseSpy = vi.spyOn(cache, "releaseLock");
+
     await job.run();
-    expect(storyRepo.deleteByIds).toHaveBeenCalledWith(["s1"]);
-    expect(noteRepo.deleteByIds).toHaveBeenCalledWith(["n1"]);
-    expect(storage.deleteObjects).not.toHaveBeenCalled();
-    await expect(cache.tryAcquireLock(purgeLockKey(), "probe", PURGE_LOCK_TTL_SECS)).resolves.toBe(
-      true,
+
+    expect(acquireSpy).toHaveBeenCalledWith(
+      purgeLockKey(),
+      expect.any(String),
+      PURGE_LOCK_TTL_SECS,
     );
+    expect(storyRepo.findPurgeable).toHaveBeenCalled();
+    expect(noteRepo.findExpiredIds).toHaveBeenCalled();
+    expect(releaseSpy).toHaveBeenCalled();
   });
 
-  it("skips all work when another instance holds the lock", async () => {
-    const { job, cache, storyRepo, noteRepo, storage } = setup({
-      stories: [{ id: "s1", objectKey: null }],
-      noteIds: ["n1"],
-    });
-    await cache.tryAcquireLock(purgeLockKey(), "other", 60);
+  it("skips purge when the lock is held by another instance", async () => {
+    const { job, cache, storyRepo, noteRepo } = setup();
+    vi.spyOn(cache, "tryAcquireLock").mockResolvedValue(false);
+    const releaseSpy = vi.spyOn(cache, "releaseLock");
+
     await job.run();
+
     expect(storyRepo.findPurgeable).not.toHaveBeenCalled();
     expect(noteRepo.findExpiredIds).not.toHaveBeenCalled();
-    expect(storage.deleteObjects).not.toHaveBeenCalled();
-    await expect(cache.tryAcquireLock(purgeLockKey(), "probe", 60)).resolves.toBe(false);
+    expect(releaseSpy).not.toHaveBeenCalled();
   });
 
-  it("skips without purging when lock acquisition fails", async () => {
-    const { job, cache, storyRepo, noteRepo } = setup({
-      stories: [{ id: "s1", objectKey: null }],
-      noteIds: ["n1"],
-    });
+  it("skips purge when lock acquisition fails and does not release", async () => {
+    const { job, cache, storyRepo, noteRepo } = setup();
     const releaseSpy = vi.spyOn(cache, "releaseLock");
     vi.spyOn(cache, "tryAcquireLock").mockRejectedValue(
       new CacheError("lock acquire", new Error("down")),
@@ -106,56 +110,56 @@ describe("PurgeJob", () => {
     expect(releaseSpy).not.toHaveBeenCalled();
   });
 
-  it("deletes text stories without calling S3", async () => {
+  it("archives text stories without calling S3", async () => {
     const { job, storyRepo, storage } = setup({
-      stories: [{ id: "s1", objectKey: null }],
+      stories: [{ id: "s1", objectKey: null, userId: "u1" }],
     });
     await job.run();
     expect(storage.deleteObjects).not.toHaveBeenCalled();
-    expect(storyRepo.deleteByIds).toHaveBeenCalledWith(["s1"]);
+    expect(storyRepo.archiveStories).toHaveBeenCalledWith(["s1"]);
   });
 
-  it("keeps failed media rows and deletes confirmed ones plus text rows", async () => {
+  it("keeps failed media rows and archives confirmed ones plus text rows", async () => {
     const { job, storyRepo, storage } = setup({
       stories: [
-        { id: "s1", objectKey: "k1" },
-        { id: "s2", objectKey: "k2" },
-        { id: "s3", objectKey: null },
+        { id: "s1", objectKey: "k1", userId: "u1" },
+        { id: "s2", objectKey: "k2", userId: "u2" },
+        { id: "s3", objectKey: null, userId: "u3" },
       ],
       deleted: ["k1"],
       failed: ["k2"],
     });
     await job.run();
     expect(storage.deleteObjects).toHaveBeenCalledWith(["k1", "k2"]);
-    expect(storyRepo.deleteByIds).toHaveBeenCalledWith(["s3", "s1"]);
+    expect(storyRepo.archiveStories).toHaveBeenCalledWith(["s3", "s1"]);
   });
 
   it("keeps media rows when storage fails and still purges notes", async () => {
     const { job, storyRepo, noteRepo, storage } = setup({
       stories: [
-        { id: "s1", objectKey: "k1" },
-        { id: "s2", objectKey: null },
+        { id: "s1", objectKey: "k1", userId: "u1" },
+        { id: "s2", objectKey: null, userId: "u2" },
       ],
       noteIds: ["n1"],
     });
     storage.deleteObjects.mockRejectedValue(new StorageError("down"));
     await job.run();
-    expect(storyRepo.deleteByIds).toHaveBeenCalledWith(["s2"]);
+    expect(storyRepo.archiveStories).toHaveBeenCalledWith(["s2"]);
     expect(noteRepo.deleteByIds).toHaveBeenCalledWith(["n1"]);
   });
 
   it("re-running after a crash is idempotent", async () => {
     const { job, storyRepo, storage } = setup({
-      stories: [{ id: "s1", objectKey: "k1" }],
+      stories: [{ id: "s1", objectKey: "k1", userId: "u1" }],
       deleted: ["k1"],
     });
-    storyRepo.deleteByIds
+    storyRepo.archiveStories
       .mockRejectedValueOnce(new Error("crash before row delete"))
       .mockResolvedValueOnce(1);
     await job.run();
     await job.run();
     expect(storage.deleteObjects).toHaveBeenCalledTimes(2);
-    expect(storyRepo.deleteByIds).toHaveBeenCalledTimes(2);
+    expect(storyRepo.archiveStories).toHaveBeenCalledTimes(2);
   });
 
   it("limits each phase to PURGE_BATCH_LIMIT", async () => {
