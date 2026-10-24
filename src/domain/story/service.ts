@@ -255,8 +255,7 @@ export class StoryService {
       throw new BusinessError("CANNOT_REACT_OWN_STORY");
     }
 
-    const friendIds = await this.storyRepo.getFriendUserIds(story.userId);
-    if (!friendIds.includes(userId)) {
+    if (!(await this.storyRepo.isAcceptedFriend(story.userId, userId))) {
       throw new BusinessError("STORY_REACT_FORBIDDEN");
     }
 
@@ -331,8 +330,7 @@ export class StoryService {
       throw new BusinessError("CANNOT_REACT_OWN_STORY");
     }
 
-    const friendIds = await this.storyRepo.getFriendUserIds(story.userId);
-    if (!friendIds.includes(userId)) {
+    if (!(await this.storyRepo.isAcceptedFriend(story.userId, userId))) {
       throw new BusinessError("STORY_REACT_FORBIDDEN");
     }
 
@@ -383,8 +381,7 @@ export class StoryService {
       throw new BusinessError("CANNOT_REPLY_OWN_STORY");
     }
 
-    const friendIds = await this.storyRepo.getFriendUserIds(story.userId);
-    if (!friendIds.includes(userId)) {
+    if (!(await this.storyRepo.isAcceptedFriend(story.userId, userId))) {
       throw new BusinessError("STORY_REPLY_FORBIDDEN");
     }
 
