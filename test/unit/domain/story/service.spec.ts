@@ -688,11 +688,12 @@ describe("StoryService", () => {
     });
 
     it("throws STORY_REACT_FORBIDDEN when user is not a friend of the author", async () => {
-      getFriendUserIdsMock.mockResolvedValueOnce(["friend-99"]);
+      isAcceptedFriendMock.mockResolvedValueOnce(false);
 
       await expect(service.reactStory("stranger-user", mockStory.id, "❤️")).rejects.toMatchObject({
         code: "STORY_REACT_FORBIDDEN",
       });
+      expect(isAcceptedFriendMock).toHaveBeenCalledWith("user-owner-1", "stranger-user");
     });
 
     it("saves reaction, marks viewed, invalidates feeds, and emits realtime event", async () => {
@@ -819,11 +820,12 @@ describe("StoryService", () => {
     });
 
     it("throws STORY_REACT_FORBIDDEN when caller is not a friend", async () => {
-      getFriendUserIdsMock.mockResolvedValueOnce(["friend-99"]);
+      isAcceptedFriendMock.mockResolvedValueOnce(false);
 
       await expect(service.unreactStory("stranger-user", mockStory.id)).rejects.toMatchObject({
         code: "STORY_REACT_FORBIDDEN",
       });
+      expect(isAcceptedFriendMock).toHaveBeenCalledWith("user-owner-1", "stranger-user");
     });
 
     it("deletes reaction and invalidates feed caches on success", async () => {
@@ -930,11 +932,12 @@ describe("StoryService", () => {
     });
 
     it("throws STORY_REPLY_FORBIDDEN when user is not a friend", async () => {
-      getFriendUserIdsMock.mockResolvedValueOnce(["friend-99"]);
+      isAcceptedFriendMock.mockResolvedValueOnce(false);
 
       await expect(service.replyStory("stranger", mockStory.id, replyDto)).rejects.toMatchObject({
         code: "STORY_REPLY_FORBIDDEN",
       });
+      expect(isAcceptedFriendMock).toHaveBeenCalledWith("user-owner-1", "stranger");
     });
 
     it("creates 1:1 conversation, sends message with story preview, and marks viewed", async () => {
