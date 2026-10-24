@@ -44,7 +44,11 @@ import {
   userStorySettings,
 } from "./schema.js";
 import { toCursorPage, type CursorPage } from "../shared.js";
-import { toStoryItemResponse } from "./dto/mapper.js";
+import {
+  decodeReactionCursor,
+  encodeReactionCursor,
+  toStoryItemResponse,
+} from "./dto/mapper.js";
 
 @Injectable()
 export class StoryPgRepository implements StoryRepository {
@@ -407,20 +411,31 @@ export class StoryPgRepository implements StoryRepository {
     limit: number,
     kind?: StoryReactionKind,
   ): Promise<CursorPage<StoryReactionResponse>> {
-    const cursorCreatedAt = cursor
-      ? sql`(SELECT sr.created_at FROM story_reactions sr WHERE sr.story_id = ${storyId} AND sr.user_id = ${cursor})`
-      : undefined;
     const conditions = [eq(storyReactions.storyId, storyId)];
     if (kind) {
       conditions.push(eq(storyReactions.kind, kind));
     }
-    if (cursor && cursorCreatedAt) {
-      conditions.push(
-        or(
-          lt(storyReactions.createdAt, cursorCreatedAt),
-          and(eq(storyReactions.createdAt, cursorCreatedAt), lt(users.id, cursor)),
-        )!,
-      );
+    if (cursor) {
+      const decoded = decodeReactionCursor(cursor);
+      if (decoded) {
+        conditions.push(
+          or(
+            lt(storyReactions.createdAt, decoded.createdAt),
+            and(
+              eq(storyReactions.createdAt, decoded.createdAt),
+              lt(users.id, decoded.userId),
+            ),
+          )!,
+        );
+      } else {
+        const cursorCreatedAt = sql`(SELECT sr.created_at FROM story_reactions sr WHERE sr.story_id = ${storyId} AND sr.user_id = ${cursor})`;
+        conditions.push(
+          or(
+            lt(storyReactions.createdAt, cursorCreatedAt),
+            and(eq(storyReactions.createdAt, cursorCreatedAt), lt(users.id, cursor)),
+          )!,
+        );
+      }
     }
     const rows = await this.db
       .select({
@@ -449,7 +464,9 @@ export class StoryPgRepository implements StoryRepository {
       kind: r.kind,
       createdAt: r.createdAt,
     }));
-    return toCursorPage(reactions, limit, (reaction) => reaction.user.id);
+    return toCursorPage(reactions, limit, (reaction) =>
+      encodeReactionCursor(reaction.createdAt, reaction.user.id),
+    );
   }
 
   async findUserReactions(

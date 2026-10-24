@@ -3,6 +3,7 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
 import type { DrizzleDb } from "../../../../src/configs/database.js";
 import { StoryPgRepository } from "../../../../src/domain/story/pg.js";
+import { encodeReactionCursor } from "../../../../src/domain/story/dto/mapper.js";
 import { stories, storyReactions, storyViews } from "../../../../src/domain/story/schema.js";
 import { friendships } from "../../../../src/domain/friend/schema.js";
 
@@ -287,6 +288,20 @@ describe("StoryPgRepository purge queries", () => {
 
       const whereSql = render(whereMock.mock.calls[0][0]);
       expect(whereSql).toContain("SELECT sr.created_at FROM story_reactions sr");
+      expect(whereSql).toContain('"story_reactions"."created_at" <');
+      expect(whereSql).toContain('"users"."id" <');
+    });
+
+    it("findReactionsByStoryId pages with an encoded cursor without subquery", async () => {
+      const { db, whereMock, limitMock } = makeDb();
+      limitMock.mockResolvedValue([]);
+      const repo = new StoryPgRepository(db);
+      const encoded = encodeReactionCursor(new Date("2026-10-24T18:00:00.000Z"), "u1");
+
+      await repo.findReactionsByStoryId("s1", encoded, 20);
+
+      const whereSql = render(whereMock.mock.calls[0][0]);
+      expect(whereSql).not.toContain("SELECT sr.created_at FROM story_reactions sr");
       expect(whereSql).toContain('"story_reactions"."created_at" <');
       expect(whereSql).toContain('"users"."id" <');
     });

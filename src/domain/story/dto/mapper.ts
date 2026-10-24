@@ -99,3 +99,22 @@ export function groupStoriesByUser(
 
   return result;
 }
+
+export function encodeReactionCursor(createdAt: Date, userId: string): string {
+  return Buffer.from(`${createdAt.getTime()}_${userId}`).toString("base64url");
+}
+
+export function decodeReactionCursor(cursor: string): { createdAt: Date; userId: string } | null {
+  try {
+    const raw = Buffer.from(cursor, "base64url").toString("utf-8");
+    const idx = raw.indexOf("_");
+    if (idx === -1) return null;
+    const msStr = raw.slice(0, idx);
+    const userId = raw.slice(idx + 1);
+    const ms = Number(msStr);
+    if (!Number.isSafeInteger(ms) || ms <= 0 || !userId) return null;
+    return { createdAt: new Date(ms), userId };
+  } catch {
+    return null;
+  }
+}

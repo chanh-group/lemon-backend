@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  decodeReactionCursor,
+  encodeReactionCursor,
   groupStoriesByUser,
   toStoryItemResponse,
 } from "../../../../src/domain/story/dto/mapper.js";
@@ -124,5 +126,27 @@ describe("groupStoriesByUser", () => {
     expect(feed[0].stories[0].myReaction).toBe("🔥");
     expect(feed[0].stories[0].myReactionKind).toBe("REACTION");
     expect(feed[0].stories[0]).not.toHaveProperty("reactionsCount");
+  });
+});
+
+describe("encodeReactionCursor & decodeReactionCursor", () => {
+  it("encodes and decodes createdAt + userId roundtrip", () => {
+    const createdAt = new Date("2026-10-24T18:00:00.000Z");
+    const userId = "0193a2b1-0000-7000-8000-000000000001";
+    const encoded = encodeReactionCursor(createdAt, userId);
+
+    expect(typeof encoded).toBe("string");
+    expect(encoded).not.toContain(":");
+
+    const decoded = decodeReactionCursor(encoded);
+    expect(decoded).not.toBeNull();
+    expect(decoded?.createdAt.getTime()).toBe(createdAt.getTime());
+    expect(decoded?.userId).toBe(userId);
+  });
+
+  it("returns null on malformed cursor string", () => {
+    expect(decodeReactionCursor("invalid")).toBeNull();
+    expect(decodeReactionCursor("")).toBeNull();
+    expect(decodeReactionCursor("not_a_valid_base64url!!")).toBeNull();
   });
 });
