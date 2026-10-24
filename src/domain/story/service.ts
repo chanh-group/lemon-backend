@@ -189,7 +189,7 @@ export class StoryService {
       throw new BusinessError("STORY_NOT_FOUND");
     }
 
-    await this.assertCanViewStory(story, userId);
+    await this.assertCanViewStory(story, userId, "STORY_VIEW_FORBIDDEN");
 
     const [viewedIds, userReactionsMap, reactionsCountMap] = await Promise.all([
       this.storyRepo.findViewedStoryIds(userId, [storyId]),
@@ -218,7 +218,7 @@ export class StoryService {
       return;
     }
 
-    await this.assertCanViewStory(story, userId);
+    await this.assertCanViewStory(story, userId, "STORY_VIEW_FORBIDDEN");
 
     const settings = await this.storyRepo.getUserStorySettings(userId);
     const anonymous = !settings.viewedReceiptsEnabled;
@@ -280,7 +280,7 @@ export class StoryService {
       throw new BusinessError("CANNOT_REACT_OWN_STORY");
     }
 
-    await this.assertCanViewStory(story, userId);
+    await this.assertCanViewStory(story, userId, "STORY_REACT_FORBIDDEN");
 
     if (!story.allowReactions) {
       throw new BusinessError("STORY_INTERACTIONS_DISABLED");
@@ -338,7 +338,7 @@ export class StoryService {
       throw new BusinessError("CANNOT_REACT_OWN_STORY");
     }
 
-    await this.assertCanViewStory(story, userId);
+    await this.assertCanViewStory(story, userId, "STORY_REACT_FORBIDDEN");
 
     if (!story.allowReactions) {
       throw new BusinessError("STORY_INTERACTIONS_DISABLED");
@@ -420,7 +420,7 @@ export class StoryService {
       throw new BusinessError("CANNOT_REACT_OWN_STORY");
     }
 
-    await this.assertCanViewStory(story, userId);
+    await this.assertCanViewStory(story, userId, "STORY_REACT_FORBIDDEN");
 
     const removed = await this.storyRepo.deleteReaction(storyId, userId);
     if (!removed) {
@@ -470,7 +470,7 @@ export class StoryService {
       throw new BusinessError("CANNOT_REPLY_OWN_STORY");
     }
 
-    await this.assertCanViewStory(story, userId);
+    await this.assertCanViewStory(story, userId, "STORY_REPLY_FORBIDDEN");
 
     if (!story.allowReplies) {
       throw new BusinessError("STORY_INTERACTIONS_DISABLED");
@@ -545,13 +545,17 @@ export class StoryService {
     return this.storyRepo.findArchivedStoriesByUserId(userId, cursor, limit);
   }
 
-  private async assertCanViewStory(story: Story, viewerId: string): Promise<void> {
+  private async assertCanViewStory(
+    story: Story,
+    viewerId: string,
+    forbiddenCode: "STORY_VIEW_FORBIDDEN" | "STORY_REACT_FORBIDDEN" | "STORY_REPLY_FORBIDDEN" = "STORY_VIEW_FORBIDDEN",
+  ): Promise<void> {
     if (story.userId === viewerId) return;
 
     if (story.audienceMode === "ALL_FRIENDS") {
       const isFriend = await this.storyRepo.isAcceptedFriend(story.userId, viewerId);
       if (!isFriend) {
-        throw new BusinessError("STORY_VIEW_FORBIDDEN");
+        throw new BusinessError(forbiddenCode);
       }
       return;
     }
@@ -559,7 +563,7 @@ export class StoryService {
     if (story.audienceMode === "CUSTOM") {
       const isAudience = await this.storyRepo.isStoryAudience(story.id, viewerId);
       if (!isAudience) {
-        throw new BusinessError("STORY_VIEW_FORBIDDEN");
+        throw new BusinessError(forbiddenCode);
       }
       return;
     }
@@ -567,11 +571,11 @@ export class StoryService {
     if (story.audienceMode === "EXCLUDE") {
       const isFriend = await this.storyRepo.isAcceptedFriend(story.userId, viewerId);
       if (!isFriend) {
-        throw new BusinessError("STORY_VIEW_FORBIDDEN");
+        throw new BusinessError(forbiddenCode);
       }
       const isExcluded = await this.storyRepo.isStoryAudience(story.id, viewerId);
       if (isExcluded) {
-        throw new BusinessError("STORY_VIEW_FORBIDDEN");
+        throw new BusinessError(forbiddenCode);
       }
       return;
     }
