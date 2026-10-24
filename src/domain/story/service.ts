@@ -479,9 +479,10 @@ export class StoryService {
     const settings = await this.storyRepo.getUserStorySettings(userId);
     const anonymous = !settings.viewedReceiptsEnabled;
 
-    await this.storyRepo.markAsViewed(storyId, userId, anonymous);
-
-    const conv = await this.conversationService.getOrCreateDirect(userId, story.userId);
+    const [, conv] = await Promise.all([
+      this.storyRepo.markAsViewed(storyId, userId, anonymous),
+      this.conversationService.getOrCreateDirect(userId, story.userId),
+    ]);
     const storyPreview = toStoryPreview(story);
 
     const message = await this.messageService.sendMessage(
