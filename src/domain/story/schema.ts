@@ -110,6 +110,11 @@ export const storyReactions = pgTable(
     primaryKey({ columns: [table.storyId, table.userId] }),
     index("story_reactions_story_idx").on(table.storyId),
     index("story_reactions_user_idx").on(table.userId),
+    index("story_reactions_story_cursor_idx").on(
+      table.storyId,
+      table.createdAt.desc(),
+      table.userId.desc(),
+    ),
   ],
 );
 
