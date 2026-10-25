@@ -35,9 +35,20 @@ export const MIME_EXTENSION_MAP: Record<string, string | undefined> = {
   "image/png": "png",
   "image/webp": "webp",
   "image/gif": "gif",
+  "image/svg+xml": "svg",
+  "image/bmp": "bmp",
+  "image/x-icon": "ico",
+  "image/vnd.microsoft.icon": "ico",
+  "image/heic": "heic",
+  "image/heif": "heif",
+  "image/tiff": "tiff",
   "video/mp4": "mp4",
   "video/webm": "webm",
   "video/quicktime": "mov",
+  "video/x-matroska": "mkv",
+  "video/x-msvideo": "avi",
+  "video/mpeg": "mpeg",
+  "video/3gpp": "3gp",
 };
 export const S3_PRESIGN_TTL_SECS = 300;
 export const S3_DELETE_BATCH_SIZE = 1000;
@@ -50,12 +61,21 @@ export const CHAT_ALLOWED_IMAGE_MIME = [
   "image/webp",
   "image/gif",
   "image/svg+xml",
+  "image/bmp",
+  "image/x-icon",
+  "image/vnd.microsoft.icon",
+  "image/heic",
+  "image/heif",
+  "image/tiff",
 ] as const;
 export const CHAT_ALLOWED_VIDEO_MIME = [
   "video/mp4",
   "video/webm",
   "video/quicktime",
   "video/x-matroska",
+  "video/x-msvideo",
+  "video/mpeg",
+  "video/3gpp",
 ] as const;
 export const CHAT_ALLOWED_AUDIO_MIME = [
   "audio/mpeg",
