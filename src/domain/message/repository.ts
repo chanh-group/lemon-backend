@@ -1,14 +1,31 @@
 import type { StoryPreview } from "../story/dto/response.js";
-import type { Message } from "./schema.js";
+import type { Message, MessageAttachment } from "./schema.js";
+
+export type MessageWithAttachments = Message & {
+  attachments?: MessageAttachment[];
+};
+
+export interface AttachmentInsertData {
+  bucket: string;
+  objectKey: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  kind?: "IMAGE" | "VIDEO" | "AUDIO" | "FILE";
+  width?: number | null;
+  height?: number | null;
+  durationMs?: number | null;
+  checksum?: string | null;
+}
 
 export interface MessageTimelineResult {
-  items: Message[];
+  items: MessageWithAttachments[];
   nextCursor?: string;
   hasMore: boolean;
 }
 
 export interface CreatedMessageResult {
-  message: Message;
+  message: MessageWithAttachments;
   isNew: boolean;
 }
 
@@ -17,7 +34,7 @@ export interface MessageRepository {
     conversationId: string,
     senderId: string,
     clientMsgId: string,
-  ): Promise<Message | null>;
+  ): Promise<MessageWithAttachments | null>;
   createMessageWithConversationUpdate(messageData: {
     conversationId: string;
     senderId: string;
@@ -36,6 +53,7 @@ export interface MessageRepository {
     requiredFriendship?: { userAId: string; userBId: string };
     storyId?: string | null;
     storyPreview?: StoryPreview | null;
+    attachments?: AttachmentInsertData[];
   }): Promise<CreatedMessageResult>;
   findTimeline(
     conversationId: string,
@@ -43,14 +61,14 @@ export interface MessageRepository {
     limit?: number,
     after?: string,
   ): Promise<MessageTimelineResult>;
-  findById(messageId: string): Promise<Message | null>;
+  findById(messageId: string): Promise<MessageWithAttachments | null>;
   resolveWriteMiss(
     messageId: string,
     userId: string,
     conversationId: string,
-  ): Promise<Message | null>;
-  updateBody(messageId: string, senderId: string, body: string): Promise<Message | null>;
-  softDelete(messageId: string, senderId: string): Promise<Message | null>;
+  ): Promise<MessageWithAttachments | null>;
+  updateBody(messageId: string, senderId: string, body: string): Promise<MessageWithAttachments | null>;
+  softDelete(messageId: string, senderId: string): Promise<MessageWithAttachments | null>;
 }
 
 export const MESSAGE_REPOSITORY = Symbol("MESSAGE_REPOSITORY");

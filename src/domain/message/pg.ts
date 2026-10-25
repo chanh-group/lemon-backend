@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, asc, desc, eq, gt, isNull, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, or } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../utils/errors/pg.js";
@@ -9,12 +9,19 @@ import { friendships } from "../friend/schema.js";
 import { DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE } from "../pagination.constants.js";
 import { ATTACHMENT_PREVIEW_TOKEN, STORY_REACTION_PREVIEW_TOKEN } from "./constants.js";
 import type {
+  AttachmentInsertData,
   CreatedMessageResult,
   MessageRepository,
   MessageTimelineResult,
+  MessageWithAttachments,
 } from "./repository.js";
 import type { StoryPreview } from "../story/dto/response.js";
-import { type Message, messages } from "./schema.js";
+import {
+  type Message,
+  type MessageAttachment,
+  messageAttachments,
+  messages,
+} from "./schema.js";
 
 /**
  * Conversation inbox preview. A story reaction carries the emoji as its body,
@@ -34,7 +41,7 @@ export class MessagePgRepository implements MessageRepository {
     conversationId: string,
     senderId: string,
     clientMsgId: string,
-  ): Promise<Message | null> {
+  ): Promise<MessageWithAttachments | null> {
     const [msg] = await this.db
       .select()
       .from(messages)
@@ -67,6 +74,7 @@ export class MessagePgRepository implements MessageRepository {
     requiredFriendship?: { userAId: string; userBId: string };
     storyId?: string | null;
     storyPreview?: StoryPreview | null;
+    attachments?: AttachmentInsertData[];
   }): Promise<CreatedMessageResult> {
     try {
       return await this.db.transaction(async (tx) => {
@@ -99,7 +107,16 @@ export class MessagePgRepository implements MessageRepository {
               ),
             )
             .limit(1);
-          if (existing) return { message: existing, isNew: false };
+          if (existing) {
+            if (messageData.attachments && messageData.attachments.length > 0) {
+              const existingAttachments = await tx
+                .select()
+                .from(messageAttachments)
+                .where(eq(messageAttachments.messageId, existing.id));
+              return { message: { ...existing, attachments: existingAttachments }, isNew: false };
+            }
+            return { message: existing, isNew: false };
+          }
         }
 
         // 2. Insert new message
@@ -116,6 +133,28 @@ export class MessagePgRepository implements MessageRepository {
             storyPreview: messageData.storyPreview ?? null,
           })
           .returning();
+
+        let insertedAttachments: MessageAttachment[] | undefined;
+        if (messageData.attachments && messageData.attachments.length > 0) {
+          insertedAttachments = await tx
+            .insert(messageAttachments)
+            .values(
+              messageData.attachments.map((att) => ({
+                messageId: newMsg.id,
+                kind: att.kind ?? (messageData.kind as any) ?? "FILE",
+                bucket: att.bucket,
+                objectKey: att.objectKey,
+                fileName: att.fileName,
+                mimeType: att.mimeType,
+                sizeBytes: att.sizeBytes,
+                width: att.width ?? null,
+                height: att.height ?? null,
+                durationMs: att.durationMs ?? null,
+                checksum: att.checksum ?? null,
+              })),
+            )
+            .returning();
+        }
 
         // 3. Atomically update parent conversation inbox fields
         const preview = toConversationPreview(newMsg.kind, newMsg.body);
@@ -141,7 +180,12 @@ export class MessagePgRepository implements MessageRepository {
             ),
           );
 
-        return { message: newMsg, isNew: true };
+        return {
+          message: insertedAttachments
+            ? { ...newMsg, attachments: insertedAttachments }
+            : newMsg,
+          isNew: true,
+        };
       });
     } catch (err: unknown) {
       if (messageData.clientMsgId && isUniqueViolation(err, "messages_client_msg_uq")) {
@@ -189,16 +233,47 @@ export class MessagePgRepository implements MessageRepository {
     const items = hasMore ? rows.slice(0, queryLimit) : rows;
     const nextCursor = hasMore && items.length > 0 ? items[items.length - 1].id : undefined;
 
+    if (items.length === 0) {
+      return {
+        items: [],
+        nextCursor,
+        hasMore,
+      };
+    }
+
+    const messageIds = items.map((m) => m.id);
+    const attachmentRows = await this.db
+      .select()
+      .from(messageAttachments)
+      .where(inArray(messageAttachments.messageId, messageIds));
+
+    const attachmentsByMessageId = new Map<string, MessageAttachment[]>();
+    for (const att of attachmentRows) {
+      const list = attachmentsByMessageId.get(att.messageId) ?? [];
+      list.push(att);
+      attachmentsByMessageId.set(att.messageId, list);
+    }
+
+    const itemsWithAttachments = items.map((m) => ({
+      ...m,
+      attachments: attachmentsByMessageId.get(m.id) ?? [],
+    }));
+
     return {
-      items,
+      items: itemsWithAttachments,
       nextCursor,
       hasMore,
     };
   }
 
-  async findById(messageId: string): Promise<Message | null> {
+  async findById(messageId: string): Promise<MessageWithAttachments | null> {
     const [msg] = await this.db.select().from(messages).where(eq(messages.id, messageId)).limit(1);
-    return msg ?? null;
+    if (!msg) return null;
+    const attachments = await this.db
+      .select()
+      .from(messageAttachments)
+      .where(eq(messageAttachments.messageId, messageId));
+    return { ...msg, attachments };
   }
 
   async resolveWriteMiss(

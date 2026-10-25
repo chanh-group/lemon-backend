@@ -8,14 +8,19 @@ describe("FileService", () => {
   let presignPutMock: Mock<
     (params: { objectKey: string; mimeType: string }) => Promise<{ uploadUrl: string }>
   >;
+  let putObjectMock: Mock<
+    (params: { objectKey: string; body: Buffer; mimeType: string }) => Promise<void>
+  >;
 
   const storage = () =>
     ({
       presignPut: presignPutMock,
+      putObject: putObjectMock,
     }) as unknown as StorageService;
 
   beforeEach(() => {
     presignPutMock = vi.fn().mockResolvedValue({ uploadUrl: "https://s3.example/signed" });
+    putObjectMock = vi.fn().mockResolvedValue(undefined);
     service = new FileService(storage());
   });
 
@@ -93,6 +98,77 @@ describe("FileService", () => {
         sizeBytes: 1024,
         mimeType: "image/jpeg",
       }),
+    ).rejects.toMatchObject({ code: "PRESIGN_FAILED" });
+  });
+
+  it("presigns a chat file upload up to 25MB with fileName", async () => {
+    const result = await service.presign("user-1", {
+      kind: "CHAT_FILE",
+      sizeBytes: 20 * 1024 * 1024,
+      mimeType: "application/pdf",
+      fileName: "Tài liệu Báo Cáo.pdf",
+      conversationId: "0193a2b1-0000-7000-8000-000000000001",
+    });
+
+    expect(result.uploadUrl).toBe("https://s3.example/signed");
+    expect(result.objectKey).toContain("chat/0193a2b1-0000-7000-8000-000000000001/");
+    expect(result.objectKey).toContain("T_i_li_u_B_o_C_o.pdf");
+  });
+
+  it("rejects chat files exceeding 25MB", async () => {
+    await expect(
+      service.presign("user-1", {
+        kind: "CHAT_FILE",
+        sizeBytes: 25 * 1024 * 1024 + 1,
+        mimeType: "application/pdf",
+      }),
+    ).rejects.toMatchObject({ code: "FILE_TOO_LARGE", params: { maxMb: "25" } });
+  });
+
+  it("rejects dangerous executable files in chat", async () => {
+    await expect(
+      service.presign("user-1", {
+        kind: "CHAT_FILE",
+        sizeBytes: 1024,
+        mimeType: "application/octet-stream",
+        fileName: "malware.exe",
+      }),
+    ).rejects.toMatchObject({ code: "FILE_TYPE_NOT_ALLOWED" });
+  });
+
+  it("uploads a file directly to storage via upload fallback", async () => {
+    const result = await service.upload(
+      "user-1",
+      {
+        buffer: Buffer.from("image-bytes"),
+        size: 1024,
+        mimetype: "image/png",
+        originalname: "avatar.png",
+      },
+      "CHAT_IMAGE",
+      "conv-123",
+    );
+
+    expect(putObjectMock).toHaveBeenCalledTimes(1);
+    expect(result.objectKey).toContain("chat/conv-123/");
+    expect(result.objectKey).toContain("avatar.png");
+  });
+
+  it("fails closed with PRESIGN_FAILED when putObject errors in upload", async () => {
+    putObjectMock.mockRejectedValueOnce(new StorageError("r2 failure"));
+
+    await expect(
+      service.upload(
+        "user-1",
+        {
+          buffer: Buffer.from("image-bytes"),
+          size: 1024,
+          mimetype: "image/png",
+          originalname: "avatar.png",
+        },
+        "CHAT_IMAGE",
+        "conv-123",
+      ),
     ).rejects.toMatchObject({ code: "PRESIGN_FAILED" });
   });
 });

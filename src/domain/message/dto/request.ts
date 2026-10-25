@@ -2,6 +2,20 @@ import { z } from "zod";
 import { vmsg } from "../../../utils/validation.js";
 import { MESSAGE_MAX_BODY_LENGTH } from "../constants.js";
 
+export const messageAttachmentInputSchema = z.object({
+  objectKey: z.string().min(1).max(512),
+  fileName: z.string().min(1).max(255),
+  mimeType: z.string().min(1).max(255),
+  sizeBytes: z.number().int().min(1),
+  kind: z.enum(["IMAGE", "VIDEO", "AUDIO", "FILE"]).optional(),
+  width: z.number().int().optional(),
+  height: z.number().int().optional(),
+  durationMs: z.number().int().optional(),
+  checksum: z.string().optional(),
+});
+
+export type MessageAttachmentInputDto = z.infer<typeof messageAttachmentInputSchema>;
+
 export const sendMessageSchema = z
   .object({
     body: z
@@ -14,10 +28,12 @@ export const sendMessageSchema = z
     kind: z.enum(["TEXT", "IMAGE", "VIDEO", "AUDIO", "FILE", "SYSTEM"]).default("TEXT"),
     clientMsgId: z.string().uuid(vmsg("VALIDATION_UUID_CLIENT_MSG")).optional(),
     replyToId: z.string().uuid(vmsg("VALIDATION_UUID_REPLY_TO")).optional(),
+    attachments: z.array(messageAttachmentInputSchema).max(10).optional(),
   })
   .refine(
     (data) => {
-      if (data.kind === "TEXT") {
+      const hasAttachments = Boolean(data.attachments && data.attachments.length > 0);
+      if (data.kind === "TEXT" && !hasAttachments) {
         return typeof data.body === "string" && data.body.trim().length > 0;
       }
       return true;
