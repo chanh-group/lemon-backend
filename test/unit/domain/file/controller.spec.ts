@@ -45,6 +45,39 @@ describe("FileController", () => {
     });
   });
 
+  it("handles uploadFile fallback endpoint", async () => {
+    const uploadMock = vi.fn().mockResolvedValue({ objectKey: "chat/c1/file.png" });
+    const c = new FileController(
+      { presign: presignMock, upload: uploadMock } as unknown as FileService,
+      new MemoryRateLimiter(),
+    );
+
+    const result = await c.uploadFile(
+      { user: { id: "user-1" } },
+      {
+        buffer: Buffer.from("data"),
+        size: 4,
+        mimetype: "image/png",
+        originalname: "file.png",
+      },
+      "CHAT_IMAGE",
+      "c1",
+    );
+
+    expect(uploadMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      success: true,
+      message: "OK",
+      data: { objectKey: "chat/c1/file.png" },
+    });
+  });
+
+  it("throws BAD_REQUEST in uploadFile when file is missing", async () => {
+    await expect(
+      controller.uploadFile({ user: { id: "user-1" } }, undefined, "CHAT_IMAGE"),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
   it("throws BusinessError UNAUTHORIZED when req.user is absent", async () => {
     await expect(controller.presignFile({}, dto)).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });

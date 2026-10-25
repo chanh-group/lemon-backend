@@ -14,6 +14,14 @@ export class UnavailableStorageService implements StorageService {
     throw new StorageError("storage is not configured");
   }
 
+  async putObject(_params: {
+    objectKey: string;
+    body: Buffer | Uint8Array;
+    mimeType: string;
+  }): Promise<void> {
+    throw new StorageError("storage is not configured");
+  }
+
   async headObject(
     _objectKey: string,
   ): Promise<{ contentLength: number; contentType: string } | null> {

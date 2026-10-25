@@ -58,6 +58,32 @@ describe("S3StorageService", () => {
     ).rejects.toBeInstanceOf(StorageError);
   });
 
+  it("uploads object successfully via putObject", async () => {
+    const send = vi.fn().mockResolvedValue({});
+    const { service } = createStorage(send);
+    const body = Buffer.from("hello world");
+
+    await service.putObject({ objectKey: "chat/u1/file.txt", body, mimeType: "text/plain" });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0]).toBeInstanceOf(PutObjectCommand);
+    expect(send.mock.calls[0][0].input).toMatchObject({
+      Bucket: "test-bucket",
+      Key: "chat/u1/file.txt",
+      ContentType: "text/plain",
+      Body: body,
+    });
+  });
+
+  it("wraps putObject errors in StorageError", async () => {
+    const send = vi.fn().mockRejectedValue(new Error("R2 down"));
+    const { service } = createStorage(send);
+
+    await expect(
+      service.putObject({ objectKey: "k", body: Buffer.from("test"), mimeType: "text/plain" }),
+    ).rejects.toBeInstanceOf(StorageError);
+  });
+
   it("returns head metadata on success", async () => {
     const send = vi.fn().mockResolvedValue({ ContentLength: 1234, ContentType: "image/png" });
     const { service } = createStorage(send);

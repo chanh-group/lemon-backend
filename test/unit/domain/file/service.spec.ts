@@ -8,14 +8,19 @@ describe("FileService", () => {
   let presignPutMock: Mock<
     (params: { objectKey: string; mimeType: string }) => Promise<{ uploadUrl: string }>
   >;
+  let putObjectMock: Mock<
+    (params: { objectKey: string; body: Buffer; mimeType: string }) => Promise<void>
+  >;
 
   const storage = () =>
     ({
       presignPut: presignPutMock,
+      putObject: putObjectMock,
     }) as unknown as StorageService;
 
   beforeEach(() => {
     presignPutMock = vi.fn().mockResolvedValue({ uploadUrl: "https://s3.example/signed" });
+    putObjectMock = vi.fn().mockResolvedValue(undefined);
     service = new FileService(storage());
   });
 
@@ -129,5 +134,41 @@ describe("FileService", () => {
         fileName: "malware.exe",
       }),
     ).rejects.toMatchObject({ code: "FILE_TYPE_NOT_ALLOWED" });
+  });
+
+  it("uploads a file directly to storage via upload fallback", async () => {
+    const result = await service.upload(
+      "user-1",
+      {
+        buffer: Buffer.from("image-bytes"),
+        size: 1024,
+        mimetype: "image/png",
+        originalname: "avatar.png",
+      },
+      "CHAT_IMAGE",
+      "conv-123",
+    );
+
+    expect(putObjectMock).toHaveBeenCalledTimes(1);
+    expect(result.objectKey).toContain("chat/conv-123/");
+    expect(result.objectKey).toContain("avatar.png");
+  });
+
+  it("fails closed with PRESIGN_FAILED when putObject errors in upload", async () => {
+    putObjectMock.mockRejectedValueOnce(new StorageError("r2 failure"));
+
+    await expect(
+      service.upload(
+        "user-1",
+        {
+          buffer: Buffer.from("image-bytes"),
+          size: 1024,
+          mimetype: "image/png",
+          originalname: "avatar.png",
+        },
+        "CHAT_IMAGE",
+        "conv-123",
+      ),
+    ).rejects.toMatchObject({ code: "PRESIGN_FAILED" });
   });
 });

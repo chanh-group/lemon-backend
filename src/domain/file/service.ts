@@ -93,4 +93,69 @@ export class FileService {
       throw err;
     }
   }
+
+  async upload(
+    userId: string,
+    file: { buffer: Buffer; size: number; mimetype: string; originalname: string },
+    kind: PresignFileDto["kind"],
+    conversationId?: string,
+  ): Promise<{ objectKey: string }> {
+    const rules = UPLOAD_RULES[kind];
+
+    if (file.size > rules.maxBytes) {
+      throw new BusinessError("FILE_TOO_LARGE", {
+        maxMb: String(Math.floor(rules.maxBytes / BYTES_PER_MB)),
+      });
+    }
+
+    if (rules.allowedMimes && !rules.allowedMimes.includes(file.mimetype)) {
+      throw new BusinessError("FILE_TYPE_NOT_ALLOWED", { mimeType: file.mimetype });
+    }
+
+    let ext = MIME_EXTENSION_MAP[file.mimetype];
+    let sanitizedFileName = "";
+
+    if (file.originalname) {
+      const parts = file.originalname.split(".");
+      const candidateExt = parts.length > 1 ? parts.pop()?.toLowerCase() : undefined;
+      if (candidateExt && (DISALLOWED_FILE_EXTENSIONS as readonly string[]).includes(candidateExt)) {
+        throw new BusinessError("FILE_TYPE_NOT_ALLOWED", { mimeType: file.mimetype });
+      }
+      if (!ext && candidateExt) {
+        ext = candidateExt;
+      }
+      sanitizedFileName = file.originalname
+        .replace(/[^\w.-]/g, "_")
+        .slice(0, 100);
+    }
+
+    if (!ext) {
+      ext = "bin";
+    }
+
+    let objectKey: string;
+    if (kind.startsWith("STORY_")) {
+      objectKey = `stories/${userId}/${uuidv7()}.${ext}`;
+    } else {
+      const scope = conversationId ?? userId;
+      objectKey = sanitizedFileName
+        ? `chat/${scope}/${uuidv7()}-${sanitizedFileName}`
+        : `chat/${scope}/${uuidv7()}.${ext}`;
+    }
+
+    try {
+      await this.storage.putObject({
+        objectKey,
+        body: file.buffer,
+        mimeType: file.mimetype,
+      });
+      this.logger.log("Direct media upload fallback success", { userId, kind, objectKey });
+      return { objectKey };
+    } catch (err) {
+      if (err instanceof StorageError) {
+        throw new BusinessError("PRESIGN_FAILED");
+      }
+      throw err;
+    }
+  }
 }

@@ -60,6 +60,25 @@ export class S3StorageService implements StorageService {
     }
   }
 
+  async putObject(params: {
+    objectKey: string;
+    body: Buffer | Uint8Array;
+    mimeType: string;
+  }): Promise<void> {
+    try {
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: params.objectKey,
+          Body: params.body,
+          ContentType: params.mimeType,
+        }),
+      );
+    } catch (err) {
+      throw new StorageError("Failed to upload object", err);
+    }
+  }
+
   async presignGet(params: PresignGetParams): Promise<{ downloadUrl: string }> {
     try {
       const disposition = params.disposition ?? "inline";
