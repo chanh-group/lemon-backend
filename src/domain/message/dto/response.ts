@@ -1,3 +1,5 @@
+import type { StoryPreview } from "../../story/dto/response.js";
+
 export interface MessageAttachmentResponse {
   id: string;
   kind: "IMAGE" | "VIDEO" | "AUDIO" | "FILE";
@@ -15,9 +17,11 @@ export interface MessageResponse {
   id: string;
   conversationId: string;
   senderId: string;
-  kind: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "FILE" | "SYSTEM";
+  kind: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "FILE" | "SYSTEM" | "STORY_REPLY" | "STORY_REACTION";
   body: string | null;
   replyToId: string | null;
+  storyId?: string | null;
+  storyPreview?: StoryPreview | null;
   attachments?: MessageAttachmentResponse[];
   createdAt: Date;
   editedAt: Date | null;

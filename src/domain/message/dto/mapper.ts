@@ -85,6 +85,8 @@ export function toMessageResponse(
     kind: message.kind,
     body: message.deletedAt ? null : message.body,
     replyToId: message.replyToId,
+    storyId: message.storyId ?? null,
+    storyPreview: message.storyPreview ?? null,
     ...(attachments && { attachments }),
     createdAt: message.createdAt,
     editedAt: message.editedAt,

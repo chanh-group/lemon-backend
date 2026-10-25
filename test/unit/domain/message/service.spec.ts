@@ -45,6 +45,8 @@ describe("MessageService", () => {
     kind: "TEXT",
     body: "Hello",
     replyToId: null,
+    storyId: null,
+    storyPreview: null,
     clientMsgId: null,
     editedAt: null,
     deletedAt: null,
@@ -171,6 +173,44 @@ describe("MessageService", () => {
       expect(redisPipelineMock).toHaveBeenCalledTimes(1);
       expect(redisExpireMock).not.toHaveBeenCalled();
       expect(emitNewMessageMock).toHaveBeenCalledWith(convId, res);
+    });
+
+    it("stores a story message with the server decided kind and snapshot", async () => {
+      const storyId = "0193a2b1-0000-7000-8000-000000000099";
+      const storyMessage = {
+        ...mockMessage,
+        kind: "STORY_REACTION" as const,
+        body: "🔥",
+        storyId,
+        storyPreview: {
+          id: storyId,
+          kind: "IMAGE" as const,
+          bucket: "lemon-stories",
+          objectKey: "stories/u/a.jpg",
+          caption: null,
+          background: null,
+        },
+      };
+      createMessageMock.mockResolvedValue({ message: storyMessage, isNew: true });
+
+      await service.sendMessage(
+        userA,
+        convId,
+        { body: "🔥", kind: "TEXT" },
+        {
+          kind: "STORY_REACTION",
+          storyId,
+          storyPreview: storyMessage.storyPreview,
+        },
+      );
+
+      expect(createMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "STORY_REACTION",
+          storyId,
+          storyPreview: storyMessage.storyPreview,
+        }),
+      );
     });
 
     it("does not emit or increment unread for idempotent retries", async () => {

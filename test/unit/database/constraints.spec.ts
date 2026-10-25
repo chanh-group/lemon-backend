@@ -32,6 +32,14 @@ describe("Drizzle Table Constraints and Schema Metadata Verification", () => {
       expect(cols.userId.notNull).toBe(true);
       expect(cols.viewedAt.notNull).toBe(true);
     });
+
+    it("story_reactions should have composite PK columns", () => {
+      const cols = getTableColumns(schema.storyReactions);
+      expect(cols.storyId.notNull).toBe(true);
+      expect(cols.userId.notNull).toBe(true);
+      expect(cols.emoji.notNull).toBe(true);
+      expect(cols.createdAt.notNull).toBe(true);
+    });
   });
 
   describe("Calls Table Generated Column", () => {
@@ -57,7 +65,7 @@ describe("Drizzle Table Constraints and Schema Metadata Verification", () => {
       expect(schema.participantRoleEnum.enumValues).toEqual(["MEMBER", "ADMIN", "OWNER"]);
     });
 
-    it("messageKindEnum should contain all 6 message types", () => {
+    it("messageKindEnum should contain all 8 message types", () => {
       expect(schema.messageKindEnum.enumValues).toEqual([
         "TEXT",
         "IMAGE",
@@ -65,6 +73,8 @@ describe("Drizzle Table Constraints and Schema Metadata Verification", () => {
         "AUDIO",
         "FILE",
         "SYSTEM",
+        "STORY_REPLY",
+        "STORY_REACTION",
       ]);
     });
 

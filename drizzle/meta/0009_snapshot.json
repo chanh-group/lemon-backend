@@ -1,11 +1,11 @@
 {
-  "id": "88da0f52-97dc-4ecd-965d-5d301611d66b",
+  "id": "42d43f1f-4fb4-4667-a948-4b1f073851ff",
   "prevId": "8d2c81ff-2e81-4e3e-b391-dae7c2f8bd84",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.calls": {
-      "name": "calls",
+    "public.users": {
+      "name": "users",
       "schema": "",
       "columns": {
         "id": {
@@ -14,89 +14,198 @@
           "primaryKey": true,
           "notNull": true
         },
-        "conversation_id": {
-          "name": "conversation_id",
-          "type": "uuid",
+        "email": {
+          "name": "email",
+          "type": "citext",
           "primaryKey": false,
           "notNull": true
         },
-        "caller_id": {
-          "name": "caller_id",
-          "type": "uuid",
+        "password_hash": {
+          "name": "password_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "google_id": {
+          "name": "google_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "username": {
+          "name": "username",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "callee_id": {
-          "name": "callee_id",
-          "type": "uuid",
+        "full_name": {
+          "name": "full_name",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "media": {
-          "name": "media",
-          "type": "call_media",
-          "typeSchema": "public",
+        "avatar_url": {
+          "name": "avatar_url",
+          "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
-        "status": {
-          "name": "status",
-          "type": "call_status",
-          "typeSchema": "public",
+        "bio": {
+          "name": "bio",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email_verified_at": {
+          "name": "email_verified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
           "primaryKey": false,
           "notNull": true,
-          "default": "'INITIATED'"
+          "default": true
         },
-        "started_at": {
-          "name": "started_at",
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         },
-        "answered_at": {
-          "name": "answered_at",
+        "updated_at": {
+          "name": "updated_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": false
-        },
-        "ended_at": {
-          "name": "ended_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "end_reason": {
-          "name": "end_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "duration_secs": {
-          "name": "duration_secs",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "generated": {
-            "as": "CASE WHEN answered_at IS NULL OR ended_at IS NULL THEN 0 ELSE GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (ended_at - answered_at))))::INT END",
-            "type": "stored"
-          }
+          "notNull": true,
+          "default": "now()"
         }
       },
       "indexes": {
-        "calls_conv_idx": {
-          "name": "calls_conv_idx",
+        "users_email_uq": {
+          "name": "users_email_uq",
           "columns": [
             {
-              "expression": "conversation_id",
+              "expression": "email",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
-            },
+            }
+          ],
+          "isUnique": true,
+          "where": "\"users\".\"deleted_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "users_username_uq": {
+          "name": "users_username_uq",
+          "columns": [
             {
-              "expression": "started_at",
+              "expression": "username",
               "isExpression": false,
-              "asc": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"users\".\"deleted_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "users_google_id_uq": {
+          "name": "users_google_id_uq",
+          "columns": [
+            {
+              "expression": "google_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"users\".\"google_id\" IS NOT NULL AND \"users\".\"deleted_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "users_phone_uq": {
+          "name": "users_phone_uq",
+          "columns": [
+            {
+              "expression": "phone",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"users\".\"phone\" IS NOT NULL AND \"users\".\"deleted_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "users_username_trgm_idx": {
+          "name": "users_username_trgm_idx",
+          "columns": [
+            {
+              "expression": "\"username\" gin_trgm_ops",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"users\".\"deleted_at\" IS NULL",
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        },
+        "users_email_trgm_idx": {
+          "name": "users_email_trgm_idx",
+          "columns": [
+            {
+              "expression": "(\"email\"::text) gin_trgm_ops",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"users\".\"deleted_at\" IS NULL",
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        },
+        "users_last_seen": {
+          "name": "users_last_seen",
+          "columns": [
+            {
+              "expression": "last_seen_at",
+              "isExpression": false,
+              "asc": true,
               "nulls": "last"
             }
           ],
@@ -104,12 +213,93 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "users_username_format_chk": {
+          "name": "users_username_format_chk",
+          "value": "\"users\".\"username\" ~ '^[a-z0-9_]{3,30}$'"
         },
-        "calls_caller_idx": {
-          "name": "calls_caller_idx",
+        "users_full_name_chk": {
+          "name": "users_full_name_chk",
+          "value": "char_length(btrim(\"users\".\"full_name\")) BETWEEN 2 AND 100"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.friendships": {
+      "name": "friendships",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "requester_id": {
+          "name": "requester_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "addressee_id": {
+          "name": "addressee_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_low": {
+          "name": "user_low",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_high": {
+          "name": "user_high",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "friendship_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PENDING'"
+        },
+        "responded_at": {
+          "name": "responded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "friendships_addressee_idx": {
+          "name": "friendships_addressee_idx",
           "columns": [
             {
-              "expression": "caller_id",
+              "expression": "addressee_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -121,9 +311,9 @@
               "nulls": "last"
             },
             {
-              "expression": "started_at",
+              "expression": "requester_id",
               "isExpression": false,
-              "asc": false,
+              "asc": true,
               "nulls": "last"
             }
           ],
@@ -132,11 +322,11 @@
           "method": "btree",
           "with": {}
         },
-        "calls_callee_idx": {
-          "name": "calls_callee_idx",
+        "friendships_requester_idx": {
+          "name": "friendships_requester_idx",
           "columns": [
             {
-              "expression": "callee_id",
+              "expression": "requester_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -148,25 +338,57 @@
               "nulls": "last"
             },
             {
-              "expression": "started_at",
+              "expression": "addressee_id",
               "isExpression": false,
-              "asc": false,
+              "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "friendships_low_idx": {
+          "name": "friendships_low_idx",
+          "columns": [
+            {
+              "expression": "user_low",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"friendships\".\"status\" = 'ACCEPTED'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "friendships_high_idx": {
+          "name": "friendships_high_idx",
+          "columns": [
+            {
+              "expression": "user_high",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"friendships\".\"status\" = 'ACCEPTED'",
           "concurrently": false,
           "method": "btree",
           "with": {}
         }
       },
       "foreignKeys": {
-        "calls_conversation_id_conversations_id_fk": {
-          "name": "calls_conversation_id_conversations_id_fk",
-          "tableFrom": "calls",
-          "tableTo": "conversations",
+        "friendships_requester_id_users_id_fk": {
+          "name": "friendships_requester_id_users_id_fk",
+          "tableFrom": "friendships",
+          "tableTo": "users",
           "columnsFrom": [
-            "conversation_id"
+            "requester_id"
           ],
           "columnsTo": [
             "id"
@@ -174,12 +396,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "calls_caller_id_users_id_fk": {
-          "name": "calls_caller_id_users_id_fk",
-          "tableFrom": "calls",
+        "friendships_addressee_id_users_id_fk": {
+          "name": "friendships_addressee_id_users_id_fk",
+          "tableFrom": "friendships",
           "tableTo": "users",
           "columnsFrom": [
-            "caller_id"
+            "addressee_id"
           ],
           "columnsTo": [
             "id"
@@ -187,12 +409,25 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "calls_callee_id_users_id_fk": {
-          "name": "calls_callee_id_users_id_fk",
-          "tableFrom": "calls",
+        "friendships_user_low_users_id_fk": {
+          "name": "friendships_user_low_users_id_fk",
+          "tableFrom": "friendships",
           "tableTo": "users",
           "columnsFrom": [
-            "callee_id"
+            "user_low"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "friendships_user_high_users_id_fk": {
+          "name": "friendships_user_high_users_id_fk",
+          "tableFrom": "friendships",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_high"
           ],
           "columnsTo": [
             "id"
@@ -202,12 +437,25 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "friendships_pair_uq": {
+          "name": "friendships_pair_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "user_low",
+            "user_high"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
-        "calls_no_self_chk": {
-          "name": "calls_no_self_chk",
-          "value": "\"calls\".\"caller_id\" <> \"calls\".\"callee_id\""
+        "friendships_no_self_chk": {
+          "name": "friendships_no_self_chk",
+          "value": "\"friendships\".\"requester_id\" <> \"friendships\".\"addressee_id\""
+        },
+        "friendships_pair_chk": {
+          "name": "friendships_pair_chk",
+          "value": "\"friendships\".\"user_low\" < \"friendships\".\"user_high\""
         }
       },
       "isRLSEnabled": false
@@ -469,235 +717,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.friendships": {
-      "name": "friendships",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "requester_id": {
-          "name": "requester_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "addressee_id": {
-          "name": "addressee_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_low": {
-          "name": "user_low",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_high": {
-          "name": "user_high",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "friendship_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'PENDING'"
-        },
-        "responded_at": {
-          "name": "responded_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "friendships_addressee_idx": {
-          "name": "friendships_addressee_idx",
-          "columns": [
-            {
-              "expression": "addressee_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "requester_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "friendships_requester_idx": {
-          "name": "friendships_requester_idx",
-          "columns": [
-            {
-              "expression": "requester_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "addressee_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "friendships_low_idx": {
-          "name": "friendships_low_idx",
-          "columns": [
-            {
-              "expression": "user_low",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"friendships\".\"status\" = 'ACCEPTED'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "friendships_high_idx": {
-          "name": "friendships_high_idx",
-          "columns": [
-            {
-              "expression": "user_high",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"friendships\".\"status\" = 'ACCEPTED'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "friendships_requester_id_users_id_fk": {
-          "name": "friendships_requester_id_users_id_fk",
-          "tableFrom": "friendships",
-          "tableTo": "users",
-          "columnsFrom": [
-            "requester_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "friendships_addressee_id_users_id_fk": {
-          "name": "friendships_addressee_id_users_id_fk",
-          "tableFrom": "friendships",
-          "tableTo": "users",
-          "columnsFrom": [
-            "addressee_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "friendships_user_low_users_id_fk": {
-          "name": "friendships_user_low_users_id_fk",
-          "tableFrom": "friendships",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_low"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "friendships_user_high_users_id_fk": {
-          "name": "friendships_user_high_users_id_fk",
-          "tableFrom": "friendships",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_high"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "friendships_pair_uq": {
-          "name": "friendships_pair_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_low",
-            "user_high"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "friendships_no_self_chk": {
-          "name": "friendships_no_self_chk",
-          "value": "\"friendships\".\"requester_id\" <> \"friendships\".\"addressee_id\""
-        },
-        "friendships_pair_chk": {
-          "name": "friendships_pair_chk",
-          "value": "\"friendships\".\"user_low\" < \"friendships\".\"user_high\""
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.message_attachments": {
       "name": "message_attachments",
       "schema": "",
@@ -729,12 +748,6 @@
         },
         "object_key": {
           "name": "object_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "file_name": {
-          "name": "file_name",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -863,6 +876,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "story_id": {
+          "name": "story_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "story_preview": {
+          "name": "story_preview",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "client_msg_id": {
           "name": "client_msg_id",
           "type": "text",
@@ -975,6 +1000,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "messages_story_idx": {
+          "name": "messages_story_idx",
+          "columns": [
+            {
+              "expression": "story_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1016,6 +1056,19 @@
           ],
           "onDelete": "set null",
           "onUpdate": "no action"
+        },
+        "messages_story_id_stories_id_fk": {
+          "name": "messages_story_id_stories_id_fk",
+          "tableFrom": "messages",
+          "tableTo": "stories",
+          "columnsFrom": [
+            "story_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1033,8 +1086,8 @@
       },
       "isRLSEnabled": false
     },
-    "public.notes": {
-      "name": "notes",
+    "public.calls": {
+      "name": "calls",
       "schema": "",
       "columns": {
         "id": {
@@ -1043,61 +1096,143 @@
           "primaryKey": true,
           "notNull": true
         },
-        "user_id": {
-          "name": "user_id",
+        "conversation_id": {
+          "name": "conversation_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "content": {
-          "name": "content",
-          "type": "text",
+        "caller_id": {
+          "name": "caller_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "background": {
-          "name": "background",
-          "type": "text",
+        "callee_id": {
+          "name": "callee_id",
+          "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
-        "created_at": {
-          "name": "created_at",
+        "media": {
+          "name": "media",
+          "type": "call_media",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "call_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'INITIATED'"
+        },
+        "started_at": {
+          "name": "started_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         },
-        "expires_at": {
-          "name": "expires_at",
+        "answered_at": {
+          "name": "answered_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "end_reason": {
+          "name": "end_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "duration_secs": {
+          "name": "duration_secs",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "generated": {
+            "as": "CASE WHEN answered_at IS NULL OR ended_at IS NULL THEN 0 ELSE GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (ended_at - answered_at))))::INT END",
+            "type": "stored"
+          }
         }
       },
       "indexes": {
-        "notes_user_uq": {
-          "name": "notes_user_uq",
+        "calls_conv_idx": {
+          "name": "calls_conv_idx",
           "columns": [
             {
-              "expression": "user_id",
+              "expression": "conversation_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
             }
           ],
-          "isUnique": true,
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
         },
-        "notes_expiry_idx": {
-          "name": "notes_expiry_idx",
+        "calls_caller_idx": {
+          "name": "calls_caller_idx",
           "columns": [
             {
-              "expression": "expires_at",
+              "expression": "caller_id",
               "isExpression": false,
               "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "calls_callee_idx": {
+          "name": "calls_callee_idx",
+          "columns": [
+            {
+              "expression": "callee_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": false,
               "nulls": "last"
             }
           ],
@@ -1108,12 +1243,38 @@
         }
       },
       "foreignKeys": {
-        "notes_user_id_users_id_fk": {
-          "name": "notes_user_id_users_id_fk",
-          "tableFrom": "notes",
+        "calls_conversation_id_conversations_id_fk": {
+          "name": "calls_conversation_id_conversations_id_fk",
+          "tableFrom": "calls",
+          "tableTo": "conversations",
+          "columnsFrom": [
+            "conversation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "calls_caller_id_users_id_fk": {
+          "name": "calls_caller_id_users_id_fk",
+          "tableFrom": "calls",
           "tableTo": "users",
           "columnsFrom": [
-            "user_id"
+            "caller_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "calls_callee_id_users_id_fk": {
+          "name": "calls_callee_id_users_id_fk",
+          "tableFrom": "calls",
+          "tableTo": "users",
+          "columnsFrom": [
+            "callee_id"
           ],
           "columnsTo": [
             "id"
@@ -1126,13 +1287,9 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "notes_content_len_chk": {
-          "name": "notes_content_len_chk",
-          "value": "char_length(\"notes\".\"content\") BETWEEN 1 AND 200"
-        },
-        "notes_background_len_chk": {
-          "name": "notes_background_len_chk",
-          "value": "char_length(\"notes\".\"background\") <= 200"
+        "calls_no_self_chk": {
+          "name": "calls_no_self_chk",
+          "value": "\"calls\".\"caller_id\" <> \"calls\".\"callee_id\""
         }
       },
       "isRLSEnabled": false
@@ -1304,6 +1461,110 @@
       },
       "isRLSEnabled": false
     },
+    "public.story_reactions": {
+      "name": "story_reactions",
+      "schema": "",
+      "columns": {
+        "story_id": {
+          "name": "story_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "emoji": {
+          "name": "emoji",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "story_reactions_story_idx": {
+          "name": "story_reactions_story_idx",
+          "columns": [
+            {
+              "expression": "story_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "story_reactions_user_idx": {
+          "name": "story_reactions_user_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "story_reactions_story_id_stories_id_fk": {
+          "name": "story_reactions_story_id_stories_id_fk",
+          "tableFrom": "story_reactions",
+          "tableTo": "stories",
+          "columnsFrom": [
+            "story_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "story_reactions_user_id_users_id_fk": {
+          "name": "story_reactions_user_id_users_id_fk",
+          "tableFrom": "story_reactions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "story_reactions_story_id_user_id_pk": {
+          "name": "story_reactions_story_id_user_id_pk",
+          "columns": [
+            "story_id",
+            "user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.story_views": {
       "name": "story_views",
       "schema": "",
@@ -1414,8 +1675,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.users": {
-      "name": "users",
+    "public.notes": {
+      "name": "notes",
       "schema": "",
       "columns": {
         "id": {
@@ -1424,76 +1685,21 @@
           "primaryKey": true,
           "notNull": true
         },
-        "email": {
-          "name": "email",
-          "type": "citext",
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "password_hash": {
-          "name": "password_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "google_id": {
-          "name": "google_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "username": {
-          "name": "username",
+        "content": {
+          "name": "content",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "full_name": {
-          "name": "full_name",
+        "background": {
+          "name": "background",
           "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "avatar_url": {
-          "name": "avatar_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "bio": {
-          "name": "bio",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "phone": {
-          "name": "phone",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "email_verified_at": {
-          "name": "email_verified_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_seen_at": {
-          "name": "last_seen_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "is_active": {
-          "name": "is_active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "deleted_at": {
-          "name": "deleted_at",
-          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -1504,116 +1710,34 @@
           "notNull": true,
           "default": "now()"
         },
-        "updated_at": {
-          "name": "updated_at",
+        "expires_at": {
+          "name": "expires_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
+          "notNull": true
         }
       },
       "indexes": {
-        "users_email_uq": {
-          "name": "users_email_uq",
+        "notes_user_uq": {
+          "name": "notes_user_uq",
           "columns": [
             {
-              "expression": "email",
+              "expression": "user_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": true,
-          "where": "\"users\".\"deleted_at\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
         },
-        "users_username_uq": {
-          "name": "users_username_uq",
+        "notes_expiry_idx": {
+          "name": "notes_expiry_idx",
           "columns": [
             {
-              "expression": "username",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"users\".\"deleted_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "users_google_id_uq": {
-          "name": "users_google_id_uq",
-          "columns": [
-            {
-              "expression": "google_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"users\".\"google_id\" IS NOT NULL AND \"users\".\"deleted_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "users_phone_uq": {
-          "name": "users_phone_uq",
-          "columns": [
-            {
-              "expression": "phone",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"users\".\"phone\" IS NOT NULL AND \"users\".\"deleted_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "users_username_trgm_idx": {
-          "name": "users_username_trgm_idx",
-          "columns": [
-            {
-              "expression": "\"username\" gin_trgm_ops",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"users\".\"deleted_at\" IS NULL",
-          "concurrently": false,
-          "method": "gin",
-          "with": {}
-        },
-        "users_email_trgm_idx": {
-          "name": "users_email_trgm_idx",
-          "columns": [
-            {
-              "expression": "(\"email\"::text) gin_trgm_ops",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"users\".\"deleted_at\" IS NULL",
-          "concurrently": false,
-          "method": "gin",
-          "with": {}
-        },
-        "users_last_seen": {
-          "name": "users_last_seen",
-          "columns": [
-            {
-              "expression": "last_seen_at",
+              "expression": "expires_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1625,24 +1749,64 @@
           "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "notes_user_id_users_id_fk": {
+          "name": "notes_user_id_users_id_fk",
+          "tableFrom": "notes",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "users_username_format_chk": {
-          "name": "users_username_format_chk",
-          "value": "\"users\".\"username\" ~ '^[a-z0-9_]{3,30}$'"
+        "notes_content_len_chk": {
+          "name": "notes_content_len_chk",
+          "value": "char_length(\"notes\".\"content\") BETWEEN 1 AND 200"
         },
-        "users_full_name_chk": {
-          "name": "users_full_name_chk",
-          "value": "char_length(btrim(\"users\".\"full_name\")) BETWEEN 2 AND 100"
+        "notes_background_len_chk": {
+          "name": "notes_background_len_chk",
+          "value": "char_length(\"notes\".\"background\") <= 200"
         }
       },
       "isRLSEnabled": false
     }
   },
   "enums": {
+    "public.friendship_status": {
+      "name": "friendship_status",
+      "schema": "public",
+      "values": [
+        "PENDING",
+        "ACCEPTED",
+        "BLOCKED"
+      ]
+    },
+    "public.conversation_kind": {
+      "name": "conversation_kind",
+      "schema": "public",
+      "values": [
+        "DIRECT",
+        "GROUP"
+      ]
+    },
+    "public.participant_role": {
+      "name": "participant_role",
+      "schema": "public",
+      "values": [
+        "MEMBER",
+        "ADMIN",
+        "OWNER"
+      ]
+    },
     "public.attachment_kind": {
       "name": "attachment_kind",
       "schema": "public",
@@ -1651,6 +1815,18 @@
         "VIDEO",
         "AUDIO",
         "FILE"
+      ]
+    },
+    "public.message_kind": {
+      "name": "message_kind",
+      "schema": "public",
+      "values": [
+        "TEXT",
+        "IMAGE",
+        "VIDEO",
+        "AUDIO",
+        "FILE",
+        "SYSTEM"
       ]
     },
     "public.call_media": {
@@ -1673,44 +1849,6 @@
         "CANCELLED",
         "COMPLETED",
         "FAILED"
-      ]
-    },
-    "public.conversation_kind": {
-      "name": "conversation_kind",
-      "schema": "public",
-      "values": [
-        "DIRECT",
-        "GROUP"
-      ]
-    },
-    "public.friendship_status": {
-      "name": "friendship_status",
-      "schema": "public",
-      "values": [
-        "PENDING",
-        "ACCEPTED",
-        "BLOCKED"
-      ]
-    },
-    "public.message_kind": {
-      "name": "message_kind",
-      "schema": "public",
-      "values": [
-        "TEXT",
-        "IMAGE",
-        "VIDEO",
-        "AUDIO",
-        "FILE",
-        "SYSTEM"
-      ]
-    },
-    "public.participant_role": {
-      "name": "participant_role",
-      "schema": "public",
-      "values": [
-        "MEMBER",
-        "ADMIN",
-        "OWNER"
       ]
     },
     "public.story_kind": {

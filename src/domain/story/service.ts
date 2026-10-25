@@ -12,11 +12,27 @@ import { storyFeedKey } from "../../utils/cache/keys.js";
 import { RedisMetricsService } from "../../configs/redis-metrics.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.js";
-import { groupStoriesByUser, reviveUserStoryFeed, toStoryItemResponse } from "./dto/mapper.js";
-import type { CreateStoryDto } from "./dto/request.js";
-import type { StoryItemResponse, UserStoryFeedResponse } from "./dto/response.js";
+import { ConversationService } from "../conversation/service.js";
+import type { MessageResponse } from "../message/dto/response.js";
+import { MessageService } from "../message/service.js";
+import { RealtimeService } from "../realtime/realtime.service.js";
+import {
+  groupStoriesByUser,
+  reviveUserStoryFeed,
+  toStoryItemResponse,
+  toStoryPreview,
+} from "./dto/mapper.js";
+import type { StoryEmoji } from "./constants.js";
+import type { CreateStoryDto, ReplyStoryDto } from "./dto/request.js";
+import type {
+  MyStoryReactionResponse,
+  StoryItemResponse,
+  StoryReactionResponse,
+  UserStoryFeedResponse,
+} from "./dto/response.js";
 import { STORY_REPOSITORY, type StoryRepository } from "./repository.js";
-import type { NewStory } from "./schema.js";
+import type { NewStory, Story } from "./schema.js";
+import type { CursorPage } from "../shared.js";
 
 const BYTES_PER_MB = 1024 * 1024;
 
@@ -36,6 +52,9 @@ export class StoryService {
     @Inject(STORY_REPOSITORY) private readonly storyRepo: StoryRepository,
     @Inject(CACHE_STORE) private readonly cache: CacheStoreExt,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
+    private readonly conversationService: ConversationService,
+    private readonly messageService: MessageService,
+    private readonly realtimeService: RealtimeService,
     private readonly metrics?: RedisMetricsService,
   ) {}
 
@@ -127,9 +146,16 @@ export class StoryService {
     ]);
 
     const storyIds = stories.map((s) => s.id);
-    const viewedStoryIds = await this.storyRepo.findViewedStoryIds(userId, storyIds);
+    // The feed is cached per viewer for 60s: only viewer-specific data
+    // (`hasViewed`, `myReaction`) belongs in it. The global reaction count
+    // changes with other people's reactions, so it is served fresh by
+    // `GET /stories/:id` instead of being cached here.
+    const [viewedStoryIds, userReactionsMap] = await Promise.all([
+      this.storyRepo.findViewedStoryIds(userId, storyIds),
+      this.storyRepo.findUserReactions(userId, storyIds),
+    ]);
 
-    const feed = groupStoriesByUser(usersMap, stories, viewedStoryIds);
+    const feed = groupStoriesByUser(usersMap, stories, viewedStoryIds, userReactionsMap);
 
     await this.cache.setBestEffort(cacheKey, feed, STORY_FEED_TTL_SECS);
 
@@ -148,8 +174,17 @@ export class StoryService {
       }
     }
 
-    const viewedIds = await this.storyRepo.findViewedStoryIds(userId, [storyId]);
-    return toStoryItemResponse(story, viewedIds.has(storyId));
+    const [viewedIds, userReactionsMap, reactionsCountMap] = await Promise.all([
+      this.storyRepo.findViewedStoryIds(userId, [storyId]),
+      this.storyRepo.findUserReactions(userId, [storyId]),
+      this.storyRepo.countReactions([storyId]),
+    ]);
+    return toStoryItemResponse(
+      story,
+      viewedIds.has(storyId),
+      userReactionsMap.get(storyId) ?? null,
+      reactionsCountMap.get(storyId) ?? 0,
+    );
   }
 
   async viewStory(userId: string, storyId: string): Promise<void> {
@@ -204,5 +239,167 @@ export class StoryService {
     await this.cache.deleteManyBestEffort([userId, ...friendIds].map(storyFeedKey));
 
     this.logger.log("Story deleted", { storyId, userId });
+  }
+
+  async reactStory(
+    userId: string,
+    storyId: string,
+    emoji: StoryEmoji,
+  ): Promise<MyStoryReactionResponse> {
+    const story = await this.storyRepo.findActiveById(storyId);
+    if (!story) {
+      throw new BusinessError("STORY_NOT_FOUND");
+    }
+
+    if (story.userId === userId) {
+      throw new BusinessError("CANNOT_REACT_OWN_STORY");
+    }
+
+    if (!(await this.storyRepo.isAcceptedFriend(story.userId, userId))) {
+      throw new BusinessError("STORY_REACT_FORBIDDEN");
+    }
+
+    const { reaction, isNew } = await this.storyRepo.addReactionWithView(storyId, userId, emoji);
+
+    await Promise.all([
+      this.cache.deleteBestEffort(storyFeedKey(userId)),
+      this.cache.deleteBestEffort(storyFeedKey(story.userId)),
+    ]);
+
+    const usersMap = await this.storyRepo.findUsersByIds([userId]);
+    const userSummary = usersMap.get(userId);
+    if (userSummary) {
+      const payload = {
+        storyId,
+        user: userSummary,
+        emoji,
+        createdAt: reaction.createdAt,
+      };
+      this.realtimeService.emitStoryReaction(story.userId, payload);
+      this.realtimeService.emitStoryReaction(userId, payload);
+    }
+
+    if (isNew) {
+      await this.mirrorReactionToDirectConversation(userId, story, emoji);
+    }
+
+    return {
+      storyId: reaction.storyId,
+      emoji: reaction.emoji,
+      createdAt: reaction.createdAt,
+    };
+  }
+
+  /**
+   * A story reaction is routed into the author's direct conversation (Meta /
+   * WhatsApp behaviour, `docs/STORIES_NOTES.md` §5.2.A): the author sees the
+   * reaction inside the chat thread, not only in the story UI.
+   *
+   * Best effort: the reaction is already stored, so a failing chat must not
+   * turn a successful reaction into an error.
+   */
+  private async mirrorReactionToDirectConversation(
+    userId: string,
+    story: Story,
+    emoji: string,
+  ): Promise<void> {
+    try {
+      const conv = await this.conversationService.getOrCreateDirect(userId, story.userId);
+      await this.messageService.sendMessage(
+        userId,
+        conv.id,
+        { kind: "TEXT", body: emoji },
+        { kind: "STORY_REACTION", storyId: story.id, storyPreview: toStoryPreview(story) },
+      );
+    } catch (err) {
+      this.logger.warn("Failed to mirror the story reaction into the direct conversation", {
+        storyId: story.id,
+        userId,
+        err,
+      });
+    }
+  }
+
+  async unreactStory(userId: string, storyId: string): Promise<void> {
+    const story = await this.storyRepo.findActiveById(storyId);
+    if (!story) {
+      throw new BusinessError("STORY_NOT_FOUND");
+    }
+
+    if (story.userId === userId) {
+      throw new BusinessError("CANNOT_REACT_OWN_STORY");
+    }
+
+    if (!(await this.storyRepo.isAcceptedFriend(story.userId, userId))) {
+      throw new BusinessError("STORY_REACT_FORBIDDEN");
+    }
+
+    const removed = await this.storyRepo.deleteReaction(storyId, userId);
+    if (!removed) {
+      return;
+    }
+
+    await Promise.all([
+      this.cache.deleteBestEffort(storyFeedKey(userId)),
+      this.cache.deleteBestEffort(storyFeedKey(story.userId)),
+    ]);
+
+    const usersMap = await this.storyRepo.findUsersByIds([userId]);
+    const userSummary = usersMap.get(userId);
+    if (userSummary) {
+      const payload = { storyId, user: userSummary };
+      this.realtimeService.emitStoryReactionRemoved(story.userId, payload);
+      this.realtimeService.emitStoryReactionRemoved(userId, payload);
+    }
+  }
+
+  async getReactions(
+    userId: string,
+    storyId: string,
+    cursor: string | undefined,
+    limit: number,
+  ): Promise<CursorPage<StoryReactionResponse>> {
+    const story = await this.storyRepo.findActiveById(storyId);
+    if (!story) {
+      throw new BusinessError("STORY_NOT_FOUND");
+    }
+
+    if (story.userId !== userId) {
+      throw new BusinessError("STORY_REACTIONS_FORBIDDEN");
+    }
+
+    return this.storyRepo.findReactionsByStoryId(storyId, cursor, limit);
+  }
+
+  async replyStory(userId: string, storyId: string, dto: ReplyStoryDto): Promise<MessageResponse> {
+    const story = await this.storyRepo.findActiveById(storyId);
+    if (!story) {
+      throw new BusinessError("STORY_NOT_FOUND");
+    }
+
+    if (story.userId === userId) {
+      throw new BusinessError("CANNOT_REPLY_OWN_STORY");
+    }
+
+    if (!(await this.storyRepo.isAcceptedFriend(story.userId, userId))) {
+      throw new BusinessError("STORY_REPLY_FORBIDDEN");
+    }
+
+    await this.storyRepo.markAsViewed(storyId, userId);
+
+    const conv = await this.conversationService.getOrCreateDirect(userId, story.userId);
+
+    const storyPreview = toStoryPreview(story);
+
+    const message = await this.messageService.sendMessage(
+      userId,
+      conv.id,
+      { kind: "TEXT", body: dto.body },
+      { kind: "STORY_REPLY", storyId: story.id, storyPreview },
+    );
+
+    await this.cache.deleteBestEffort(storyFeedKey(userId));
+
+    return message;
   }
 }

@@ -3,13 +3,19 @@ import type { CacheStoreExt } from "../../../../src/utils/cache/store.js";
 import type { PurgeableStory, StoryRepository } from "../../../../src/domain/story/repository.js";
 import { StoryService } from "../../../../src/domain/story/service.js";
 import type { NewStory, Story } from "../../../../src/domain/story/schema.js";
+import type { StoryReactionResult } from "../../../../src/domain/story/repository.js";
 import type { CreateStoryDto } from "../../../../src/domain/story/dto/request.js";
 import type {
+  StoryReactionResponse,
   StoryViewerResponse,
   UserStoryFeedResponse,
 } from "../../../../src/domain/story/dto/response.js";
+import type { CursorPage } from "../../../../src/domain/shared.js";
 import { StorageError } from "../../../../src/utils/storage/error.js";
 import type { StorageService } from "../../../../src/utils/storage/store.js";
+import type { ConversationService } from "../../../../src/domain/conversation/service.js";
+import type { MessageService } from "../../../../src/domain/message/service.js";
+import type { RealtimeService } from "../../../../src/domain/realtime/realtime.service.js";
 
 describe("StoryService", () => {
   let service: StoryService;
@@ -43,6 +49,21 @@ describe("StoryService", () => {
   let isAcceptedFriendMock: Mock<(userAId: string, userBId: string) => Promise<boolean>>;
   let findPurgeableMock: Mock<(limit: number) => Promise<PurgeableStory[]>>;
   let deleteByIdsMock: Mock<(ids: string[]) => Promise<number>>;
+  let addReactionWithViewMock: Mock<
+    (storyId: string, userId: string, emoji: string) => Promise<StoryReactionResult>
+  >;
+  let deleteReactionMock: Mock<(storyId: string, userId: string) => Promise<boolean>>;
+  let findReactionsByStoryIdMock: Mock<
+    (
+      storyId: string,
+      cursor: string | undefined,
+      limit: number,
+    ) => Promise<CursorPage<StoryReactionResponse>>
+  >;
+  let findUserReactionsMock: Mock<
+    (userId: string, storyIds: string[]) => Promise<Map<string, string>>
+  >;
+  let countReactionsMock: Mock<(storyIds: string[]) => Promise<Map<string, number>>>;
 
   let getBestEffortMock: Mock<(key: string) => Promise<unknown>>;
   let setBestEffortMock: Mock<(key: string, value: unknown, ttlSeconds?: number) => Promise<void>>;
@@ -54,6 +75,14 @@ describe("StoryService", () => {
   >;
   let getBucketMock: Mock<() => string>;
   let storageMock: StorageService;
+
+  let getOrCreateDirectMock: Mock;
+  let conversationServiceMock: ConversationService;
+  let sendMessageMock: Mock;
+  let messageServiceMock: MessageService;
+  let emitStoryReactionMock: Mock;
+  let emitStoryReactionRemovedMock: Mock;
+  let realtimeServiceMock: RealtimeService;
 
   const mockStory: Story = {
     id: "0193a2b1-0000-7000-8000-000000000001",
@@ -151,6 +180,36 @@ describe("StoryService", () => {
       .mockResolvedValue(true);
     findPurgeableMock = vi.fn<(limit: number) => Promise<PurgeableStory[]>>().mockResolvedValue([]);
     deleteByIdsMock = vi.fn<(ids: string[]) => Promise<number>>().mockResolvedValue(0);
+    addReactionWithViewMock = vi
+      .fn<(storyId: string, userId: string, emoji: string) => Promise<StoryReactionResult>>()
+      .mockResolvedValue({
+        reaction: {
+          storyId: "story-1",
+          userId: "user-1",
+          emoji: "❤️",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        isNew: true,
+      });
+    deleteReactionMock = vi
+      .fn<(storyId: string, userId: string) => Promise<boolean>>()
+      .mockResolvedValue(true);
+    findReactionsByStoryIdMock = vi
+      .fn<
+        (
+          storyId: string,
+          cursor: string | undefined,
+          limit: number,
+        ) => Promise<CursorPage<StoryReactionResponse>>
+      >()
+      .mockResolvedValue({ items: [], hasMore: false });
+    findUserReactionsMock = vi
+      .fn<(userId: string, storyIds: string[]) => Promise<Map<string, string>>>()
+      .mockResolvedValue(new Map());
+    countReactionsMock = vi
+      .fn<(storyIds: string[]) => Promise<Map<string, number>>>()
+      .mockResolvedValue(new Map());
 
     getBestEffortMock = vi.fn<(key: string) => Promise<unknown>>().mockResolvedValue(null);
     setBestEffortMock = vi
@@ -186,6 +245,11 @@ describe("StoryService", () => {
       isAcceptedFriend: isAcceptedFriendMock,
       findPurgeable: findPurgeableMock,
       deleteByIds: deleteByIdsMock,
+      addReactionWithView: addReactionWithViewMock,
+      deleteReaction: deleteReactionMock,
+      findReactionsByStoryId: findReactionsByStoryIdMock,
+      findUserReactions: findUserReactionsMock,
+      countReactions: countReactionsMock,
     };
 
     const mockCache = {
@@ -195,7 +259,31 @@ describe("StoryService", () => {
       deleteManyBestEffort: deleteManyBestEffortMock,
     } as unknown as CacheStoreExt;
 
-    service = new StoryService(mockRepo, mockCache, storageMock);
+    getOrCreateDirectMock = vi.fn().mockResolvedValue({ id: "conv-1" });
+    conversationServiceMock = {
+      getOrCreateDirect: getOrCreateDirectMock,
+    } as unknown as ConversationService;
+
+    sendMessageMock = vi.fn().mockResolvedValue({ id: "msg-1" });
+    messageServiceMock = {
+      sendMessage: sendMessageMock,
+    } as unknown as MessageService;
+
+    emitStoryReactionMock = vi.fn();
+    emitStoryReactionRemovedMock = vi.fn();
+    realtimeServiceMock = {
+      emitStoryReaction: emitStoryReactionMock,
+      emitStoryReactionRemoved: emitStoryReactionRemovedMock,
+    } as unknown as RealtimeService;
+
+    service = new StoryService(
+      mockRepo,
+      mockCache,
+      storageMock,
+      conversationServiceMock,
+      messageServiceMock,
+      realtimeServiceMock,
+    );
   });
 
   describe("createStory", () => {
@@ -400,6 +488,25 @@ describe("StoryService", () => {
       expect(findActiveByUserIdsMock).not.toHaveBeenCalled();
     });
 
+    it("keeps the global reaction count out of the cached feed", async () => {
+      getFriendUserIdsMock.mockResolvedValueOnce(["u1"]);
+      getBestEffortMock.mockResolvedValueOnce(null);
+      findActiveByUserIdsMock.mockResolvedValueOnce([mockStory]);
+      findUsersByIdsMock.mockResolvedValueOnce(
+        new Map([
+          [
+            "user-owner-1",
+            { id: "user-owner-1", username: "owner", fullName: "Owner", avatarUrl: null },
+          ],
+        ]),
+      );
+
+      const result = await service.getFeed("user-viewer-1");
+
+      expect(countReactionsMock).not.toHaveBeenCalled();
+      expect(result[0].stories[0]).not.toHaveProperty("reactionsCount");
+    });
+
     it("revives Date objects from a JSON round-tripped cached feed", async () => {
       const feed: UserStoryFeedResponse[] = [
         {
@@ -564,6 +671,323 @@ describe("StoryService", () => {
         code: "STORY_NOT_FOUND",
       });
       expect(markDeletedMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("reactStory", () => {
+    it("throws STORY_NOT_FOUND if the story is inactive or missing", async () => {
+      findActiveByIdMock.mockResolvedValueOnce(null);
+
+      await expect(service.reactStory("friend-1", "non-existent", "❤️")).rejects.toMatchObject({
+        code: "STORY_NOT_FOUND",
+      });
+    });
+
+    it("throws CANNOT_REACT_OWN_STORY when reacting to own story", async () => {
+      await expect(service.reactStory("user-owner-1", mockStory.id, "❤️")).rejects.toMatchObject({
+        code: "CANNOT_REACT_OWN_STORY",
+      });
+    });
+
+    it("throws STORY_REACT_FORBIDDEN when user is not a friend of the author", async () => {
+      isAcceptedFriendMock.mockResolvedValueOnce(false);
+
+      await expect(service.reactStory("stranger-user", mockStory.id, "❤️")).rejects.toMatchObject({
+        code: "STORY_REACT_FORBIDDEN",
+      });
+      expect(isAcceptedFriendMock).toHaveBeenCalledWith("user-owner-1", "stranger-user");
+    });
+
+    it("saves reaction, marks viewed, invalidates feeds, and emits realtime event", async () => {
+      const now = new Date("2026-10-14T02:00:00Z");
+      addReactionWithViewMock.mockResolvedValueOnce({
+        reaction: {
+          storyId: mockStory.id,
+          userId: "friend-1",
+          emoji: "🔥",
+          createdAt: now,
+          updatedAt: now,
+        },
+        isNew: true,
+      });
+      findUsersByIdsMock.mockResolvedValueOnce(
+        new Map([
+          [
+            "friend-1",
+            {
+              id: "friend-1",
+              username: "friendone",
+              fullName: "Friend One",
+              avatarUrl: null,
+            },
+          ],
+        ]),
+      );
+
+      const result = await service.reactStory("friend-1", mockStory.id, "🔥");
+
+      expect(addReactionWithViewMock).toHaveBeenCalledWith(mockStory.id, "friend-1", "🔥");
+      expect(deleteBestEffortMock).toHaveBeenCalledWith("stories:feed:friend-1");
+      expect(deleteBestEffortMock).toHaveBeenCalledWith("stories:feed:user-owner-1");
+      expect(emitStoryReactionMock).toHaveBeenCalledWith(
+        "user-owner-1",
+        expect.objectContaining({
+          storyId: mockStory.id,
+          emoji: "🔥",
+          createdAt: now,
+          user: expect.objectContaining({ id: "friend-1" }),
+        }),
+      );
+      expect(emitStoryReactionMock).toHaveBeenCalledWith(
+        "friend-1",
+        expect.objectContaining({ storyId: mockStory.id }),
+      );
+      expect(result).toEqual({
+        storyId: mockStory.id,
+        emoji: "🔥",
+        createdAt: now,
+      });
+    });
+
+    it("mirrors the reaction into the author's direct conversation", async () => {
+      getOrCreateDirectMock.mockResolvedValueOnce({ id: "conv-direct-1" });
+
+      await service.reactStory("friend-1", mockStory.id, "🔥");
+
+      expect(getOrCreateDirectMock).toHaveBeenCalledWith("friend-1", "user-owner-1");
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        "friend-1",
+        "conv-direct-1",
+        expect.objectContaining({ kind: "TEXT", body: "🔥" }),
+        {
+          kind: "STORY_REACTION",
+          storyId: mockStory.id,
+          storyPreview: expect.objectContaining({ id: mockStory.id, kind: mockStory.kind }),
+        },
+      );
+    });
+
+    it("keeps the reaction when the direct conversation mirror fails", async () => {
+      const now = new Date("2026-10-14T02:00:00Z");
+      addReactionWithViewMock.mockResolvedValueOnce({
+        reaction: {
+          storyId: mockStory.id,
+          userId: "friend-1",
+          emoji: "🔥",
+          createdAt: now,
+          updatedAt: now,
+        },
+        isNew: true,
+      });
+      getOrCreateDirectMock.mockRejectedValueOnce(new Error("chat unavailable"));
+
+      await expect(service.reactStory("friend-1", mockStory.id, "🔥")).resolves.toMatchObject({
+        storyId: mockStory.id,
+        emoji: "🔥",
+      });
+      expect(addReactionWithViewMock).toHaveBeenCalledWith(mockStory.id, "friend-1", "🔥");
+    });
+
+    it("does not send another direct message when the reaction is only changed", async () => {
+      addReactionWithViewMock.mockResolvedValueOnce({
+        reaction: {
+          storyId: mockStory.id,
+          userId: "friend-1",
+          emoji: "😂",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        isNew: false,
+      });
+
+      await service.reactStory("friend-1", mockStory.id, "😂");
+
+      expect(sendMessageMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("unreactStory", () => {
+    it("throws STORY_NOT_FOUND when story does not exist", async () => {
+      findActiveByIdMock.mockResolvedValueOnce(null);
+
+      await expect(service.unreactStory("friend-1", "non-existent")).rejects.toMatchObject({
+        code: "STORY_NOT_FOUND",
+      });
+    });
+
+    it("throws CANNOT_REACT_OWN_STORY when unreacting own story", async () => {
+      await expect(service.unreactStory("user-owner-1", mockStory.id)).rejects.toMatchObject({
+        code: "CANNOT_REACT_OWN_STORY",
+      });
+    });
+
+    it("throws STORY_REACT_FORBIDDEN when caller is not a friend", async () => {
+      isAcceptedFriendMock.mockResolvedValueOnce(false);
+
+      await expect(service.unreactStory("stranger-user", mockStory.id)).rejects.toMatchObject({
+        code: "STORY_REACT_FORBIDDEN",
+      });
+      expect(isAcceptedFriendMock).toHaveBeenCalledWith("user-owner-1", "stranger-user");
+    });
+
+    it("deletes reaction and invalidates feed caches on success", async () => {
+      await service.unreactStory("friend-1", mockStory.id);
+
+      expect(deleteReactionMock).toHaveBeenCalledWith(mockStory.id, "friend-1");
+      expect(deleteBestEffortMock).toHaveBeenCalledWith("stories:feed:friend-1");
+      expect(deleteBestEffortMock).toHaveBeenCalledWith("stories:feed:user-owner-1");
+    });
+
+    it("emits the removal event to the author and to the reactor", async () => {
+      findUsersByIdsMock.mockResolvedValueOnce(
+        new Map([
+          [
+            "friend-1",
+            {
+              id: "friend-1",
+              username: "friendone",
+              fullName: "Friend One",
+              avatarUrl: null,
+            },
+          ],
+        ]),
+      );
+
+      await service.unreactStory("friend-1", mockStory.id);
+
+      expect(emitStoryReactionRemovedMock).toHaveBeenCalledWith(
+        "user-owner-1",
+        expect.objectContaining({ storyId: mockStory.id }),
+      );
+      expect(emitStoryReactionRemovedMock).toHaveBeenCalledWith(
+        "friend-1",
+        expect.objectContaining({ storyId: mockStory.id }),
+      );
+    });
+
+    it("keeps the caches and the event untouched when there was no reaction to remove", async () => {
+      deleteReactionMock.mockResolvedValueOnce(false);
+
+      await service.unreactStory("friend-1", mockStory.id);
+
+      expect(deleteBestEffortMock).not.toHaveBeenCalled();
+      expect(emitStoryReactionRemovedMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getReactions", () => {
+    it("throws STORY_NOT_FOUND when the story is missing or expired", async () => {
+      findActiveByIdMock.mockResolvedValueOnce(null);
+
+      await expect(
+        service.getReactions("user-owner-1", "non-existent", undefined, 20),
+      ).rejects.toMatchObject({
+        code: "STORY_NOT_FOUND",
+      });
+    });
+
+    it("throws STORY_REACTIONS_FORBIDDEN when a non-owner requests reactions", async () => {
+      await expect(
+        service.getReactions("intruder", mockStory.id, undefined, 20),
+      ).rejects.toMatchObject({
+        code: "STORY_REACTIONS_FORBIDDEN",
+      });
+    });
+
+    it("returns the paginated reactions for the story owner", async () => {
+      const page: CursorPage<StoryReactionResponse> = {
+        items: [
+          {
+            user: { id: "friend-1", username: "f1", fullName: "F1", avatarUrl: null },
+            emoji: "❤️",
+            createdAt: new Date(),
+          },
+        ],
+        hasMore: false,
+      };
+      findReactionsByStoryIdMock.mockResolvedValueOnce(page);
+
+      const result = await service.getReactions("user-owner-1", mockStory.id, undefined, 20);
+
+      expect(findReactionsByStoryIdMock).toHaveBeenCalledWith(mockStory.id, undefined, 20);
+      expect(result).toEqual(page);
+    });
+  });
+
+  describe("replyStory", () => {
+    const replyDto = { body: "Looking great!" };
+
+    it("throws STORY_NOT_FOUND when replying to missing or expired story", async () => {
+      findActiveByIdMock.mockResolvedValueOnce(null);
+
+      await expect(service.replyStory("friend-1", "non-existent", replyDto)).rejects.toMatchObject({
+        code: "STORY_NOT_FOUND",
+      });
+    });
+
+    it("throws CANNOT_REPLY_OWN_STORY when replying to own story", async () => {
+      await expect(
+        service.replyStory("user-owner-1", mockStory.id, replyDto),
+      ).rejects.toMatchObject({
+        code: "CANNOT_REPLY_OWN_STORY",
+      });
+    });
+
+    it("throws STORY_REPLY_FORBIDDEN when user is not a friend", async () => {
+      isAcceptedFriendMock.mockResolvedValueOnce(false);
+
+      await expect(service.replyStory("stranger", mockStory.id, replyDto)).rejects.toMatchObject({
+        code: "STORY_REPLY_FORBIDDEN",
+      });
+      expect(isAcceptedFriendMock).toHaveBeenCalledWith("user-owner-1", "stranger");
+    });
+
+    it("creates 1:1 conversation, sends message with story preview, and marks viewed", async () => {
+      const mockMsgResponse = {
+        id: "msg-123",
+        conversationId: "conv-direct-1",
+        senderId: "friend-1",
+        kind: "TEXT" as const,
+        body: "Looking great!",
+        storyId: mockStory.id,
+        storyPreview: {
+          id: mockStory.id,
+          kind: mockStory.kind,
+          bucket: mockStory.bucket,
+          objectKey: mockStory.objectKey,
+          caption: mockStory.caption,
+          background: mockStory.background,
+        },
+        replyToId: null,
+        editedAt: null,
+        deletedAt: null,
+        createdAt: new Date(),
+      };
+      getOrCreateDirectMock.mockResolvedValueOnce({ id: "conv-direct-1" });
+      sendMessageMock.mockResolvedValueOnce(mockMsgResponse);
+
+      const result = await service.replyStory("friend-1", mockStory.id, replyDto);
+
+      expect(markAsViewedMock).toHaveBeenCalledWith(mockStory.id, "friend-1");
+      expect(getOrCreateDirectMock).toHaveBeenCalledWith("friend-1", "user-owner-1");
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        "friend-1",
+        "conv-direct-1",
+        expect.objectContaining({
+          kind: "TEXT",
+          body: "Looking great!",
+        }),
+        {
+          kind: "STORY_REPLY",
+          storyId: mockStory.id,
+          storyPreview: expect.objectContaining({
+            id: mockStory.id,
+            kind: mockStory.kind,
+          }),
+        },
+      );
+      expect(deleteBestEffortMock).toHaveBeenCalledWith("stories:feed:friend-1");
+      expect(result).toEqual(mockMsgResponse);
     });
   });
 });

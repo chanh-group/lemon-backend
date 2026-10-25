@@ -1,9 +1,14 @@
-import type { NewStory, Story } from "./schema.js";
-import type { StoryViewerResponse } from "./dto/response.js";
+import type { NewStory, Story, StoryReaction } from "./schema.js";
+import type { StoryReactionResponse, StoryViewerResponse } from "./dto/response.js";
 import type { UserSummary } from "../user/dto/response.js";
 import type { CursorPage } from "../shared.js";
 
 export type PurgeableStory = { id: string; objectKey: string | null };
+
+export interface StoryReactionResult {
+  reaction: StoryReaction;
+  isNew: boolean;
+}
 
 export interface StoryRepository {
   create(data: NewStory): Promise<Story>;
@@ -23,6 +28,16 @@ export interface StoryRepository {
   getFriendUserIds(userId: string): Promise<string[]>;
   findPurgeable(limit: number): Promise<PurgeableStory[]>;
   deleteByIds(ids: string[]): Promise<number>;
+  /** Marks the story as viewed and upserts the reaction in one transaction. */
+  addReactionWithView(storyId: string, userId: string, emoji: string): Promise<StoryReactionResult>;
+  deleteReaction(storyId: string, userId: string): Promise<boolean>;
+  findReactionsByStoryId(
+    storyId: string,
+    cursor: string | undefined,
+    limit: number,
+  ): Promise<CursorPage<StoryReactionResponse>>;
+  findUserReactions(userId: string, storyIds: string[]): Promise<Map<string, string>>;
+  countReactions(storyIds: string[]): Promise<Map<string, number>>;
 }
 
 export const STORY_REPOSITORY: unique symbol = Symbol("STORY_REPOSITORY");

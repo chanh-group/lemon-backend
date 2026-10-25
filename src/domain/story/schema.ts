@@ -10,7 +10,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
-import { created, uuidV7 } from "../../utils/database.js";
+import { created, updated, uuidV7 } from "../../utils/database.js";
 import { users } from "../user/schema.js";
 import { STORY_MAX_CAPTION_LENGTH } from "./constants.js";
 
@@ -77,7 +77,31 @@ export const storyViews = pgTable(
   ],
 );
 
+export const storyReactions = pgTable(
+  "story_reactions",
+  {
+    storyId: uuid("story_id")
+      .notNull()
+      .references(() => stories.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    emoji: text("emoji").notNull(),
+    // `created_at` stays immutable: it is the moment the reaction was first
+    // made and the stable sort key of the reaction list.
+    createdAt: created("created_at"),
+    updatedAt: updated("updated_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.storyId, table.userId] }),
+    index("story_reactions_story_idx").on(table.storyId),
+    index("story_reactions_user_idx").on(table.userId),
+  ],
+);
+
 export type Story = typeof stories.$inferSelect;
 export type NewStory = typeof stories.$inferInsert;
 export type StoryView = typeof storyViews.$inferSelect;
 export type NewStoryView = typeof storyViews.$inferInsert;
+export type StoryReaction = typeof storyReactions.$inferSelect;
+export type NewStoryReaction = typeof storyReactions.$inferInsert;
