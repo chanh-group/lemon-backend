@@ -1,5 +1,6 @@
 import {
   DeleteObjectsCommand,
+  GetObjectCommand,
   HeadObjectCommand,
   NotFound,
   PutObjectCommand,
@@ -39,9 +40,10 @@ describe("S3StorageService", () => {
     const [client, command, options] = signer.mock.calls[0];
     expect(client).toBeDefined();
     expect(command).toBeInstanceOf(PutObjectCommand);
-    expect(command.input.Bucket).toBe("test-bucket");
-    expect(command.input.Key).toBe("stories/u1/abc.jpg");
-    expect(command.input.ContentType).toBe("image/jpeg");
+    const putCmd = command as PutObjectCommand;
+    expect(putCmd.input.Bucket).toBe("test-bucket");
+    expect(putCmd.input.Key).toBe("stories/u1/abc.jpg");
+    expect(putCmd.input.ContentType).toBe("image/jpeg");
     expect(options.expiresIn).toBe(300);
     expect(options.signableHeaders).toContain("content-type");
     expect(send).not.toHaveBeenCalled();
@@ -186,5 +188,53 @@ describe("S3StorageService", () => {
     });
 
     expect(uploadUrl).toContain("x-amz-checksum-crc32");
+  });
+
+  it("presigns a GET for inline preview with UTF-8 content-type for text/plain", async () => {
+    const send = vi.fn();
+    const signer = vi.fn<PresignerFn>().mockResolvedValue("https://s3.example/get-signed");
+    const { service } = createStorage(send, signer);
+
+    const result = await service.presignGet({
+      objectKey: "chat/c1/doc.txt",
+      fileName: "Tài liệu tiếng Việt.txt",
+      disposition: "inline",
+      mimeType: "text/plain",
+    });
+
+    expect(result.downloadUrl).toBe("https://s3.example/get-signed");
+    const [client, command, options] = signer.mock.calls[0];
+    expect(client).toBeDefined();
+    expect(command).toBeInstanceOf(GetObjectCommand);
+    const getCmd = command as GetObjectCommand;
+    expect(getCmd.input.Bucket).toBe("test-bucket");
+    expect(getCmd.input.Key).toBe("chat/c1/doc.txt");
+    expect(getCmd.input.ResponseContentType).toBe("text/plain; charset=utf-8");
+    expect(getCmd.input.ResponseContentDisposition).toContain("inline;");
+    expect(getCmd.input.ResponseContentDisposition).toContain("filename*=UTF-8''");
+    expect(options.expiresIn).toBe(300);
+  });
+
+  it("presigns a GET for download attachment with encoded filename", async () => {
+    const send = vi.fn();
+    const signer = vi.fn<PresignerFn>().mockResolvedValue("https://s3.example/download-signed");
+    const { service } = createStorage(send, signer);
+
+    const result = await service.presignGet({
+      objectKey: "chat/c1/report.pdf",
+      fileName: "Báo cáo Q4.pdf",
+      disposition: "attachment",
+      mimeType: "application/pdf",
+      expiresInSecs: 3600,
+    });
+
+    expect(result.downloadUrl).toBe("https://s3.example/download-signed");
+    const [, command, options] = signer.mock.calls[0];
+    expect(command).toBeInstanceOf(GetObjectCommand);
+    const downloadCmd = command as GetObjectCommand;
+    expect(downloadCmd.input.ResponseContentDisposition).toContain("attachment;");
+    expect(downloadCmd.input.ResponseContentDisposition).toContain("filename*=UTF-8''B%C3%A1o%20c%C3%A1o%20Q4.pdf");
+    expect(downloadCmd.input.ResponseContentType).toBe("application/pdf");
+    expect(options.expiresIn).toBe(3600);
   });
 });

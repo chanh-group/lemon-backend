@@ -418,5 +418,74 @@ describe("MessageService", () => {
       expect(resolveWriteMissMock).toHaveBeenCalledWith(msgId, userA, convId);
       expect(emitMessageRevokedMock).not.toHaveBeenCalled();
     });
+
+    it("sends an attachment message without text body successfully and maps storage presigned URLs", async () => {
+      const storageMock = {
+        getBucket: vi.fn().mockReturnValue("lemon-chat-storage"),
+        presignPut: vi.fn(),
+        presignGet: vi.fn().mockImplementation(async (params: any) => ({
+          downloadUrl: `https://r2.example/${params.disposition}/${params.objectKey}`,
+        })),
+        headObject: vi.fn(),
+        deleteObjects: vi.fn(),
+      };
+
+      const serviceWithStorage = new MessageService(
+        { createMessageWithConversationUpdate: createMessageMock } as any,
+        { getParticipantUserIds: getParticipantUserIdsMock, findById: findConversationByIdMock } as any,
+        { assertCanChat: assertCanChatMock } as any,
+        { emitNewMessage: emitNewMessageMock } as any,
+        null,
+        undefined,
+        undefined,
+        storageMock as any,
+      );
+
+      getParticipantUserIdsMock.mockResolvedValue([userA, userB]);
+      findConversationByIdMock.mockResolvedValue({ id: convId, kind: "DIRECT", partner: { id: userB } });
+      assertCanChatMock.mockResolvedValue(true);
+
+      const createdMsgWithAtt = {
+        ...mockMessage,
+        kind: "FILE" as const,
+        body: null,
+        attachments: [
+          {
+            id: "att-1",
+            messageId: msgId,
+            kind: "FILE" as const,
+            bucket: "lemon-chat-storage",
+            objectKey: "chat/c1/report.pdf",
+            fileName: "Báo Cáo.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 1024,
+            width: null,
+            height: null,
+            durationMs: null,
+            checksum: null,
+            createdAt: new Date(),
+          },
+        ],
+      };
+      createMessageMock.mockResolvedValue({ message: createdMsgWithAtt, isNew: true });
+
+      const res = await serviceWithStorage.sendMessage(userA, convId, {
+        kind: "FILE",
+        attachments: [
+          {
+            objectKey: "chat/c1/report.pdf",
+            fileName: "Báo Cáo.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 1024,
+          },
+        ],
+      });
+
+      expect(res.id).toBe(msgId);
+      expect(res.attachments).toHaveLength(1);
+      expect(res.attachments![0].previewUrl).toBe("https://r2.example/inline/chat/c1/report.pdf");
+      expect(res.attachments![0].downloadUrl).toBe("https://r2.example/attachment/chat/c1/report.pdf");
+      expect(res.attachments![0].fileName).toBe("Báo Cáo.pdf");
+    });
   });
 });

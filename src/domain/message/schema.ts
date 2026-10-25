@@ -78,6 +78,7 @@ export const messageAttachments = pgTable(
     kind: attachmentKindEnum("kind").notNull(),
     bucket: text("bucket").notNull(),
     objectKey: text("object_key").notNull(),
+    fileName: text("file_name").notNull(),
     mimeType: text("mime_type").notNull(),
     sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
     width: integer("width"),

@@ -95,4 +95,39 @@ describe("FileService", () => {
       }),
     ).rejects.toMatchObject({ code: "PRESIGN_FAILED" });
   });
+
+  it("presigns a chat file upload up to 25MB with fileName", async () => {
+    const result = await service.presign("user-1", {
+      kind: "CHAT_FILE",
+      sizeBytes: 20 * 1024 * 1024,
+      mimeType: "application/pdf",
+      fileName: "Tài liệu Báo Cáo.pdf",
+      conversationId: "0193a2b1-0000-7000-8000-000000000001",
+    });
+
+    expect(result.uploadUrl).toBe("https://s3.example/signed");
+    expect(result.objectKey).toContain("chat/0193a2b1-0000-7000-8000-000000000001/");
+    expect(result.objectKey).toContain("T_i_li_u_B_o_C_o.pdf");
+  });
+
+  it("rejects chat files exceeding 25MB", async () => {
+    await expect(
+      service.presign("user-1", {
+        kind: "CHAT_FILE",
+        sizeBytes: 25 * 1024 * 1024 + 1,
+        mimeType: "application/pdf",
+      }),
+    ).rejects.toMatchObject({ code: "FILE_TOO_LARGE", params: { maxMb: "25" } });
+  });
+
+  it("rejects dangerous executable files in chat", async () => {
+    await expect(
+      service.presign("user-1", {
+        kind: "CHAT_FILE",
+        sizeBytes: 1024,
+        mimeType: "application/octet-stream",
+        fileName: "malware.exe",
+      }),
+    ).rejects.toMatchObject({ code: "FILE_TYPE_NOT_ALLOWED" });
+  });
 });

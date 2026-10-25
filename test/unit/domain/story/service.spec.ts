@@ -165,6 +165,7 @@ describe("StoryService", () => {
     getBucketMock = vi.fn().mockReturnValue("lemon-stories");
     storageMock = {
       presignPut: vi.fn(),
+      presignGet: vi.fn(),
       headObject: headObjectMock,
       deleteObjects: vi.fn(),
       getBucket: getBucketMock,

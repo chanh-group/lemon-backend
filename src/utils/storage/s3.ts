@@ -1,5 +1,6 @@
 import {
   DeleteObjectsCommand,
+  GetObjectCommand,
   HeadObjectCommand,
   NotFound,
   PutObjectCommand,
@@ -8,12 +9,12 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { S3_DELETE_BATCH_SIZE } from "../cache/constants.js";
 import { StorageError } from "./error.js";
-import type { StorageService } from "./store.js";
+import type { PresignGetParams, StorageService } from "./store.js";
 
 export type PresignerFn = (
   client: S3Client,
-  command: PutObjectCommand,
-  options: { expiresIn: number; signableHeaders: Set<string> },
+  command: PutObjectCommand | GetObjectCommand,
+  options: { expiresIn: number; signableHeaders?: Set<string> },
 ) => Promise<string>;
 
 export interface S3StorageOptions {
@@ -33,7 +34,7 @@ export class S3StorageService implements StorageService {
     this.client = options.client;
     this.bucket = options.bucket;
     this.presignTtlSecs = options.presignTtlSecs;
-    this.presigner = options.presigner ?? getSignedUrl;
+    this.presigner = options.presigner ?? (getSignedUrl as unknown as PresignerFn);
   }
 
   async presignPut(params: {
@@ -56,6 +57,43 @@ export class S3StorageService implements StorageService {
       return { uploadUrl };
     } catch (err) {
       throw new StorageError("Failed to presign upload", err);
+    }
+  }
+
+  async presignGet(params: PresignGetParams): Promise<{ downloadUrl: string }> {
+    try {
+      const disposition = params.disposition ?? "inline";
+      let contentDisposition: string | undefined;
+
+      if (params.fileName) {
+        // RFC 5987 / RFC 6266 encoding for international filenames
+        const asciiFallback = params.fileName.replace(/[^\x20-\x7E]/g, "_").replace(/["\\]/g, "");
+        const utf8Encoded = encodeURIComponent(params.fileName);
+        contentDisposition = `${disposition}; filename="${asciiFallback}"; filename*=UTF-8''${utf8Encoded}`;
+      } else {
+        contentDisposition = disposition;
+      }
+
+      let contentType = params.mimeType;
+      if (contentType && contentType.startsWith("text/plain") && !contentType.includes("charset")) {
+        contentType = "text/plain; charset=utf-8";
+      }
+
+      const downloadUrl = await this.presigner(
+        this.client,
+        new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: params.objectKey,
+          ...(contentDisposition && { ResponseContentDisposition: contentDisposition }),
+          ...(contentType && { ResponseContentType: contentType }),
+        }),
+        {
+          expiresIn: params.expiresInSecs ?? this.presignTtlSecs,
+        },
+      );
+      return { downloadUrl };
+    } catch (err) {
+      throw new StorageError("Failed to presign download", err);
     }
   }
 

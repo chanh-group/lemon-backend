@@ -1,3 +1,16 @@
+export interface MessageAttachmentResponse {
+  id: string;
+  kind: "IMAGE" | "VIDEO" | "AUDIO" | "FILE";
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  width: number | null;
+  height: number | null;
+  durationMs: number | null;
+  previewUrl: string;
+  downloadUrl: string;
+}
+
 export interface MessageResponse {
   id: string;
   conversationId: string;
@@ -5,6 +18,7 @@ export interface MessageResponse {
   kind: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "FILE" | "SYSTEM";
   body: string | null;
   replyToId: string | null;
+  attachments?: MessageAttachmentResponse[];
   createdAt: Date;
   editedAt: Date | null;
   deletedAt: Date | null;

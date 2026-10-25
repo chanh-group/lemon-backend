@@ -1,5 +1,5 @@
 import { StorageError } from "./error.js";
-import type { StorageService } from "./store.js";
+import type { PresignGetParams, StorageService } from "./store.js";
 
 // Dev/test without S3 configuration: boot stays safe; every call fails closed.
 export class UnavailableStorageService implements StorageService {
@@ -7,6 +7,10 @@ export class UnavailableStorageService implements StorageService {
     objectKey: string;
     mimeType: string;
   }): Promise<{ uploadUrl: string }> {
+    throw new StorageError("storage is not configured");
+  }
+
+  async presignGet(_params: PresignGetParams): Promise<{ downloadUrl: string }> {
     throw new StorageError("storage is not configured");
   }
 

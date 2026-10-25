@@ -42,6 +42,42 @@ export const MIME_EXTENSION_MAP: Record<string, string | undefined> = {
 export const S3_PRESIGN_TTL_SECS = 300;
 export const S3_DELETE_BATCH_SIZE = 1000;
 
+// Chat attachment upload limits (< 25MB)
+export const CHAT_MAX_FILE_BYTES = 25 * 1024 * 1024; // 25MB
+export const CHAT_ALLOWED_IMAGE_MIME = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/svg+xml",
+] as const;
+export const CHAT_ALLOWED_VIDEO_MIME = [
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "video/x-matroska",
+] as const;
+export const CHAT_ALLOWED_AUDIO_MIME = [
+  "audio/mpeg",
+  "audio/mp4",
+  "audio/ogg",
+  "audio/webm",
+  "audio/wav",
+  "audio/x-m4a",
+] as const;
+export const DISALLOWED_FILE_EXTENSIONS = [
+  "exe",
+  "bat",
+  "cmd",
+  "sh",
+  "msi",
+  "dll",
+  "com",
+  "vbs",
+  "ps1",
+  "scr",
+] as const;
+
 // Note feed key and lifetime settings.
 export const NOTE_FEED_KEY_PREFIX = "notes:feed:";
 export const NOTE_FEED_TTL_SECS = 60; // 1 minute — per-viewer note feed tray cache

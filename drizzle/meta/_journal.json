@@ -64,6 +64,13 @@
       "when": 1792507490066,
       "tag": "0008_wise_starbolt",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792924062584,
+      "tag": "0009_sticky_zemo",
+      "breakpoints": true
     }
   ]
 }
