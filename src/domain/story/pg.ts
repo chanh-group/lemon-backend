@@ -43,10 +43,12 @@ import {
   storyViews,
   userStorySettings,
 } from "./schema.js";
+import { BusinessError } from "../../utils/errors/business.js";
 import { toCursorPage, type CursorPage } from "../shared.js";
 import {
   decodeReactionCursor,
   encodeReactionCursor,
+  isUuid,
   toStoryItemResponse,
 } from "./dto/mapper.js";
 
@@ -427,7 +429,7 @@ export class StoryPgRepository implements StoryRepository {
             ),
           )!,
         );
-      } else {
+      } else if (isUuid(cursor)) {
         const cursorCreatedAt = sql`(SELECT sr.created_at FROM story_reactions sr WHERE sr.story_id = ${storyId} AND sr.user_id = ${cursor})`;
         conditions.push(
           or(
@@ -435,6 +437,8 @@ export class StoryPgRepository implements StoryRepository {
             and(eq(storyReactions.createdAt, cursorCreatedAt), lt(users.id, cursor)),
           )!,
         );
+      } else {
+        throw new BusinessError("BAD_REQUEST");
       }
     }
     const rows = await this.db

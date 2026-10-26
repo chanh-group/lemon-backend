@@ -23,4 +23,13 @@ describe("cursor pagination helpers", () => {
     expect(() => parseCursorPage(undefined, "0")).toThrow();
     expect(() => parseCursorPage(undefined, "1.5")).toThrow();
   });
+
+  it("supports opaque base64url cursors only when allowOpaque option is enabled", () => {
+    const opaqueCursor = "MTc5Mjg0MzE5NTMxN18wMTkzYTJiMS0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDE";
+    expect(() => parseCursorPage(opaqueCursor, "20")).toThrow();
+    expect(parseCursorPage(opaqueCursor, "20", 20, 50, { allowOpaque: true })).toEqual({
+      cursor: opaqueCursor,
+      size: 20,
+    });
+  });
 });

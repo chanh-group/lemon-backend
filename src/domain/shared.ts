@@ -31,13 +31,15 @@ export function parseCursorPage(
   size: string | undefined,
   defaultSize = DEFAULT_PAGE_SIZE,
   maxSize = MAX_PAGE_SIZE,
+  options?: { allowOpaque?: boolean },
 ): CursorPageInput {
-  if (
-    cursor !== undefined &&
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cursor) &&
-    !/^[A-Za-z0-9_-]{10,128}$/.test(cursor)
-  ) {
-    throw new BusinessError("BAD_REQUEST");
+  if (cursor !== undefined) {
+    const isUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cursor);
+    const isOpaque = options?.allowOpaque && /^[A-Za-z0-9_-]{10,128}$/.test(cursor);
+    if (!isUuid && !isOpaque) {
+      throw new BusinessError("BAD_REQUEST");
+    }
   }
   if (size === undefined) return { cursor, size: defaultSize };
   if (!/^[1-9]\d*$/.test(size)) throw new BusinessError("BAD_REQUEST");

@@ -29,6 +29,7 @@ import { Lang } from "../../utils/decorators.js";
 import { t } from "../../utils/i18n/index.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { messageOnly, ok, withMessage } from "../../utils/response.js";
+import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "../pagination.constants.js";
 import { getAuthUser, parseCursorPage, type AuthUser } from "../shared.js";
 import type { StoryReactionKind } from "./constants.js";
 import {
@@ -222,7 +223,9 @@ export class StoryController {
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
     await this.assertReactionsReadRateLimit(req, userId);
-    const page = parseCursorPage(cursor, limit);
+    const page = parseCursorPage(cursor, limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, {
+      allowOpaque: true,
+    });
     const validKind =
       kind === "REACTION" || kind === "LIKE" ? (kind as StoryReactionKind) : undefined;
     const data = await this.storyService.getReactions(

@@ -100,6 +100,13 @@ export function groupStoriesByUser(
   return result;
 }
 
+export const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isUuid(value: string): boolean {
+  return UUID_REGEX.test(value);
+}
+
 export function encodeReactionCursor(createdAt: Date, userId: string): string {
   return Buffer.from(`${createdAt.getTime()}_${userId}`).toString("base64url");
 }
@@ -112,8 +119,11 @@ export function decodeReactionCursor(cursor: string): { createdAt: Date; userId:
     const msStr = raw.slice(0, idx);
     const userId = raw.slice(idx + 1);
     const ms = Number(msStr);
-    if (!Number.isSafeInteger(ms) || ms <= 0 || !userId) return null;
-    return { createdAt: new Date(ms), userId };
+    if (!Number.isSafeInteger(ms) || ms <= 0) return null;
+    const date = new Date(ms);
+    if (Number.isNaN(date.getTime())) return null;
+    if (!isUuid(userId)) return null;
+    return { createdAt: date, userId };
   } catch {
     return null;
   }

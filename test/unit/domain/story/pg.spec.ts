@@ -2,6 +2,7 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
 import type { DrizzleDb } from "../../../../src/configs/database.js";
+import { BusinessError } from "../../../../src/utils/errors/business.js";
 import { StoryPgRepository } from "../../../../src/domain/story/pg.js";
 import { encodeReactionCursor } from "../../../../src/domain/story/dto/mapper.js";
 import { stories, storyReactions, storyViews } from "../../../../src/domain/story/schema.js";
@@ -279,12 +280,13 @@ describe("StoryPgRepository purge queries", () => {
       ]);
     });
 
-    it("findReactionsByStoryId pages with the cursor of the previous item", async () => {
+    it("findReactionsByStoryId pages with a valid legacy UUID cursor", async () => {
       const { db, whereMock, limitMock } = makeDb();
       limitMock.mockResolvedValue([]);
       const repo = new StoryPgRepository(db);
+      const legacyCursor = "00000000-0000-4000-8000-000000000001";
 
-      await repo.findReactionsByStoryId("s1", "u1", 20);
+      await repo.findReactionsByStoryId("s1", legacyCursor, 20);
 
       const whereSql = render(whereMock.mock.calls[0][0]);
       expect(whereSql).toContain("SELECT sr.created_at FROM story_reactions sr");
@@ -296,7 +298,10 @@ describe("StoryPgRepository purge queries", () => {
       const { db, whereMock, limitMock } = makeDb();
       limitMock.mockResolvedValue([]);
       const repo = new StoryPgRepository(db);
-      const encoded = encodeReactionCursor(new Date("2026-10-24T18:00:00.000Z"), "u1");
+      const encoded = encodeReactionCursor(
+        new Date("2026-10-24T18:00:00.000Z"),
+        "00000000-0000-4000-8000-000000000001",
+      );
 
       await repo.findReactionsByStoryId("s1", encoded, 20);
 
@@ -304,6 +309,15 @@ describe("StoryPgRepository purge queries", () => {
       expect(whereSql).not.toContain("SELECT sr.created_at FROM story_reactions sr");
       expect(whereSql).toContain('"story_reactions"."created_at" <');
       expect(whereSql).toContain('"users"."id" <');
+    });
+
+    it("findReactionsByStoryId throws BAD_REQUEST when cursor is neither valid encoded cursor nor legacy UUID", async () => {
+      const { db } = makeDb();
+      const repo = new StoryPgRepository(db);
+
+      await expect(
+        repo.findReactionsByStoryId("s1", "not-a-valid-cursor", 20),
+      ).rejects.toThrow(BusinessError);
     });
 
     it("findUserReactions returns empty map when storyIds is empty", async () => {
