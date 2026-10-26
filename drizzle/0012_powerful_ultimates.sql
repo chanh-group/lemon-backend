@@ -1,1 +1,0 @@
-CREATE INDEX "story_reactions_story_cursor_idx" ON "story_reactions" USING btree ("story_id","created_at" DESC NULLS LAST,"user_id" DESC NULLS LAST);

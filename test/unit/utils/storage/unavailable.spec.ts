@@ -11,6 +11,12 @@ describe("UnavailableStorageService", () => {
     );
   });
 
+  it("throws StorageError on putObject", async () => {
+    await expect(
+      storage.putObject({ objectKey: "k", body: Buffer.from("test"), mimeType: "image/jpeg" }),
+    ).rejects.toThrow(StorageError);
+  });
+
   it("throws StorageError on headObject", async () => {
     await expect(storage.headObject("k")).rejects.toThrow(StorageError);
   });

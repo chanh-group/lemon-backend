@@ -36,4 +36,5 @@ ALTER TABLE "user_story_settings" ADD CONSTRAINT "user_story_settings_user_id_us
 CREATE INDEX "story_audiences_user_idx" ON "story_audiences" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "story_audiences_story_idx" ON "story_audiences" USING btree ("story_id");--> statement-breakpoint
 CREATE INDEX "story_mutes_user_idx" ON "story_mutes" USING btree ("user_id");--> statement-breakpoint
-CREATE INDEX "stories_archived_idx" ON "stories" USING btree ("archived_at");
+CREATE INDEX "stories_archived_idx" ON "stories" USING btree ("archived_at");--> statement-breakpoint
+CREATE INDEX "story_reactions_story_cursor_idx" ON "story_reactions" USING btree ("story_id","created_at" DESC NULLS LAST,"user_id" DESC NULLS LAST);

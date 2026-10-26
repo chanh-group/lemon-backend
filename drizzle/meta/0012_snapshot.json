@@ -1,6 +1,6 @@
 {
-  "id": "85efcba3-2ca6-4e73-8c64-d9b7d37cc8b9",
-  "prevId": "4c070ea2-8a17-4cfc-996a-508275a7f7f9",
+  "id": "ac7b880d-ab46-4663-bff2-ce2cdbd878d4",
+  "prevId": "81f2ce49-e4fb-4fe8-a6b8-dcb570e52afd",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -748,6 +748,12 @@
         },
         "object_key": {
           "name": "object_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file_name": {
+          "name": "file_name",
           "type": "text",
           "primaryKey": false,
           "notNull": true

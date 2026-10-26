@@ -12,12 +12,16 @@ import { UNREAD_TTL_SECONDS } from "../../utils/cache/constants.js";
 import { unreadCountKey } from "../../utils/cache/keys.js";
 import type { SendMessageDto } from "./dto/request.js";
 import type { MessageResponse, MessageTimelineResponse } from "./dto/response.js";
-import { toMessageResponse, toMessageTimeline } from "./dto/mapper.js";
+import {
+  toMessageResponseAsync,
+  toMessageTimelineAsync,
+} from "./dto/mapper.js";
 import { FriendService } from "../friend/service.js";
 import { SystemError } from "../../utils/errors/system.js";
 import { RedisHealthService } from "../../configs/redis-health.js";
 import { RedisMetricsService } from "../../configs/redis-metrics.js";
 import { MESSAGE_MAX_BODY_LENGTH } from "./constants.js";
+import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.js";
 import type { StoryPreview } from "../story/dto/response.js";
 
 export type { SendMessageDto };
@@ -53,6 +57,7 @@ export class MessageService {
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
     @Optional() @Inject(RedisHealthService) private readonly redisHealth?: RedisHealthService,
     @Optional() @Inject(RedisMetricsService) private readonly metrics?: RedisMetricsService,
+    @Optional() @Inject(STORAGE_SERVICE) private readonly storage?: StorageService,
   ) {}
 
   async sendMessage(
@@ -68,7 +73,8 @@ export class MessageService {
     }
     const directPartnerId = await this.assertDirectConversationAllowed(conversationId, senderId);
 
-    if ((!dto.kind || dto.kind === "TEXT") && (!dto.body || dto.body.trim().length === 0)) {
+    const hasAttachments = Boolean(dto.attachments && dto.attachments.length > 0);
+    if ((!dto.kind || dto.kind === "TEXT") && !hasAttachments && (!dto.body || dto.body.trim().length === 0)) {
       throw new BusinessError("BAD_REQUEST");
     }
 
@@ -83,14 +89,37 @@ export class MessageService {
       }
     }
 
+    let bucket = "lemon-chat-storage";
+    if (this.storage) {
+      try {
+        bucket = this.storage.getBucket();
+      } catch {
+        bucket = "lemon-chat-storage";
+      }
+    }
+
+    const attachmentsToInsert = dto.attachments?.map((att) => ({
+      bucket,
+      objectKey: att.objectKey,
+      fileName: att.fileName,
+      mimeType: att.mimeType,
+      sizeBytes: att.sizeBytes,
+      kind: att.kind ?? (dto.kind === "TEXT" ? "FILE" : (dto.kind as any)),
+      width: att.width,
+      height: att.height,
+      durationMs: att.durationMs,
+      checksum: att.checksum,
+    }));
+
     // 2. Persist message in PostgreSQL with transaction
     const { message, isNew } = await this.messageRepo.createMessageWithConversationUpdate({
       conversationId,
       senderId,
       body: dto.body,
-      kind: story?.kind ?? dto.kind ?? "TEXT",
+      kind: story?.kind ?? dto.kind ?? (hasAttachments && dto.attachments?.[0]?.kind ? dto.attachments[0].kind : "TEXT"),
       clientMsgId: dto.clientMsgId,
       replyToId: dto.replyToId,
+      attachments: attachmentsToInsert,
       ...(directPartnerId
         ? { requiredFriendship: { userAId: senderId, userBId: directPartnerId } }
         : {}),
@@ -98,7 +127,7 @@ export class MessageService {
       storyPreview: story?.storyPreview ?? null,
     });
 
-    const response = toMessageResponse(message);
+    const response = await toMessageResponseAsync(message, this.storage);
 
     if (isNew) {
       const recipientIds = participantIds.filter((id) => id !== senderId);
@@ -150,8 +179,9 @@ export class MessageService {
   ): Promise<MessageTimelineResponse> {
     await this.assertDirectConversationAllowed(conversationId, userId);
 
-    return toMessageTimeline(
+    return await toMessageTimelineAsync(
       await this.messageRepo.findTimeline(conversationId, cursor, limit, after),
+      this.storage,
     );
   }
 
@@ -200,7 +230,7 @@ export class MessageService {
       return await this.resolveWriteMiss(messageId, userId, msg.conversationId);
     }
 
-    const response = toMessageResponse(updated);
+    const response = await toMessageResponseAsync(updated, this.storage);
     this.realtimeService.emitMessageUpdated(response.conversationId, response);
     return response;
   }
@@ -225,7 +255,7 @@ export class MessageService {
       return await this.resolveWriteMiss(messageId, userId, msg.conversationId);
     }
 
-    const response = toMessageResponse(revoked);
+    const response = await toMessageResponseAsync(revoked, this.storage);
     this.realtimeService.emitMessageRevoked(response.conversationId, {
       id: response.id,
       deletedAt: response.deletedAt!,
@@ -242,6 +272,6 @@ export class MessageService {
     if (!missed) {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
-    return toMessageResponse(missed);
+    return await toMessageResponseAsync(missed, this.storage);
   }
 }
