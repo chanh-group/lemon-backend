@@ -8,7 +8,6 @@ import { StorageModule } from "./configs/storage.js";
 import { AuthGuard } from "./domain/auth/guards/authguard.js";
 import { AuthModule } from "./domain/auth/module.js";
 import { ConversationModule } from "./domain/conversation/module.js";
-import { ExampleModule } from "./domain/example/module.js";
 import { FileModule } from "./domain/file/module.js";
 import { FriendModule } from "./domain/friend/module.js";
 import { HealthModule } from "./domain/health/module.js";
@@ -41,7 +40,6 @@ import { RedisReadinessGuard } from "./middleware/redis-readiness.guard.js";
     NoteModule,
     FileModule,
     PurgeModule,
-    ExampleModule,
   ],
   providers: [
     {
