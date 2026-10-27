@@ -9,7 +9,7 @@ import { messages } from "../message/schema.js";
 import { users } from "../user/schema.js";
 import type { ConversationRepository, ConversationWithPartner } from "./repository.js";
 import { conversationParticipants, conversations } from "./schema.js";
-import { toCursorPage } from "../shared.js";
+import { canonicalPair, toCursorPage } from "../shared.js";
 
 const partnerParticipants = alias(conversationParticipants, "partner_participants");
 
@@ -18,12 +18,8 @@ export class ConversationPgRepository implements ConversationRepository {
   constructor(@InjectDrizzle() private readonly db: DrizzleDb) {}
 
   private getDirectKey(userAId: string, userBId: string): string {
-    const [low, high] = this.canonicalParticipants(userAId, userBId);
+    const [low, high] = canonicalPair(userAId, userBId);
     return `${low}:${high}`;
-  }
-
-  private canonicalParticipants(userAId: string, userBId: string): [string, string] {
-    return userAId < userBId ? [userAId, userBId] : [userBId, userAId];
   }
 
   async findDirectByParticipants(
@@ -92,7 +88,7 @@ export class ConversationPgRepository implements ConversationRepository {
         }
 
         // Ensure both participants exist
-        const [participantLow, participantHigh] = this.canonicalParticipants(userAId, userBId);
+        const [participantLow, participantHigh] = canonicalPair(userAId, userBId);
         await tx
           .insert(conversationParticipants)
           .values([

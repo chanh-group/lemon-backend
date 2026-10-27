@@ -265,6 +265,20 @@ export class StoryService {
     storyId: string,
     emoji: StoryEmoji,
   ): Promise<MyStoryReactionResponse> {
+    return this.saveReaction(userId, storyId, emoji, "REACTION", true);
+  }
+
+  async likeStory(userId: string, storyId: string): Promise<MyStoryReactionResponse> {
+    return this.saveReaction(userId, storyId, STORY_SILENT_LIKE_EMOJI, "LIKE", false);
+  }
+
+  private async saveReaction(
+    userId: string,
+    storyId: string,
+    emoji: string,
+    kind: StoryReactionKind,
+    mirrorToConversation: boolean,
+  ): Promise<MyStoryReactionResponse> {
     const story = await this.storyRepo.findActiveById(storyId);
     if (!story) {
       throw new BusinessError("STORY_NOT_FOUND");
@@ -287,7 +301,7 @@ export class StoryService {
       storyId,
       userId,
       emoji,
-      "REACTION",
+      kind,
       anonymous,
     );
 
@@ -303,72 +317,16 @@ export class StoryService {
         storyId,
         user: userSummary,
         emoji,
-        kind: "REACTION",
+        kind,
         createdAt: reaction.createdAt,
       };
       this.realtimeService.emitStoryReaction(story.userId, payload);
       this.realtimeService.emitStoryReaction(userId, payload);
     }
 
-    if (isNew) {
+    if (mirrorToConversation && isNew) {
       await this.mirrorReactionToDirectConversation(userId, story, emoji);
     }
-
-    return {
-      storyId: reaction.storyId,
-      emoji: reaction.emoji,
-      kind: reaction.kind,
-      createdAt: reaction.createdAt,
-    };
-  }
-
-  async likeStory(userId: string, storyId: string): Promise<MyStoryReactionResponse> {
-    const story = await this.storyRepo.findActiveById(storyId);
-    if (!story) {
-      throw new BusinessError("STORY_NOT_FOUND");
-    }
-
-    if (story.userId === userId) {
-      throw new BusinessError("CANNOT_REACT_OWN_STORY");
-    }
-
-    await this.assertCanViewStory(story, userId, "STORY_REACT_FORBIDDEN");
-
-    if (!story.allowReactions) {
-      throw new BusinessError("STORY_INTERACTIONS_DISABLED");
-    }
-
-    const settings = await this.storyRepo.getUserStorySettings(userId);
-    const anonymous = !settings.viewedReceiptsEnabled;
-
-    const { reaction } = await this.storyRepo.addReactionWithView(
-      storyId,
-      userId,
-      STORY_SILENT_LIKE_EMOJI,
-      "LIKE",
-      anonymous,
-    );
-
-    await Promise.all([
-      this.cache.deleteBestEffort(storyFeedKey(userId)),
-      this.cache.deleteBestEffort(storyFeedKey(story.userId)),
-    ]);
-
-    const usersMap = await this.storyRepo.findUsersByIds([userId]);
-    const userSummary = usersMap.get(userId);
-    if (userSummary) {
-      const payload = {
-        storyId,
-        user: userSummary,
-        emoji: STORY_SILENT_LIKE_EMOJI,
-        kind: "LIKE",
-        createdAt: reaction.createdAt,
-      };
-      this.realtimeService.emitStoryReaction(story.userId, payload);
-      this.realtimeService.emitStoryReaction(userId, payload);
-    }
-
-    // Silent like: do NOT mirror to direct conversation!
 
     return {
       storyId: reaction.storyId,
@@ -494,23 +452,25 @@ export class StoryService {
 
   // Settings
   async getStorySettings(userId: string): Promise<UserStorySettingsResponse> {
-    const s = await this.storyRepo.getUserStorySettings(userId);
-    return {
-      viewedReceiptsEnabled: s.viewedReceiptsEnabled,
-      archiveEnabled: s.archiveEnabled,
-      archiveDurationSecs: s.archiveDurationSecs,
-    };
+    return this.toStorySettingsResponse(await this.storyRepo.getUserStorySettings(userId));
   }
 
   async updateStorySettings(
     userId: string,
     dto: UpdateStorySettingsDto,
   ): Promise<UserStorySettingsResponse> {
-    const s = await this.storyRepo.upsertUserStorySettings(userId, dto);
+    return this.toStorySettingsResponse(await this.storyRepo.upsertUserStorySettings(userId, dto));
+  }
+
+  private toStorySettingsResponse(settings: {
+    viewedReceiptsEnabled: boolean;
+    archiveEnabled: boolean;
+    archiveDurationSecs: number | null;
+  }): UserStorySettingsResponse {
     return {
-      viewedReceiptsEnabled: s.viewedReceiptsEnabled,
-      archiveEnabled: s.archiveEnabled,
-      archiveDurationSecs: s.archiveDurationSecs,
+      viewedReceiptsEnabled: settings.viewedReceiptsEnabled,
+      archiveEnabled: settings.archiveEnabled,
+      archiveDurationSecs: settings.archiveDurationSecs,
     };
   }
 

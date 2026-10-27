@@ -9,6 +9,11 @@ export function isUuid(value: string): boolean {
   return uuidSchema.safeParse(value).success;
 }
 
+/** Stable ordering for a pair stored as two columns or a compound key. */
+export function canonicalPair(userAId: string, userBId: string): [string, string] {
+  return userAId < userBId ? [userAId, userBId] : [userBId, userAId];
+}
+
 export interface CursorPage<T> {
   items: T[];
   nextCursor?: string;

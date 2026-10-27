@@ -7,7 +7,7 @@ import { SystemError } from "../../utils/errors/system.js";
 import { conversationParticipants, conversations } from "../conversation/schema.js";
 import type { AcceptedFriendRequest, FriendRepository } from "./repository.js";
 import { friendships } from "./schema.js";
-import { toCursorPage } from "../shared.js";
+import { canonicalPair, toCursorPage } from "../shared.js";
 
 function encodeCursor(createdAt: Date, id: string): string {
   return Buffer.from(`${createdAt.toISOString()}|${id}`).toString("base64url");
@@ -28,12 +28,8 @@ function decodeCursor(cursor: string | undefined): { createdAt: Date; id: string
 export class FriendPgRepository implements FriendRepository {
   constructor(@InjectDrizzle() private readonly db: DrizzleDb) {}
 
-  private pair(userAId: string, userBId: string): [string, string] {
-    return userAId < userBId ? [userAId, userBId] : [userBId, userAId];
-  }
-
   async findByPair(userAId: string, userBId: string) {
-    const [userLow, userHigh] = this.pair(userAId, userBId);
+    const [userLow, userHigh] = canonicalPair(userAId, userBId);
     const [row] = await this.db
       .select()
       .from(friendships)
@@ -43,7 +39,7 @@ export class FriendPgRepository implements FriendRepository {
   }
 
   async createRequest(requesterId: string, addresseeId: string) {
-    const [userLow, userHigh] = this.pair(requesterId, addresseeId);
+    const [userLow, userHigh] = canonicalPair(requesterId, addresseeId);
     const [created] = await this.db
       .insert(friendships)
       .values({ requesterId, addresseeId, userLow, userHigh, status: "PENDING" })
@@ -248,7 +244,7 @@ export class FriendPgRepository implements FriendRepository {
         .returning({ requesterId: friendships.requesterId, addresseeId: friendships.addresseeId });
       if (!accepted) return null;
 
-      const [userLow, userHigh] = this.pair(accepted.requesterId, accepted.addresseeId);
+      const [userLow, userHigh] = canonicalPair(accepted.requesterId, accepted.addresseeId);
       const directKey = `${userLow}:${userHigh}`;
       let [conversation] = await tx
         .select()
@@ -349,7 +345,7 @@ export class FriendPgRepository implements FriendRepository {
   }
 
   async deleteAcceptedPair(userAId: string, userBId: string): Promise<boolean> {
-    const [userLow, userHigh] = this.pair(userAId, userBId);
+    const [userLow, userHigh] = canonicalPair(userAId, userBId);
     const [row] = await this.db
       .delete(friendships)
       .where(
@@ -364,7 +360,7 @@ export class FriendPgRepository implements FriendRepository {
   }
 
   async blockPair(blockerId: string, targetId: string): Promise<void> {
-    const [userLow, userHigh] = this.pair(blockerId, targetId);
+    const [userLow, userHigh] = canonicalPair(blockerId, targetId);
     await this.db
       .insert(friendships)
       .values({
