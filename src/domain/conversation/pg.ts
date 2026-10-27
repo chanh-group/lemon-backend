@@ -66,7 +66,7 @@ export class ConversationPgRepository implements ConversationRepository {
         const [existingConv] = await tx
           .select()
           .from(conversations)
-          .where(eq(conversations.directKey, directKey))
+          .where(and(eq(conversations.directKey, directKey), isNull(conversations.deletedAt)))
           .limit(1);
 
         let convId: string;

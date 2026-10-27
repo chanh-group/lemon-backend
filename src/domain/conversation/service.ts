@@ -41,6 +41,21 @@ function parseUnreadCount(value: unknown): number | null {
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
+function isOnlinePresence(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "state" in parsed &&
+      parsed.state === "online"
+    );
+  } catch {
+    return false;
+  }
+}
+
 @Injectable()
 export class ConversationService {
   private readonly logger = new Logger(ConversationService.name);
@@ -170,16 +185,7 @@ export class ConversationService {
         for (let i = 0; i < list.length; i++) {
           if (list[i].partner) {
             const [err, val] = results[partnerIdx++];
-            if (!err && val) {
-              try {
-                const presence = JSON.parse(val as string);
-                list[i].partner!.isOnline = presence.state === "online";
-              } catch {
-                list[i].partner!.isOnline = false;
-              }
-            } else {
-              list[i].partner!.isOnline = false;
-            }
+            list[i].partner!.isOnline = !err && isOnlinePresence(val);
           }
         }
       } else {
@@ -254,16 +260,7 @@ export class ConversationService {
 
       if (results && conv.partner && results.length > 1) {
         const [errPres, valPres] = results[1];
-        if (!errPres && valPres) {
-          try {
-            const presence = JSON.parse(valPres as string);
-            conv.partner.isOnline = presence.state === "online";
-          } catch {
-            conv.partner.isOnline = false;
-          }
-        } else {
-          conv.partner.isOnline = false;
-        }
+        conv.partner.isOnline = !errPres && isOnlinePresence(valPres);
       }
     }
 

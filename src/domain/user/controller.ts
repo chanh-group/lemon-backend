@@ -1,5 +1,6 @@
 import { Controller, Get, Param, Query } from "@nestjs/common";
-import { CurrentUser, type AuthUser } from "../../utils/decorators.js";
+import { CurrentUser } from "../../utils/decorators.js";
+import type { AuthUser } from "../auth/types.js";
 import { ok } from "../../utils/response.js";
 import { parseCursorPage } from "../shared.js";
 import { USER_SEARCH_MAX_LENGTH, USER_SEARCH_MIN_LENGTH } from "./constants.js";

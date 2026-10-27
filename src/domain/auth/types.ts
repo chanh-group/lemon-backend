@@ -19,3 +19,8 @@ export interface TokenPair {
   accessToken: string;
   refreshToken: string;
 }
+
+/** Authenticated identity attached to an HTTP request by AuthGuard. */
+export interface AuthUser {
+  id: string;
+}

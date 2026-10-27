@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BusinessError } from "../utils/errors/business.js";
+import type { AuthUser } from "./auth/types.js";
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "./pagination.constants.js";
 
 const uuidSchema = z.string().uuid();
@@ -61,9 +62,7 @@ export function parseCursorPage(
  * headers are NEVER accepted as identity (client-spoofable). Missing or
  * malformed `req.user` fails closed with BusinessError(UNAUTHORIZED) → 401.
  */
-export interface AuthUser {
-  id: string;
-}
+export type { AuthUser } from "./auth/types.js";
 
 export function getAuthUser(req: { user?: unknown }): AuthUser {
   const user = req.user as { id?: unknown } | undefined;

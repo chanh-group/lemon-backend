@@ -16,6 +16,7 @@ import { users } from "../user/schema.js";
 import { STORY_MAX_CAPTION_LENGTH } from "./constants.js";
 
 export const storyKindEnum = pgEnum("story_kind", ["IMAGE", "VIDEO", "TEXT"]);
+export type StoryKind = (typeof storyKindEnum.enumValues)[number];
 export const storyReactionKindEnum = pgEnum("story_reaction_kind", ["REACTION", "LIKE"]);
 export const storyAudienceModeEnum = pgEnum("story_audience_mode", [
   "ALL_FRIENDS",

@@ -1,10 +1,11 @@
 import type { UserSummary } from "../../user/dto/response.js";
 import type { StoryAudienceMode, StoryReactionKind } from "../constants.js";
+import type { StoryKind } from "../schema.js";
 
 export interface StoryItemResponse {
   id: string;
   userId: string;
-  kind: "IMAGE" | "VIDEO" | "TEXT";
+  kind: StoryKind;
   bucket: string | null;
   objectKey: string | null;
   mimeType: string | null;
@@ -70,11 +71,4 @@ export interface UserStorySettingsResponse {
  * snapshot outlives the story row (`messages.story_id` is `ON DELETE SET
  * NULL`), so it must stay self-contained.
  */
-export interface StoryPreview {
-  id: string;
-  kind: "IMAGE" | "VIDEO" | "TEXT";
-  bucket: string | null;
-  objectKey: string | null;
-  caption: string | null;
-  background: string | null;
-}
+export type { StoryPreview } from "../types.js";

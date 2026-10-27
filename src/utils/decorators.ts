@@ -5,7 +5,6 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import type { Request } from "express";
-import type { AuthUser } from "../domain/shared.js";
 import { getLanguageFromHeader } from "./i18n/index.js";
 
 export const IS_PUBLIC_KEY = "isPublic";
@@ -16,15 +15,13 @@ export const IS_PUBLIC_KEY = "isPublic";
  */
 export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
 
-export type { AuthUser };
-
 /**
  * Parameter decorator to extract the authenticated user
  * from the request object populated by AuthGuard.
  */
 export const CurrentUser = createParamDecorator(
-  (_data: unknown, ctx: ExecutionContext): AuthUser => {
-    const request = ctx.switchToHttp().getRequest<Request & { user?: AuthUser }>();
+  (_data: unknown, ctx: ExecutionContext): { id: string } => {
+    const request = ctx.switchToHttp().getRequest<Request & { user?: { id: string } }>();
     if (!request.user) {
       throw new UnauthorizedException({
         code: "UNAUTHORIZED",

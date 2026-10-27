@@ -15,7 +15,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { created, uuidV7 } from "../../utils/database.js";
 import { conversations } from "../conversation/schema.js";
-import type { StoryPreview } from "../story/dto/response.js";
+import type { StoryPreview } from "../story/types.js";
 import { stories } from "../story/schema.js";
 import { users } from "../user/schema.js";
 import { MESSAGE_MAX_BODY_LENGTH } from "./constants.js";

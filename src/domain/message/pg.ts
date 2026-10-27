@@ -7,7 +7,11 @@ import { isForeignKeyViolation, isUniqueViolation } from "../../utils/errors/pg.
 import { conversations } from "../conversation/schema.js";
 import { friendships } from "../friend/schema.js";
 import { DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE } from "../pagination.constants.js";
-import { ATTACHMENT_PREVIEW_TOKEN, STORY_REACTION_PREVIEW_TOKEN } from "./constants.js";
+import {
+  ATTACHMENT_PREVIEW_TOKEN,
+  MESSAGE_REVOKED_PREVIEW_TOKEN,
+  STORY_REACTION_PREVIEW_TOKEN,
+} from "./constants.js";
 import type {
   AttachmentInsertData,
   CreatedMessageResult,
@@ -15,7 +19,7 @@ import type {
   MessageTimelineResult,
   MessageWithAttachments,
 } from "./repository.js";
-import type { StoryPreview } from "../story/dto/response.js";
+import type { StoryPreview } from "../story/types.js";
 import { type Message, type MessageAttachment, messageAttachments, messages } from "./schema.js";
 
 /**
@@ -369,7 +373,7 @@ export class MessagePgRepository implements MessageRepository {
       await tx
         .update(conversations)
         .set({
-          lastMessagePreview: "Tin nhắn đã bị thu hồi",
+          lastMessagePreview: MESSAGE_REVOKED_PREVIEW_TOKEN,
           updatedAt: sql`now()`,
         })
         .where(

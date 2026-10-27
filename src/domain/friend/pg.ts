@@ -3,6 +3,7 @@ import { InjectDrizzle } from "@nestjs/drizzle";
 import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { users } from "../user/schema.js";
+import { SystemError } from "../../utils/errors/system.js";
 import { conversationParticipants, conversations } from "../conversation/schema.js";
 import type { AcceptedFriendRequest, FriendRepository } from "./repository.js";
 import { friendships } from "./schema.js";
@@ -55,7 +56,7 @@ export class FriendPgRepository implements FriendRepository {
 
     const existing = await this.findByPair(requesterId, addresseeId);
     if (existing) return { friendship: existing, created: false };
-    throw new Error("Friend request insert conflicted but the friendship row was not found");
+    throw new SystemError("database", "Friend request conflict row was not found");
   }
 
   async listFriendsPage(userId: string, cursor: string | undefined, limit: number) {
@@ -119,7 +120,12 @@ export class FriendPgRepository implements FriendRepository {
     );
     return {
       ...page,
-      items: page.items.map(({ createdAt: _, friendshipId: __, ...friend }) => friend),
+      items: page.items.map((friend) => ({
+        id: friend.id,
+        name: friend.name,
+        username: friend.username,
+        avatarUrl: friend.avatarUrl,
+      })),
     };
   }
 
@@ -265,7 +271,8 @@ export class FriendPgRepository implements FriendRepository {
             .limit(1);
         }
       }
-      if (!conversation) throw new Error("Accepted friendship has no direct conversation");
+      if (!conversation)
+        throw new SystemError("database", "Accepted friendship has no conversation");
 
       if (conversation.deletedAt) {
         [conversation] = await tx
@@ -296,7 +303,7 @@ export class FriendPgRepository implements FriendRepository {
         .from(users)
         .where(eq(users.id, accepted.requesterId))
         .limit(1);
-      if (!partner) throw new Error("Accepted friend requester was not found");
+      if (!partner) throw new SystemError("database", "Accepted friend requester was not found");
 
       return {
         ...accepted,

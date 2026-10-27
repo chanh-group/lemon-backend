@@ -1,4 +1,4 @@
-import type { StoryPreview } from "../../story/dto/response.js";
+import type { StoryPreview } from "../../story/types.js";
 import type { MessageKind } from "../schema.js";
 
 export interface MessageAttachmentResponse {

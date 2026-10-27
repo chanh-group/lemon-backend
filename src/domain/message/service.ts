@@ -20,7 +20,7 @@ import { RedisMetricsService } from "../../configs/redis-metrics.js";
 import { MESSAGE_MAX_BODY_LENGTH } from "./constants.js";
 import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.js";
 import { CHAT_MAX_FILE_BYTES } from "../../utils/cache/constants.js";
-import type { StoryPreview } from "../story/dto/response.js";
+import type { StoryPreview } from "../story/types.js";
 
 function attachmentKindFromMessageKind(
   kind: SendMessageDto["kind"],
