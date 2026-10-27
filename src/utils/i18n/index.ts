@@ -36,11 +36,7 @@ export const getLanguageFromHeader = (acceptLanguage: string | null | undefined)
 
 export const hasTranslation = (key: string): key is TranslationKey => Object.hasOwn(en, key);
 
-export const t = (
-  key: TranslationKey,
-  lang: Lang | string,
-  params?: Record<string, string>,
-): string => {
+export const t = (key: TranslationKey, lang: string, params?: Record<string, string>): string => {
   const dictionary = lang === "en" ? locales.en : locales.vi;
   let text = dictionary[key] || key;
 

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { ChatGateway } from "../../../../src/domain/realtime/chat.gateway.js";
 import type { JwtConfig } from "../../../../src/domain/auth/jwt.js";
-import type { DrizzleDb } from "../../../../src/configs/database.js";
 import type { Redis } from "ioredis";
 import type { Socket } from "socket.io";
 
@@ -19,7 +18,6 @@ describe("ChatGateway", () => {
   let redisTtlMock: Mock;
   let mockJwt: JwtConfig;
   let mockRedis: Redis;
-  let mockDb: DrizzleDb;
   let activeConversationIdsMock: Mock;
   let isParticipantMock: Mock;
   let updateLastSeenMock: Mock;
@@ -81,11 +79,6 @@ describe("ChatGateway", () => {
       del: vi.fn().mockResolvedValue(1),
       ttl: redisTtlMock,
     } as unknown as Redis;
-
-    mockDb = {
-      select: dbSelectMock,
-      update: dbUpdateMock,
-    } as unknown as DrizzleDb;
 
     gateway = new ChatGateway(
       {

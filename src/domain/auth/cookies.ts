@@ -17,7 +17,7 @@ export interface CookieConfig {
  * else (including unset) falls back to `strict` — fail-closed.
  */
 function parseSameSite(raw: unknown): CookieConfig["sameSite"] {
-  const value = typeof raw === "string" ? raw : raw == null ? "" : String(raw as any);
+  const value = typeof raw === "string" ? raw : raw == null ? "" : String(raw);
   switch (value.trim().toLowerCase()) {
     case "lax":
       return "lax";
@@ -30,7 +30,7 @@ function parseSameSite(raw: unknown): CookieConfig["sameSite"] {
 
 /** Parse `COOKIE_SECURE`: `true` (case-insensitive) or `1` enable it, else false. */
 function parseSecure(raw: unknown): boolean {
-  const value = typeof raw === "string" ? raw : raw == null ? "" : String(raw as any);
+  const value = typeof raw === "string" ? raw : raw == null ? "" : String(raw);
   return value.toLowerCase() === "true" || value === "1";
 }
 
