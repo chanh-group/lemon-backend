@@ -57,6 +57,7 @@ export class NoteService {
           note: {
             ...item.note,
             createdAt: new Date(item.note.createdAt),
+            updatedAt: new Date(item.note.updatedAt),
             expiresAt: new Date(item.note.expiresAt),
           },
         }));

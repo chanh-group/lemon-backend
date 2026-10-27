@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { check, index, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
-import { created, uuidV7 } from "../../utils/database.js";
+import { created, updated, uuidV7 } from "../../utils/database.js";
 import { users } from "../user/schema.js";
 import { NOTE_MAX_BACKGROUND_LENGTH, NOTE_MAX_CONTENT_LENGTH } from "./constants.js";
 
@@ -14,6 +14,7 @@ export const notes = pgTable(
     content: text("content").notNull(),
     background: text("background"),
     createdAt: created("created_at"),
+    updatedAt: updated("updated_at"),
     expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
   },
   (table) => [

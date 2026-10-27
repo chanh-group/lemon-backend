@@ -8,6 +8,7 @@ export function toNoteResponse(note: Note): NoteResponse {
     content: note.content,
     background: note.background,
     createdAt: note.createdAt,
+    updatedAt: note.updatedAt,
     expiresAt: note.expiresAt,
   };
 }

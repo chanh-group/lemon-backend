@@ -28,6 +28,7 @@ describe("NoteController", () => {
     content: "Sunny day note",
     background: "#ffcc00",
     createdAt: new Date("2026-10-15T00:00:00Z"),
+    updatedAt: new Date("2026-10-15T00:00:00Z"),
     expiresAt: new Date("2026-10-16T00:00:00Z"),
   };
 

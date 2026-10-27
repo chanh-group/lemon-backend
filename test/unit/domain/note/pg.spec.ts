@@ -58,6 +58,7 @@ describe("NotePgRepository.upsert", () => {
     content: "Sunny day note",
     background: "#ffcc00",
     createdAt: new Date("2026-10-17T00:00:00Z"),
+    updatedAt: new Date("2026-10-17T00:00:00Z"),
     expiresAt,
   };
 
@@ -88,7 +89,7 @@ describe("NotePgRepository.upsert", () => {
     expect(deleteMock).not.toHaveBeenCalled();
   });
 
-  it("upsert refreshes createdAt alongside content and expiresAt", async () => {
+  it("upsert preserves createdAt and refreshes updatedAt with the DB clock", async () => {
     const { db, onConflictDoUpdateMock } = makeDb();
     const repo = new NotePgRepository(db);
 
@@ -100,7 +101,7 @@ describe("NotePgRepository.upsert", () => {
           content: "Sunny day note",
           background: "#ffcc00",
           expiresAt,
-          createdAt: expect.any(Date),
+          updatedAt: expect.anything(),
         }),
       }),
     );
@@ -116,13 +117,19 @@ describe("NotePgRepository.findActiveFeedByUserIds", () => {
       content: "Sunny day note",
       background: null,
       createdAt: new Date("2026-10-17T00:00:00Z"),
+      updatedAt: new Date("2026-10-17T00:00:00Z"),
       expiresAt: new Date("2026-10-18T00:00:00Z"),
     };
     const row = {
       note,
       user: { id: userId, username: "user1", fullName: "User One", avatarUrl: null },
     };
-    const whereMock = vi.fn().mockResolvedValue([row]);
+    const orderByMock = vi
+      .fn<(first: SQL, second: SQL) => Promise<(typeof row)[]>>()
+      .mockResolvedValue([row]);
+    const whereMock = vi.fn<(condition: SQL) => { orderBy: typeof orderByMock }>(() => ({
+      orderBy: orderByMock,
+    }));
     const innerJoinMock = vi.fn(() => ({ where: whereMock }));
     const fromMock = vi.fn(() => ({ innerJoin: innerJoinMock }));
     const selectMock = vi.fn(() => ({ from: fromMock }));
@@ -137,6 +144,7 @@ describe("NotePgRepository.findActiveFeedByUserIds", () => {
     );
     expect(innerJoinMock).toHaveBeenCalledTimes(1);
     expect(render(whereMock.mock.calls[0][0])).toContain('"notes"."expires_at" >');
+    expect(orderByMock).toHaveBeenCalledWith(expect.anything(), expect.anything());
   });
 
   it("does not query for an empty user list", async () => {
