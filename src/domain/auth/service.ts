@@ -50,7 +50,10 @@ export class AuthService {
   async requestOtp(input: RequestOtpDto): Promise<void> {
     const existingUser = await this.userRepo.findByEmail(input.email);
     if (existingUser) {
-      throw new BusinessError("USER_ALREADY_EXISTS");
+      this.logger.log("Registration OTP skipped for existing account", {
+        action: "auth.request_otp_existing",
+      });
+      return;
     }
 
     const code = this.generateOtp();
@@ -74,7 +77,6 @@ export class AuthService {
 
     this.logger.log("Registration OTP requested", {
       action: "auth.request_otp",
-      email: input.email,
     });
   }
 
@@ -340,7 +342,6 @@ export class AuthService {
 
     this.logger.log("Forgot password OTP sent", {
       action: "auth.forgot_otp_sent",
-      email: input.email,
     });
   }
 

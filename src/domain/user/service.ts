@@ -70,7 +70,7 @@ export class UserService {
 
     try {
       const created = await this.userRepo.create(data);
-      this.logger.log("User created successfully", { userId: created.id, email: created.email });
+      this.logger.log("User created successfully", { userId: created.id });
       return created;
     } catch (err: unknown) {
       const mapped = mapUniqueViolation(err, [
