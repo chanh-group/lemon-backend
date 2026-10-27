@@ -84,7 +84,7 @@ export class UserPgRepository implements UserRepository {
   async updatePasswordHash(id: string, hash: string): Promise<void> {
     await this.db
       .update(users)
-      .set({ passwordHash: hash, updatedAt: new Date() })
+      .set({ passwordHash: hash, updatedAt: sql`now()` })
       .where(and(eq(users.id, id), isNull(users.deletedAt)));
   }
 
@@ -94,23 +94,23 @@ export class UserPgRepository implements UserRepository {
   ): Promise<User | null> {
     const [result] = await this.db
       .update(users)
-      .set({ ...data, updatedAt: new Date() })
+      .set({ ...data, updatedAt: sql`now()` })
       .where(and(eq(users.id, id), isNull(users.deletedAt)))
       .returning();
     return result ?? null;
   }
 
-  async updateLastSeen(id: string, lastSeenAt: Date = new Date()): Promise<void> {
+  async updateLastSeen(id: string, _lastSeenAt?: Date): Promise<void> {
     await this.db
       .update(users)
-      .set({ lastSeenAt })
+      .set({ lastSeenAt: sql`now()` })
       .where(and(eq(users.id, id), isNull(users.deletedAt)));
   }
 
   async softDelete(id: string): Promise<void> {
     await this.db
       .update(users)
-      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .set({ deletedAt: sql`now()`, updatedAt: sql`now()` })
       .where(eq(users.id, id));
   }
 }

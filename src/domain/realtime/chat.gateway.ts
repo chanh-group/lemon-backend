@@ -19,7 +19,7 @@ import {
 import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { conversationParticipants } from "../conversation/schema.js";
 import { users } from "../user/schema.js";
@@ -329,7 +329,10 @@ export class ChatGateway
 
   private async touchLastSeen(userId: string): Promise<void> {
     try {
-      await this.db.update(users).set({ lastSeenAt: new Date() }).where(eq(users.id, userId));
+      await this.db
+        .update(users)
+        .set({ lastSeenAt: sql`now()` })
+        .where(eq(users.id, userId));
     } catch (err) {
       logger.warn(`Failed to touch lastSeen for ${userId}: ${String(err)}`);
     }

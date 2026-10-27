@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, asc, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { users } from "../user/schema.js";
 import { conversationParticipants, conversations } from "../conversation/schema.js";
@@ -187,7 +187,7 @@ export class FriendPgRepository implements FriendRepository {
     return this.db.transaction(async (tx) => {
       const [accepted] = await tx
         .update(friendships)
-        .set({ status: "ACCEPTED", respondedAt: new Date(), updatedAt: new Date() })
+        .set({ status: "ACCEPTED", respondedAt: sql`now()`, updatedAt: sql`now()` })
         .where(
           and(
             eq(friendships.id, requestId),
@@ -322,7 +322,7 @@ export class FriendPgRepository implements FriendRepository {
         userLow,
         userHigh,
         status: "BLOCKED",
-        respondedAt: new Date(),
+        respondedAt: sql`now()`,
       })
       .onConflictDoUpdate({
         target: [friendships.userLow, friendships.userHigh],
@@ -330,8 +330,8 @@ export class FriendPgRepository implements FriendRepository {
           requesterId: blockerId,
           addresseeId: targetId,
           status: "BLOCKED",
-          respondedAt: new Date(),
-          updatedAt: new Date(),
+          respondedAt: sql`now()`,
+          updatedAt: sql`now()`,
         },
       });
   }

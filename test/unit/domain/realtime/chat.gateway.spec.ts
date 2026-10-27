@@ -304,7 +304,7 @@ describe("ChatGateway", () => {
       expect(redisPipelineMock).toHaveBeenCalledTimes(2);
       expect(pipelineZremMock).toHaveBeenCalledWith("presence:online", mockUserId);
       expect(dbUpdateMock).toHaveBeenCalled();
-      expect(updateSetMock).toHaveBeenCalledWith({ lastSeenAt: expect.any(Date) });
+      expect(updateSetMock).toHaveBeenCalledWith({ lastSeenAt: expect.anything() });
       expect(updateWhereMock).toHaveBeenCalled();
     });
 

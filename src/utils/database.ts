@@ -11,9 +11,6 @@ export const created = (name: string) =>
   timestamp(name, { withTimezone: true, mode: "date" }).defaultNow().notNull();
 
 export const updated = (name: string) =>
-  timestamp(name, { withTimezone: true, mode: "date" })
-    .defaultNow()
-    .$onUpdate(() => new Date())
-    .notNull();
+  timestamp(name, { withTimezone: true, mode: "date" }).defaultNow().notNull();
 
 export const uuidV7 = (name: string) => uuid(name).$defaultFn(() => uuidv7());
