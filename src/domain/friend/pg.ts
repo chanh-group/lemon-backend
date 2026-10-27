@@ -51,7 +51,6 @@ export class FriendPgRepository implements FriendRepository {
           id: users.id,
           name: users.fullName,
           username: users.username,
-          email: users.email,
           avatarUrl: users.avatarUrl,
         })
         .from(friendships)
@@ -71,7 +70,6 @@ export class FriendPgRepository implements FriendRepository {
           id: users.id,
           name: users.fullName,
           username: users.username,
-          email: users.email,
           avatarUrl: users.avatarUrl,
         })
         .from(friendships)
@@ -125,7 +123,6 @@ export class FriendPgRepository implements FriendRepository {
             id: users.id,
             name: users.fullName,
             username: users.username,
-            email: users.email,
             avatarUrl: users.avatarUrl,
           },
         })
@@ -149,7 +146,6 @@ export class FriendPgRepository implements FriendRepository {
             id: users.id,
             name: users.fullName,
             username: users.username,
-            email: users.email,
             avatarUrl: users.avatarUrl,
           },
         })
