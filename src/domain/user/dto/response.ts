@@ -10,6 +10,14 @@ export interface UserSummary {
   avatarUrl: string | null;
 }
 
+export interface PublicUserResponse {
+  id: string;
+  username: string;
+  fullName: string;
+  avatarUrl: string | null;
+  bio: string | null;
+}
+
 export interface UserResponseDto {
   id: string;
   email: string;
