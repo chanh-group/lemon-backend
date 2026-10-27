@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { RealtimeService } from "../../../../src/domain/realtime/realtime.service.js";
 import { convRoom, userRoom } from "../../../../src/domain/realtime/rooms.js";
 import type { ChatGateway } from "../../../../src/domain/realtime/chat.gateway.js";
+import type { MessageResponse } from "../../../../src/domain/message/dto/response.js";
+
+const message = { id: "m1" } as MessageResponse;
 
 describe("RealtimeService", () => {
   function createService(to: ReturnType<typeof vi.fn>): RealtimeService {
@@ -14,7 +17,7 @@ describe("RealtimeService", () => {
       const to = vi.fn().mockReturnValue({ emit });
       const service = createService(to);
 
-      service.emitNewMessage("c1", { id: "m1" });
+      service.emitNewMessage("c1", message);
 
       expect(to).toHaveBeenCalledTimes(1);
       expect(to).toHaveBeenCalledWith("conv:c1");
@@ -31,7 +34,7 @@ describe("RealtimeService", () => {
         message: unknown,
         recipientUserIds?: string[],
       ) => void;
-      legacyCall("c1", { id: "m1" }, ["u2", "u3"]);
+      legacyCall("c1", message, ["u2", "u3"]);
 
       expect(to).toHaveBeenCalledTimes(1);
       expect(to).not.toHaveBeenCalledWith("user:u2");
@@ -41,7 +44,7 @@ describe("RealtimeService", () => {
     it("does nothing when the gateway server is not initialized", () => {
       const service = new RealtimeService({ server: undefined } as unknown as ChatGateway);
 
-      expect(() => service.emitNewMessage("c1", { id: "m1" })).not.toThrow();
+      expect(() => service.emitNewMessage("c1", message)).not.toThrow();
     });
 
     it("swallows socket emit failures", () => {
@@ -50,7 +53,7 @@ describe("RealtimeService", () => {
       });
       const service = createService(to);
 
-      expect(() => service.emitNewMessage("c1", { id: "m1" })).not.toThrow();
+      expect(() => service.emitNewMessage("c1", message)).not.toThrow();
     });
   });
 

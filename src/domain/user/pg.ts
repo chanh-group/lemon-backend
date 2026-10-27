@@ -8,6 +8,27 @@ import { users } from "./schema.js";
 import { toCursorPage } from "../shared.js";
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "../pagination.constants.js";
 
+function encodeSearchCursor(rank: number, id: string): string {
+  return Buffer.from(`${rank}:${id}`).toString("base64url");
+}
+
+function decodeSearchCursor(cursor: string): { rank: number; id: string } | null {
+  try {
+    const [rank, id] = Buffer.from(cursor, "base64url").toString("utf8").split(":");
+    const value = Number(rank);
+    return Number.isInteger(value) && value >= 0 && value <= 3 && id ? { rank: value, id } : null;
+  } catch {
+    return null;
+  }
+}
+
+function searchRank(user: User, query: string): number {
+  if (user.username === query) return 0;
+  if (user.username.startsWith(query)) return 1;
+  if (user.fullName.toLowerCase().startsWith(query)) return 2;
+  return 3;
+}
+
 @Injectable()
 export class UserPgRepository implements UserRepository {
   constructor(@InjectDrizzle() private readonly db: DrizzleDb) {}
@@ -52,21 +73,44 @@ export class UserPgRepository implements UserRepository {
     cursor?: string,
     limit = DEFAULT_PAGE_SIZE,
   ) {
-    const pattern = `%${query.trim().replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
-    const searchColumn = field === "email" ? sql<string>`${users.email}::text` : users.username;
-    const filters = [ilike(searchColumn, pattern), isNull(users.deletedAt)];
+    const clean = query.trim().toLowerCase().replaceAll("%", "\\%").replaceAll("_", "\\_");
+    const pattern = `%${clean}%`;
+    const prefix = `${clean}%`;
+    const usernameRank = sql<number>`CASE
+      WHEN ${users.username} = ${clean} THEN 0
+      WHEN ${users.username} ILIKE ${prefix} THEN 1
+      WHEN ${users.fullName} ILIKE ${prefix} THEN 2
+      ELSE 3
+    END`;
+    const searchFilter =
+      field === "email"
+        ? ilike(sql<string>`${users.email}::text`, pattern)
+        : or(ilike(users.username, pattern), ilike(users.fullName, pattern));
+    const filters = [searchFilter, isNull(users.deletedAt)];
     if (excludeId) {
       filters.push(ne(users.id, excludeId));
     }
-    if (cursor) filters.push(gt(users.id, cursor));
+    if (cursor) {
+      const decoded = decodeSearchCursor(cursor);
+      if (decoded) {
+        filters.push(
+          or(
+            gt(usernameRank, decoded.rank),
+            and(eq(usernameRank, decoded.rank), gt(users.id, decoded.id)),
+          )!,
+        );
+      }
+    }
     const pageSize = Math.min(limit, MAX_PAGE_SIZE);
     const rows = await this.db
       .select()
       .from(users)
       .where(and(...filters))
-      .orderBy(asc(users.id))
+      .orderBy(field === "email" ? asc(users.id) : asc(usernameRank), asc(users.id))
       .limit(pageSize + 1);
-    return toCursorPage(rows, pageSize, (user) => user.id);
+    return toCursorPage(rows, pageSize, (user) =>
+      field === "email" ? user.id : encodeSearchCursor(searchRank(user, clean), user.id),
+    );
   }
 
   async create(data: NewUser): Promise<User> {
@@ -84,7 +128,7 @@ export class UserPgRepository implements UserRepository {
   async updatePasswordHash(id: string, hash: string): Promise<void> {
     await this.db
       .update(users)
-      .set({ passwordHash: hash, updatedAt: new Date() })
+      .set({ passwordHash: hash, updatedAt: sql`now()` })
       .where(and(eq(users.id, id), isNull(users.deletedAt)));
   }
 
@@ -94,23 +138,23 @@ export class UserPgRepository implements UserRepository {
   ): Promise<User | null> {
     const [result] = await this.db
       .update(users)
-      .set({ ...data, updatedAt: new Date() })
+      .set({ ...data, updatedAt: sql`now()` })
       .where(and(eq(users.id, id), isNull(users.deletedAt)))
       .returning();
     return result ?? null;
   }
 
-  async updateLastSeen(id: string, lastSeenAt: Date = new Date()): Promise<void> {
+  async updateLastSeen(id: string, _lastSeenAt?: Date): Promise<void> {
     await this.db
       .update(users)
-      .set({ lastSeenAt })
+      .set({ lastSeenAt: sql`now()` })
       .where(and(eq(users.id, id), isNull(users.deletedAt)));
   }
 
   async softDelete(id: string): Promise<void> {
     await this.db
       .update(users)
-      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .set({ deletedAt: sql`now()`, updatedAt: sql`now()` })
       .where(eq(users.id, id));
   }
 }

@@ -2,13 +2,14 @@ import en from "./locales/en.json" with { type: "json" };
 import vi from "./locales/vi.json" with { type: "json" };
 
 export type TranslationKey = keyof typeof en;
+export type Lang = "en" | "vi";
 
-const locales: Record<string, Record<string, string>> = {
+const locales = {
   en,
   vi,
-};
+} satisfies Record<Lang, Record<TranslationKey, string>>;
 
-export const getLanguageFromHeader = (acceptLanguage: string | null | undefined): string => {
+export const getLanguageFromHeader = (acceptLanguage: string | null | undefined): Lang => {
   if (!acceptLanguage) {
     return "vi";
   } // Default to Vietnamese
@@ -25,7 +26,7 @@ export const getLanguageFromHeader = (acceptLanguage: string | null | undefined)
     .sort((a, b) => b.q - a.q);
 
   for (const lang of langs) {
-    if (locales[lang.code]) {
+    if (lang.code === "en" || lang.code === "vi") {
       return lang.code;
     }
   }
@@ -36,7 +37,7 @@ export const getLanguageFromHeader = (acceptLanguage: string | null | undefined)
 export const hasTranslation = (key: string): key is TranslationKey => Object.hasOwn(en, key);
 
 export const t = (key: TranslationKey, lang: string, params?: Record<string, string>): string => {
-  const dictionary = locales[lang] || locales["vi"];
+  const dictionary = lang === "en" ? locales.en : locales.vi;
   let text = dictionary[key] || key;
 
   if (params) {

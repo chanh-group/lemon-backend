@@ -12,17 +12,29 @@ import { UNREAD_TTL_SECONDS } from "../../utils/cache/constants.js";
 import { unreadCountKey } from "../../utils/cache/keys.js";
 import type { SendMessageDto } from "./dto/request.js";
 import type { MessageResponse, MessageTimelineResponse } from "./dto/response.js";
-import {
-  toMessageResponseAsync,
-  toMessageTimelineAsync,
-} from "./dto/mapper.js";
+import { toMessageResponseAsync, toMessageTimelineAsync } from "./dto/mapper.js";
 import { FriendService } from "../friend/service.js";
 import { SystemError } from "../../utils/errors/system.js";
 import { RedisHealthService } from "../../configs/redis-health.js";
 import { RedisMetricsService } from "../../configs/redis-metrics.js";
 import { MESSAGE_MAX_BODY_LENGTH } from "./constants.js";
 import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.js";
-import type { StoryPreview } from "../story/dto/response.js";
+import { CHAT_MAX_FILE_BYTES } from "../../utils/cache/constants.js";
+import type { StoryPreview } from "../story/types.js";
+
+function attachmentKindFromMessageKind(
+  kind: SendMessageDto["kind"],
+): "IMAGE" | "VIDEO" | "AUDIO" | "FILE" {
+  switch (kind) {
+    case "IMAGE":
+    case "VIDEO":
+    case "AUDIO":
+    case "FILE":
+      return kind;
+    default:
+      return "FILE";
+  }
+}
 
 export type { SendMessageDto };
 
@@ -74,12 +86,48 @@ export class MessageService {
     const directPartnerId = await this.assertDirectConversationAllowed(conversationId, senderId);
 
     const hasAttachments = Boolean(dto.attachments && dto.attachments.length > 0);
-    if ((!dto.kind || dto.kind === "TEXT") && !hasAttachments && (!dto.body || dto.body.trim().length === 0)) {
+    if (
+      (!dto.kind || dto.kind === "TEXT") &&
+      !hasAttachments &&
+      (!dto.body || dto.body.trim().length === 0)
+    ) {
       throw new BusinessError("BAD_REQUEST");
     }
 
     if (dto.body && dto.body.length > MESSAGE_MAX_BODY_LENGTH) {
       throw new BusinessError("BAD_REQUEST");
+    }
+
+    if (dto.kind !== "TEXT") {
+      if (!hasAttachments || (dto.body && dto.body.trim().length > 0)) {
+        throw new BusinessError("BAD_REQUEST");
+      }
+      if (dto.attachments?.some((attachment) => attachment.kind && attachment.kind !== dto.kind)) {
+        throw new BusinessError("BAD_REQUEST");
+      }
+    }
+
+    const attachments = dto.attachments;
+    if (attachments?.length) {
+      const storage = this.storage;
+      if (!storage) throw new BusinessError("OBJECT_NOT_UPLOADED");
+      await Promise.all(
+        attachments.map(async (attachment) => {
+          if (attachment.sizeBytes > CHAT_MAX_FILE_BYTES) {
+            throw new BusinessError("FILE_TOO_LARGE", {
+              maxMb: String(Math.floor(CHAT_MAX_FILE_BYTES / (1024 * 1024))),
+            });
+          }
+          if (!attachment.objectKey.startsWith(`chat/${conversationId}/${senderId}/`)) {
+            throw new BusinessError("INVALID_OBJECT_KEY");
+          }
+          const object = await storage.headObject(attachment.objectKey);
+          if (!object) throw new BusinessError("OBJECT_NOT_UPLOADED");
+          if (object.contentLength !== attachment.sizeBytes) {
+            throw new BusinessError("INVALID_OBJECT_KEY");
+          }
+        }),
+      );
     }
 
     if (dto.replyToId) {
@@ -98,13 +146,13 @@ export class MessageService {
       }
     }
 
-    const attachmentsToInsert = dto.attachments?.map((att) => ({
+    const attachmentsToInsert = attachments?.map((att) => ({
       bucket,
       objectKey: att.objectKey,
       fileName: att.fileName,
       mimeType: att.mimeType,
       sizeBytes: att.sizeBytes,
-      kind: att.kind ?? (dto.kind === "TEXT" ? "FILE" : (dto.kind as any)),
+      kind: att.kind ?? attachmentKindFromMessageKind(dto.kind),
       width: att.width,
       height: att.height,
       durationMs: att.durationMs,
@@ -116,7 +164,10 @@ export class MessageService {
       conversationId,
       senderId,
       body: dto.body,
-      kind: story?.kind ?? dto.kind ?? (hasAttachments && dto.attachments?.[0]?.kind ? dto.attachments[0].kind : "TEXT"),
+      kind:
+        story?.kind ??
+        dto.kind ??
+        (hasAttachments && dto.attachments?.[0]?.kind ? dto.attachments[0].kind : "TEXT"),
       clientMsgId: dto.clientMsgId,
       replyToId: dto.replyToId,
       attachments: attachmentsToInsert,
@@ -178,6 +229,12 @@ export class MessageService {
     after?: string,
   ): Promise<MessageTimelineResponse> {
     await this.assertDirectConversationAllowed(conversationId, userId);
+    if (
+      (cursor && !(await this.convRepo.isMessageInConversation(conversationId, cursor))) ||
+      (after && !(await this.convRepo.isMessageInConversation(conversationId, after)))
+    ) {
+      throw new BusinessError("MESSAGE_NOT_FOUND");
+    }
 
     return await toMessageTimelineAsync(
       await this.messageRepo.findTimeline(conversationId, cursor, limit, after),

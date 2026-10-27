@@ -3,8 +3,10 @@ import { vmsg } from "../../../utils/validation.js";
 import { MESSAGE_MAX_BODY_LENGTH } from "../../message/constants.js";
 import {
   ALLOWED_STORY_EMOJIS,
+  STORY_AUDIENCE_MODES,
   STORY_MAX_BACKGROUND_LENGTH,
   STORY_MAX_CAPTION_LENGTH,
+  STORY_REACTION_KINDS,
 } from "../constants.js";
 
 export const createStorySchema = z.object({
@@ -15,6 +17,10 @@ export const createStorySchema = z.object({
   durationMs: z.number().int().min(0).optional(),
   caption: z.string().max(STORY_MAX_CAPTION_LENGTH).optional(),
   background: z.string().max(STORY_MAX_BACKGROUND_LENGTH).optional(),
+  allowReplies: z.boolean().optional(),
+  allowReactions: z.boolean().optional(),
+  audienceMode: z.enum(STORY_AUDIENCE_MODES).optional(),
+  audienceUserIds: z.array(z.string().uuid()).max(500).optional(),
 });
 
 export type CreateStoryDto = z.infer<typeof createStorySchema>;
@@ -37,3 +43,19 @@ export const replyStorySchema = z.object({
 });
 
 export type ReplyStoryDto = z.infer<typeof replyStorySchema>;
+
+export const updateStorySettingsSchema = z.object({
+  viewedReceiptsEnabled: z.boolean().optional(),
+  archiveEnabled: z.boolean().optional(),
+  archiveDurationSecs: z.number().int().min(0).nullable().optional(),
+});
+
+export type UpdateStorySettingsDto = z.infer<typeof updateStorySettingsSchema>;
+
+export const getReactionsQuerySchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.string().optional(),
+  kind: z.enum(STORY_REACTION_KINDS).optional(),
+});
+
+export type GetReactionsQueryDto = z.infer<typeof getReactionsQuerySchema>;

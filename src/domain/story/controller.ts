@@ -8,6 +8,7 @@ import {
   Inject,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   Req,
@@ -18,6 +19,8 @@ import {
   RATE_LIMIT_STORY_REACT_USER_MAX,
   RATE_LIMIT_STORY_REPLY_IP_MAX,
   RATE_LIMIT_STORY_REPLY_USER_MAX,
+  RATE_LIMIT_STORY_REACTIONS_READ_IP_MAX,
+  RATE_LIMIT_STORY_REACTIONS_READ_USER_MAX,
   RATE_LIMIT_WINDOW_SECS,
   extractClientIp,
   type RateLimiter,
@@ -25,15 +28,20 @@ import {
 import { Lang } from "../../utils/decorators.js";
 import { t } from "../../utils/i18n/index.js";
 import { BusinessError } from "../../utils/errors/business.js";
+import { parseSchemaIssues } from "../../utils/validation.js";
 import { messageOnly, ok, withMessage } from "../../utils/response.js";
+import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "../pagination.constants.js";
 import { getAuthUser, parseCursorPage, type AuthUser } from "../shared.js";
 import {
   createStorySchema,
   reactStorySchema,
   replyStorySchema,
+  getReactionsQuerySchema,
+  updateStorySettingsSchema,
   type CreateStoryDto,
   type ReactStoryDto,
   type ReplyStoryDto,
+  type UpdateStorySettingsDto,
 } from "./dto/request.js";
 import { StoryService } from "./service.js";
 
@@ -60,6 +68,66 @@ export class StoryController {
   async getFeed(@Req() req: { user?: unknown }) {
     const { id: userId }: AuthUser = getAuthUser(req);
     const data = await this.storyService.getFeed(userId);
+    return ok(data);
+  }
+
+  @Get("settings")
+  async getSettings(@Req() req: { user?: unknown }) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    const data = await this.storyService.getStorySettings(userId);
+    return ok(data);
+  }
+
+  @Patch("settings")
+  async updateSettings(
+    @Req() req: { user?: unknown },
+    @Body({ schema: updateStorySettingsSchema }) dto: UpdateStorySettingsDto,
+    @Lang() lang: string,
+  ) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    const data = await this.storyService.updateStorySettings(userId, dto);
+    return withMessage(data, t("STORY_SETTINGS_UPDATED", lang));
+  }
+
+  @Get("mutes")
+  async getMutes(@Req() req: { user?: unknown }) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    const data = await this.storyService.getMutedAuthorIds(userId);
+    return ok(data);
+  }
+
+  @Post("mutes/:authorId")
+  @HttpCode(HttpStatus.OK)
+  async muteAuthor(
+    @Req() req: { user?: unknown },
+    @Param("authorId", ParseUUIDPipe) authorId: string,
+    @Lang() lang: string,
+  ) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    await this.storyService.muteAuthor(userId, authorId);
+    return messageOnly(t("STORY_MUTED", lang));
+  }
+
+  @Delete("mutes/:authorId")
+  async unmuteAuthor(
+    @Req() req: { user?: unknown },
+    @Param("authorId", ParseUUIDPipe) authorId: string,
+    @Lang() lang: string,
+  ) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    await this.storyService.unmuteAuthor(userId, authorId);
+    return messageOnly(t("STORY_UNMUTED", lang));
+  }
+
+  @Get("archive")
+  async getArchive(
+    @Req() req: { user?: unknown },
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+  ) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    const page = parseCursorPage(cursor, limit);
+    const data = await this.storyService.getArchivedStories(userId, page.cursor, page.size);
     return ok(data);
   }
 
@@ -121,16 +189,61 @@ export class StoryController {
     return messageOnly(t("STORY_REACTION_REMOVED", lang));
   }
 
+  @Post(":id/like")
+  @HttpCode(HttpStatus.OK)
+  async likeStory(
+    @Req() req: { user?: unknown; ip?: string; socket?: { remoteAddress?: string | null } },
+    @Param("id", ParseUUIDPipe) storyId: string,
+    @Lang() lang: string,
+  ) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    await this.assertReactRateLimit(req, userId);
+    const data = await this.storyService.likeStory(userId, storyId);
+    return withMessage(data, t("STORY_LIKED", lang));
+  }
+
+  @Delete(":id/like")
+  async unlikeStory(
+    @Req() req: { user?: unknown; ip?: string; socket?: { remoteAddress?: string | null } },
+    @Param("id", ParseUUIDPipe) storyId: string,
+    @Lang() lang: string,
+  ) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    await this.assertReactRateLimit(req, userId);
+    await this.storyService.unlikeStory(userId, storyId);
+    return messageOnly(t("STORY_UNLIKED", lang));
+  }
+
   @Get(":id/reactions")
   async getReactions(
-    @Req() req: { user?: unknown },
+    @Req() req: { user?: unknown; ip?: string; socket?: { remoteAddress?: string | null } },
     @Param("id", ParseUUIDPipe) storyId: string,
     @Query("cursor") cursor?: string,
     @Query("limit") limit?: string,
+    @Query("kind") kind?: string,
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
-    const page = parseCursorPage(cursor, limit);
-    const data = await this.storyService.getReactions(userId, storyId, page.cursor, page.size);
+    await this.assertReactionsReadRateLimit(req, userId);
+    const parsedQuery = getReactionsQuerySchema.safeParse({ cursor, limit, kind });
+    if (!parsedQuery.success) {
+      throw BusinessError.validation(parseSchemaIssues(parsedQuery.error.issues));
+    }
+    const page = parseCursorPage(
+      parsedQuery.data.cursor,
+      parsedQuery.data.limit,
+      DEFAULT_PAGE_SIZE,
+      MAX_PAGE_SIZE,
+      {
+        allowOpaque: true,
+      },
+    );
+    const data = await this.storyService.getReactions(
+      userId,
+      storyId,
+      page.cursor,
+      page.size,
+      parsedQuery.data.kind,
+    );
     return ok(data);
   }
 
@@ -168,6 +281,23 @@ export class StoryController {
       extractClientIp(req),
       RATE_LIMIT_STORY_REACT_USER_MAX,
       RATE_LIMIT_STORY_REACT_IP_MAX,
+      RATE_LIMIT_WINDOW_SECS,
+    );
+    if (!allowed) {
+      throw new BusinessError("TOO_MANY_REQUESTS");
+    }
+  }
+
+  private async assertReactionsReadRateLimit(
+    req: { ip?: string; socket?: { remoteAddress?: string | null } },
+    userId: string,
+  ): Promise<void> {
+    const allowed = await this.rateLimiter.checkMixedLimit(
+      "story-reactions-read",
+      userId,
+      extractClientIp(req),
+      RATE_LIMIT_STORY_REACTIONS_READ_USER_MAX,
+      RATE_LIMIT_STORY_REACTIONS_READ_IP_MAX,
       RATE_LIMIT_WINDOW_SECS,
     );
     if (!allowed) {

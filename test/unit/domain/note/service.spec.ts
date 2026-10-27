@@ -38,6 +38,7 @@ describe("NoteService", () => {
     content: "Sunny day note",
     background: "#ffcc00",
     createdAt: new Date("2026-10-15T00:00:00Z"),
+    updatedAt: new Date("2026-10-15T00:00:00Z"),
     expiresAt: new Date("2026-10-16T00:00:00Z"),
   };
 
@@ -56,6 +57,7 @@ describe("NoteService", () => {
           content: data.content,
           background: data.background ?? null,
           createdAt: new Date(),
+          updatedAt: new Date(),
           expiresAt: data.expiresAt,
         }),
       );
@@ -145,6 +147,7 @@ describe("NoteService", () => {
             content: "cached note",
             background: null,
             createdAt: new Date("2026-10-15T00:00:00Z"),
+            updatedAt: new Date("2026-10-15T00:00:00Z"),
             expiresAt: new Date("2026-10-16T00:00:00Z"),
           },
         },

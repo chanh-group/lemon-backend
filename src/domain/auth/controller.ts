@@ -10,7 +10,8 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { CurrentUser, Lang, Public, type AuthUser } from "../../utils/decorators.js";
+import { CurrentUser, Lang, Public } from "../../utils/decorators.js";
+import type { AuthUser } from "./types.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { t } from "../../utils/i18n/index.js";
 import { created, messageOnly, withMessage } from "../../utils/response.js";

@@ -1,4 +1,5 @@
 import type { SQL } from "drizzle-orm";
+import { desc } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
 import type { DrizzleDb } from "../../../../src/configs/database.js";
@@ -14,11 +15,16 @@ import { BusinessError } from "../../../../src/utils/errors/business.js";
 function makeSelectChain() {
   const limitMock = vi.fn<(limit: number) => Promise<unknown[]>>();
   const forMock = vi.fn(() => ({ limit: limitMock }));
-  const whereMock = vi.fn<(condition: SQL) => unknown>(() => ({ limit: limitMock, for: forMock }));
+  const orderByMock = vi.fn(() => ({ limit: limitMock }));
+  const whereMock = vi.fn<(condition: SQL) => unknown>(() => ({
+    limit: limitMock,
+    for: forMock,
+    orderBy: orderByMock,
+  }));
   const fromMock = vi.fn(() => ({ where: whereMock }));
   const selectMock = vi.fn(() => ({ from: fromMock }));
 
-  return { selectMock, fromMock, whereMock, forMock, limitMock };
+  return { selectMock, fromMock, whereMock, forMock, orderByMock, limitMock };
 }
 
 function makeDb() {
@@ -203,7 +209,7 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
         lastMessageId: existingRow.id,
         lastMessageAt: existingRow.createdAt,
         lastMessagePreview: "Hello from the first attempt",
-        updatedAt: expect.any(Date),
+        updatedAt: expect.anything(),
       }),
     );
     const update = render(updateWhereMock.mock.calls[0][0]);
@@ -329,6 +335,21 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
         storyPreview,
       }),
     );
+  });
+});
+
+describe("MessagePgRepository.findTimeline", () => {
+  it("orders and paginates by createdAt, using the UUID only as a tie-breaker", async () => {
+    const { db, dbSelect } = makeDb();
+    dbSelect.limitMock.mockResolvedValueOnce([]);
+    const repo = new MessagePgRepository(db);
+
+    await repo.findTimeline(conversationId, messageId);
+
+    const where = render(dbSelect.whereMock.mock.calls[0][0]);
+    expect(where.sql).toContain("m.created_at FROM messages m");
+    expect(where.sql).toContain('"messages"."created_at" <');
+    expect(dbSelect.orderByMock).toHaveBeenCalledWith(desc(messages.createdAt), desc(messages.id));
   });
 });
 

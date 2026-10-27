@@ -1,23 +1,35 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, asc, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { users } from "../user/schema.js";
+import { SystemError } from "../../utils/errors/system.js";
 import { conversationParticipants, conversations } from "../conversation/schema.js";
 import type { AcceptedFriendRequest, FriendRepository } from "./repository.js";
 import { friendships } from "./schema.js";
-import { toCursorPage } from "../shared.js";
+import { canonicalPair, toCursorPage } from "../shared.js";
+
+function encodeCursor(createdAt: Date, id: string): string {
+  return Buffer.from(`${createdAt.toISOString()}|${id}`).toString("base64url");
+}
+
+function decodeCursor(cursor: string | undefined): { createdAt: Date; id: string } | undefined {
+  if (!cursor) return undefined;
+  try {
+    const [rawDate, id] = Buffer.from(cursor, "base64url").toString("utf8").split("|");
+    const createdAt = new Date(rawDate);
+    return id && !Number.isNaN(createdAt.getTime()) ? { createdAt, id } : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 @Injectable()
 export class FriendPgRepository implements FriendRepository {
   constructor(@InjectDrizzle() private readonly db: DrizzleDb) {}
 
-  private pair(userAId: string, userBId: string): [string, string] {
-    return userAId < userBId ? [userAId, userBId] : [userBId, userAId];
-  }
-
   async findByPair(userAId: string, userBId: string) {
-    const [userLow, userHigh] = this.pair(userAId, userBId);
+    const [userLow, userHigh] = canonicalPair(userAId, userBId);
     const [row] = await this.db
       .select()
       .from(friendships)
@@ -27,7 +39,7 @@ export class FriendPgRepository implements FriendRepository {
   }
 
   async createRequest(requesterId: string, addresseeId: string) {
-    const [userLow, userHigh] = this.pair(requesterId, addresseeId);
+    const [userLow, userHigh] = canonicalPair(requesterId, addresseeId);
     const [created] = await this.db
       .insert(friendships)
       .values({ requesterId, addresseeId, userLow, userHigh, status: "PENDING" })
@@ -40,18 +52,25 @@ export class FriendPgRepository implements FriendRepository {
 
     const existing = await this.findByPair(requesterId, addresseeId);
     if (existing) return { friendship: existing, created: false };
-    throw new Error("Friend request insert conflicted but the friendship row was not found");
+    throw new SystemError("database", "Friend request conflict row was not found");
   }
 
   async listFriendsPage(userId: string, cursor: string | undefined, limit: number) {
-    const cursorFilter = cursor ? gt(users.id, cursor) : undefined;
+    const decoded = decodeCursor(cursor);
+    const cursorFilter = decoded
+      ? or(
+          lt(friendships.createdAt, decoded.createdAt),
+          and(eq(friendships.createdAt, decoded.createdAt), lt(friendships.id, decoded.id)),
+        )
+      : undefined;
     const [outgoing, incoming] = await Promise.all([
       this.db
         .select({
           id: users.id,
+          createdAt: friendships.createdAt,
+          friendshipId: friendships.id,
           name: users.fullName,
           username: users.username,
-          email: users.email,
           avatarUrl: users.avatarUrl,
         })
         .from(friendships)
@@ -64,14 +83,15 @@ export class FriendPgRepository implements FriendRepository {
             cursorFilter,
           ),
         )
-        .orderBy(asc(users.id))
+        .orderBy(desc(friendships.createdAt), desc(friendships.id))
         .limit(limit + 1),
       this.db
         .select({
           id: users.id,
+          createdAt: friendships.createdAt,
+          friendshipId: friendships.id,
           name: users.fullName,
           username: users.username,
-          email: users.email,
           avatarUrl: users.avatarUrl,
         })
         .from(friendships)
@@ -84,13 +104,25 @@ export class FriendPgRepository implements FriendRepository {
             cursorFilter,
           ),
         )
-        .orderBy(asc(users.id))
+        .orderBy(desc(friendships.createdAt), desc(friendships.id))
         .limit(limit + 1),
     ]);
-    const merged = [...outgoing, ...incoming].sort((a, b) =>
-      a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+    const merged = [...outgoing, ...incoming].sort(
+      (a, b) =>
+        b.createdAt.getTime() - a.createdAt.getTime() || (a.friendshipId < b.friendshipId ? 1 : -1),
     );
-    return toCursorPage(merged.slice(0, limit + 1), limit, (friend) => friend.id);
+    const page = toCursorPage(merged.slice(0, limit + 1), limit, (friend) =>
+      encodeCursor(friend.createdAt, friend.friendshipId),
+    );
+    return {
+      ...page,
+      items: page.items.map((friend) => ({
+        id: friend.id,
+        name: friend.name,
+        username: friend.username,
+        avatarUrl: friend.avatarUrl,
+      })),
+    };
   }
 
   async findAcceptedFriendIds(userId: string, candidates: string[]): Promise<Set<string>> {
@@ -125,7 +157,6 @@ export class FriendPgRepository implements FriendRepository {
             id: users.id,
             name: users.fullName,
             username: users.username,
-            email: users.email,
             avatarUrl: users.avatarUrl,
           },
         })
@@ -136,10 +167,18 @@ export class FriendPgRepository implements FriendRepository {
             eq(friendships.addresseeId, userId),
             eq(friendships.status, "PENDING"),
             isNull(users.deletedAt),
-            incomingCursor ? gt(friendships.id, incomingCursor) : undefined,
+            decodeCursor(incomingCursor)
+              ? or(
+                  lt(friendships.createdAt, decodeCursor(incomingCursor)!.createdAt),
+                  and(
+                    eq(friendships.createdAt, decodeCursor(incomingCursor)!.createdAt),
+                    lt(friendships.id, decodeCursor(incomingCursor)!.id),
+                  ),
+                )
+              : undefined,
           ),
         )
-        .orderBy(asc(friendships.id))
+        .orderBy(desc(friendships.createdAt), desc(friendships.id))
         .limit(limit + 1),
       this.db
         .select({
@@ -149,7 +188,6 @@ export class FriendPgRepository implements FriendRepository {
             id: users.id,
             name: users.fullName,
             username: users.username,
-            email: users.email,
             avatarUrl: users.avatarUrl,
           },
         })
@@ -160,22 +198,30 @@ export class FriendPgRepository implements FriendRepository {
             eq(friendships.requesterId, userId),
             eq(friendships.status, "PENDING"),
             isNull(users.deletedAt),
-            outgoingCursor ? gt(friendships.id, outgoingCursor) : undefined,
+            decodeCursor(outgoingCursor)
+              ? or(
+                  lt(friendships.createdAt, decodeCursor(outgoingCursor)!.createdAt),
+                  and(
+                    eq(friendships.createdAt, decodeCursor(outgoingCursor)!.createdAt),
+                    lt(friendships.id, decodeCursor(outgoingCursor)!.id),
+                  ),
+                )
+              : undefined,
           ),
         )
-        .orderBy(asc(friendships.id))
+        .orderBy(desc(friendships.createdAt), desc(friendships.id))
         .limit(limit + 1),
     ]);
     return {
       incoming: toCursorPage(
         incomingRows.map((row) => ({ ...row, direction: "incoming" as const })),
         limit,
-        (row) => row.id,
+        (row) => encodeCursor(row.createdAt, row.id),
       ),
       outgoing: toCursorPage(
         outgoingRows.map((row) => ({ ...row, direction: "outgoing" as const })),
         limit,
-        (row) => row.id,
+        (row) => encodeCursor(row.createdAt, row.id),
       ),
     };
   }
@@ -187,7 +233,7 @@ export class FriendPgRepository implements FriendRepository {
     return this.db.transaction(async (tx) => {
       const [accepted] = await tx
         .update(friendships)
-        .set({ status: "ACCEPTED", respondedAt: new Date(), updatedAt: new Date() })
+        .set({ status: "ACCEPTED", respondedAt: sql`now()`, updatedAt: sql`now()` })
         .where(
           and(
             eq(friendships.id, requestId),
@@ -198,7 +244,7 @@ export class FriendPgRepository implements FriendRepository {
         .returning({ requesterId: friendships.requesterId, addresseeId: friendships.addresseeId });
       if (!accepted) return null;
 
-      const [userLow, userHigh] = this.pair(accepted.requesterId, accepted.addresseeId);
+      const [userLow, userHigh] = canonicalPair(accepted.requesterId, accepted.addresseeId);
       const directKey = `${userLow}:${userHigh}`;
       let [conversation] = await tx
         .select()
@@ -221,7 +267,8 @@ export class FriendPgRepository implements FriendRepository {
             .limit(1);
         }
       }
-      if (!conversation) throw new Error("Accepted friendship has no direct conversation");
+      if (!conversation)
+        throw new SystemError("database", "Accepted friendship has no conversation");
 
       if (conversation.deletedAt) {
         [conversation] = await tx
@@ -252,7 +299,7 @@ export class FriendPgRepository implements FriendRepository {
         .from(users)
         .where(eq(users.id, accepted.requesterId))
         .limit(1);
-      if (!partner) throw new Error("Accepted friend requester was not found");
+      if (!partner) throw new SystemError("database", "Accepted friend requester was not found");
 
       return {
         ...accepted,
@@ -298,7 +345,7 @@ export class FriendPgRepository implements FriendRepository {
   }
 
   async deleteAcceptedPair(userAId: string, userBId: string): Promise<boolean> {
-    const [userLow, userHigh] = this.pair(userAId, userBId);
+    const [userLow, userHigh] = canonicalPair(userAId, userBId);
     const [row] = await this.db
       .delete(friendships)
       .where(
@@ -313,7 +360,7 @@ export class FriendPgRepository implements FriendRepository {
   }
 
   async blockPair(blockerId: string, targetId: string): Promise<void> {
-    const [userLow, userHigh] = this.pair(blockerId, targetId);
+    const [userLow, userHigh] = canonicalPair(blockerId, targetId);
     await this.db
       .insert(friendships)
       .values({
@@ -322,7 +369,7 @@ export class FriendPgRepository implements FriendRepository {
         userLow,
         userHigh,
         status: "BLOCKED",
-        respondedAt: new Date(),
+        respondedAt: sql`now()`,
       })
       .onConflictDoUpdate({
         target: [friendships.userLow, friendships.userHigh],
@@ -330,8 +377,8 @@ export class FriendPgRepository implements FriendRepository {
           requesterId: blockerId,
           addresseeId: targetId,
           status: "BLOCKED",
-          respondedAt: new Date(),
-          updatedAt: new Date(),
+          respondedAt: sql`now()`,
+          updatedAt: sql`now()`,
         },
       });
   }

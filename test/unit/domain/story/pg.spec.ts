@@ -2,8 +2,15 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
 import type { DrizzleDb } from "../../../../src/configs/database.js";
+import { BusinessError } from "../../../../src/utils/errors/business.js";
 import { StoryPgRepository } from "../../../../src/domain/story/pg.js";
-import { stories, storyReactions, storyViews } from "../../../../src/domain/story/schema.js";
+import { encodeReactionCursor } from "../../../../src/domain/story/dto/mapper.js";
+import {
+  stories,
+  storyReactions,
+  storyViews,
+  userStorySettings,
+} from "../../../../src/domain/story/schema.js";
 import { friendships } from "../../../../src/domain/friend/schema.js";
 
 function makeDb(rows: unknown[] = []) {
@@ -17,8 +24,15 @@ function makeDb(rows: unknown[] = []) {
       groupBy: groupByMock,
     }),
   );
-  const joinMock = vi.fn(() => ({ where: whereMock }));
-  const fromMock = vi.fn(() => ({ where: whereMock, innerJoin: joinMock }));
+  const joinMock = vi.fn(() => ({
+    where: whereMock,
+    leftJoin: vi.fn(() => ({ where: whereMock })),
+  }));
+  const fromMock = vi.fn(() => ({
+    where: whereMock,
+    innerJoin: joinMock,
+    leftJoin: vi.fn(() => ({ where: whereMock })),
+  }));
   const selectMock = vi.fn(() => ({ from: fromMock }));
   const returningMock = vi.fn();
   const onConflictMock = vi.fn<(conflict: unknown) => unknown>(() => ({
@@ -32,12 +46,15 @@ function makeDb(rows: unknown[] = []) {
   const insertMock = vi.fn(() => ({ values: valuesMock }));
   const deleteWhereMock = vi.fn<(condition: SQL) => unknown>(() => ({ returning: returningMock }));
   const deleteMock = vi.fn(() => ({ where: deleteWhereMock }));
-  const tx = { select: selectMock, insert: insertMock };
+  const updateSetMock = vi.fn(() => ({ where: vi.fn(() => ({ returning: returningMock })) }));
+  const updateMock = vi.fn(() => ({ set: updateSetMock }));
+  const tx = { select: selectMock, insert: insertMock, update: updateMock };
   const transactionMock = vi.fn((cb: (t: typeof tx) => Promise<unknown>) => cb(tx));
   const db = {
     select: selectMock,
     delete: deleteMock,
     insert: insertMock,
+    update: updateMock,
     transaction: transactionMock,
   } as unknown as DrizzleDb;
   return {
@@ -80,20 +97,36 @@ describe("StoryPgRepository purge queries", () => {
   describe("findPurgeable", () => {
     it("findPurgeable selects id and object_key with the batch limit", async () => {
       const { db, selectMock, whereMock, orderByMock, limitMock } = makeDb();
-      const rows = [{ id: "s1", objectKey: "k1" }];
+      const rows = [
+        {
+          id: "s1",
+          objectKey: "k1",
+          userId: "u1",
+          archivedAt: null,
+          deletedAt: null,
+          archiveEnabled: true,
+        },
+      ];
       limitMock.mockResolvedValue(rows);
       const repo = new StoryPgRepository(db);
 
       const result = await repo.findPurgeable(500);
 
-      expect(selectMock).toHaveBeenCalledWith({ id: stories.id, objectKey: stories.objectKey });
+      expect(selectMock).toHaveBeenCalledWith({
+        id: stories.id,
+        objectKey: stories.objectKey,
+        userId: stories.userId,
+        archivedAt: stories.archivedAt,
+        deletedAt: stories.deletedAt,
+        archiveEnabled: userStorySettings.archiveEnabled,
+      });
       expect(limitMock).toHaveBeenCalledWith(500);
       expect(result).toEqual(rows);
 
       const whereSql = render(whereMock.mock.calls[0][0]);
       expect(whereSql).toContain('"stories"."expires_at" < now()');
       expect(whereSql).toContain('"stories"."deleted_at" is not null');
-      expect(whereSql).toContain(" or ");
+      expect(whereSql).toContain('"stories"."archived_at" is null');
 
       const orderBySql = render(orderByMock.mock.calls[0][0]);
       expect(orderBySql).toContain('"stories"."expires_at" asc');
@@ -136,6 +169,7 @@ describe("StoryPgRepository purge queries", () => {
           storyId: "s1",
           userId: "u1",
           emoji: "🔥",
+          kind: "REACTION",
           createdAt,
           updatedAt: createdAt,
           isNew: true,
@@ -161,6 +195,7 @@ describe("StoryPgRepository purge queries", () => {
         storyId: "s1",
         userId: "u1",
         emoji: "🔥",
+        kind: "REACTION",
         createdAt,
         updatedAt: createdAt,
       });
@@ -173,6 +208,7 @@ describe("StoryPgRepository purge queries", () => {
           storyId: "s1",
           userId: "u1",
           emoji: "😂",
+          kind: "REACTION",
           createdAt: new Date(),
           updatedAt: new Date(),
           isNew: false,
@@ -196,6 +232,7 @@ describe("StoryPgRepository purge queries", () => {
           storyId: "s1",
           userId: "u1",
           emoji: "😂",
+          kind: "REACTION",
           createdAt: new Date(),
           updatedAt: new Date(),
           isNew: false,
@@ -237,6 +274,7 @@ describe("StoryPgRepository purge queries", () => {
           fullName: "F1",
           avatarUrl: null,
           emoji: "❤️",
+          kind: "REACTION",
           createdAt,
         },
       ]);
@@ -253,22 +291,50 @@ describe("StoryPgRepository purge queries", () => {
         {
           user: { id: "u1", username: "f1", fullName: "F1", avatarUrl: null },
           emoji: "❤️",
+          kind: "REACTION",
           createdAt,
         },
       ]);
     });
 
-    it("findReactionsByStoryId pages with the cursor of the previous item", async () => {
+    it("findReactionsByStoryId pages with a valid legacy UUID cursor", async () => {
       const { db, whereMock, limitMock } = makeDb();
       limitMock.mockResolvedValue([]);
       const repo = new StoryPgRepository(db);
+      const legacyCursor = "00000000-0000-4000-8000-000000000001";
 
-      await repo.findReactionsByStoryId("s1", "u1", 20);
+      await repo.findReactionsByStoryId("s1", legacyCursor, 20);
 
       const whereSql = render(whereMock.mock.calls[0][0]);
       expect(whereSql).toContain("SELECT sr.created_at FROM story_reactions sr");
       expect(whereSql).toContain('"story_reactions"."created_at" <');
       expect(whereSql).toContain('"users"."id" <');
+    });
+
+    it("findReactionsByStoryId pages with an encoded cursor without subquery", async () => {
+      const { db, whereMock, limitMock } = makeDb();
+      limitMock.mockResolvedValue([]);
+      const repo = new StoryPgRepository(db);
+      const encoded = encodeReactionCursor(
+        new Date("2026-10-24T18:00:00.000Z"),
+        "00000000-0000-4000-8000-000000000001",
+      );
+
+      await repo.findReactionsByStoryId("s1", encoded, 20);
+
+      const whereSql = render(whereMock.mock.calls[0][0]);
+      expect(whereSql).not.toContain("SELECT sr.created_at FROM story_reactions sr");
+      expect(whereSql).toContain('"story_reactions"."created_at" <');
+      expect(whereSql).toContain('"users"."id" <');
+    });
+
+    it("findReactionsByStoryId throws BAD_REQUEST when cursor is neither valid encoded cursor nor legacy UUID", async () => {
+      const { db } = makeDb();
+      const repo = new StoryPgRepository(db);
+
+      await expect(repo.findReactionsByStoryId("s1", "not-a-valid-cursor", 20)).rejects.toThrow(
+        BusinessError,
+      );
     });
 
     it("findUserReactions returns empty map when storyIds is empty", async () => {
@@ -280,13 +346,13 @@ describe("StoryPgRepository purge queries", () => {
       expect(selectMock).not.toHaveBeenCalled();
     });
 
-    it("findUserReactions maps rows to a story id -> emoji map", async () => {
-      const { db } = makeDb([{ storyId: "s1", emoji: "🔥" }]);
+    it("findUserReactions maps rows to a story id -> detail map", async () => {
+      const { db } = makeDb([{ storyId: "s1", emoji: "🔥", kind: "REACTION" }]);
       const repo = new StoryPgRepository(db);
 
       const result = await repo.findUserReactions("u1", ["s1"]);
 
-      expect(result.get("s1")).toBe("🔥");
+      expect(result.get("s1")).toEqual({ emoji: "🔥", kind: "REACTION" });
     });
 
     it("countReactions returns empty map when storyIds is empty", async () => {

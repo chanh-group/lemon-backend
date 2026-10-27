@@ -1,0 +1,2 @@
+DROP INDEX "messages_timeline_idx";--> statement-breakpoint
+CREATE INDEX "messages_timeline_idx" ON "messages" USING btree ("conversation_id","created_at" DESC NULLS LAST,"id" DESC NULLS LAST) WHERE "messages"."deleted_at" IS NULL;

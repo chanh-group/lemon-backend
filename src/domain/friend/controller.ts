@@ -17,10 +17,10 @@ import {
   RATE_LIMIT_FRIEND_REQUEST_IP_MAX,
   RATE_LIMIT_FRIEND_REQUEST_USER_MAX,
   RATE_LIMIT_FRIEND_REQUEST_WINDOW_SECS,
+  assertMixedRateLimit,
   extractClientIp,
   type RateLimiter,
 } from "../../middleware/ratelimit.js";
-import { BusinessError } from "../../utils/errors/business.js";
 import { Lang } from "../../utils/decorators.js";
 import { t } from "../../utils/i18n/index.js";
 import { created, messageOnly, ok, withMessage } from "../../utils/response.js";
@@ -45,18 +45,15 @@ export class FriendController {
     @Lang() lang: string,
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
-    if (
-      !(await this.rateLimiter.checkMixedLimit(
-        "friend-request",
-        userId,
-        extractClientIp(req),
-        RATE_LIMIT_FRIEND_REQUEST_USER_MAX,
-        RATE_LIMIT_FRIEND_REQUEST_IP_MAX,
-        RATE_LIMIT_FRIEND_REQUEST_WINDOW_SECS,
-      ))
-    ) {
-      throw new BusinessError("TOO_MANY_REQUESTS");
-    }
+    await assertMixedRateLimit(
+      this.rateLimiter,
+      "friend-request",
+      userId,
+      extractClientIp(req),
+      RATE_LIMIT_FRIEND_REQUEST_USER_MAX,
+      RATE_LIMIT_FRIEND_REQUEST_IP_MAX,
+      RATE_LIMIT_FRIEND_REQUEST_WINDOW_SECS,
+    );
     await this.service.sendRequest(userId, dto.userId);
     return created(undefined, t("FRIEND_REQUEST_SENT", lang));
   }
@@ -69,8 +66,12 @@ export class FriendController {
     @Query("limit") limit?: string,
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
-    const incomingPage = parseCursorPage(incomingCursor, limit);
-    const outgoingPage = parseCursorPage(outgoingCursor, limit);
+    const incomingPage = parseCursorPage(incomingCursor, limit, undefined, undefined, {
+      allowOpaque: true,
+    });
+    const outgoingPage = parseCursorPage(outgoingCursor, limit, undefined, undefined, {
+      allowOpaque: true,
+    });
     const data = await this.service.listRequestsPage(
       userId,
       incomingPage.cursor,
@@ -123,7 +124,7 @@ export class FriendController {
     @Query("limit") limit?: string,
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
-    const page = parseCursorPage(cursor, limit);
+    const page = parseCursorPage(cursor, limit, undefined, undefined, { allowOpaque: true });
     return ok(await this.service.listFriendsPage(userId, page.cursor, page.size));
   }
 

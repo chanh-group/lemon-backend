@@ -1,9 +1,10 @@
 import { Controller, Get, Param, Query } from "@nestjs/common";
-import { CurrentUser, type AuthUser } from "../../utils/decorators.js";
+import { CurrentUser } from "../../utils/decorators.js";
+import type { AuthUser } from "../auth/types.js";
 import { ok } from "../../utils/response.js";
 import { parseCursorPage } from "../shared.js";
 import { USER_SEARCH_MAX_LENGTH, USER_SEARCH_MIN_LENGTH } from "./constants.js";
-import { toUserResponse } from "./dto/mapper.js";
+import { toPublicUserResponse } from "./dto/mapper.js";
 import { UserService } from "./service.js";
 
 @Controller("users")
@@ -18,7 +19,9 @@ export class UserController {
     @Query("cursor") cursor?: string,
     @Query("limit") limit?: string,
   ) {
-    const page = parseCursorPage(cursor, limit);
+    const page = parseCursorPage(cursor, limit, undefined, undefined, {
+      allowOpaque: field === "username",
+    });
     const value = query?.trim() ?? "";
     if (value.length < USER_SEARCH_MIN_LENGTH || value.length > USER_SEARCH_MAX_LENGTH) {
       return { items: [], hasMore: false };
@@ -40,7 +43,6 @@ export class UserController {
         id: user.id,
         name: user.fullName,
         username: user.username,
-        email: user.email,
       })),
     };
   }
@@ -49,13 +51,13 @@ export class UserController {
   async getByUsername(@Param("username") username: string) {
     const cleanUsername = decodeURIComponent(username).trim().toLowerCase().replace(/^@/, "");
     const user = await this.userService.findByUsername(cleanUsername);
-    return ok(user ? toUserResponse(user) : null);
+    return ok(user ? toPublicUserResponse(user) : null);
   }
 
   @Get("by-email/:email")
   async getByEmail(@Param("email") email: string) {
     const cleanEmail = decodeURIComponent(email).trim().toLowerCase();
     const user = await this.userService.findByEmail(cleanEmail);
-    return ok(user ? toUserResponse(user) : null);
+    return ok(user ? toPublicUserResponse(user) : null);
   }
 }

@@ -18,6 +18,7 @@ import {
   RATE_LIMIT_MESSAGE_IP_MAX,
   RATE_LIMIT_MESSAGE_USER_MAX,
   RATE_LIMIT_WINDOW_SECS,
+  assertMixedRateLimit,
   extractClientIp,
   type RateLimiter,
 } from "../../middleware/ratelimit.js";
@@ -53,18 +54,15 @@ export class MessageController {
     @Lang() lang: string,
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
-    if (
-      !(await this.rateLimiter.checkMixedLimit(
-        "send-message",
-        userId,
-        extractClientIp(req),
-        RATE_LIMIT_MESSAGE_USER_MAX,
-        RATE_LIMIT_MESSAGE_IP_MAX,
-        RATE_LIMIT_WINDOW_SECS,
-      ))
-    ) {
-      throw new BusinessError("TOO_MANY_REQUESTS");
-    }
+    await assertMixedRateLimit(
+      this.rateLimiter,
+      "send-message",
+      userId,
+      extractClientIp(req),
+      RATE_LIMIT_MESSAGE_USER_MAX,
+      RATE_LIMIT_MESSAGE_IP_MAX,
+      RATE_LIMIT_WINDOW_SECS,
+    );
     const data = await this.messageService.sendMessage(userId, conversationId, dto);
     return created(data, t("MESSAGE_SENT", lang));
   }

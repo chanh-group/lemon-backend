@@ -5,8 +5,8 @@ import {
   UpdateUserInput,
   updateUserSchema,
 } from "./dto/request.js";
-import { toUserResponse } from "./dto/mapper.js";
-import type { UserResponseDto } from "./dto/response.js";
+import { toPublicUserResponse, toUserResponse } from "./dto/mapper.js";
+import type { PublicUserResponse, UserResponseDto } from "./dto/response.js";
 import { USER_REPOSITORY } from "./repository.js";
 import type { UserRepository } from "./repository.js";
 import type { User } from "./schema.js";
@@ -45,9 +45,9 @@ export class UserService {
     excludeId: string | undefined,
     cursor: string | undefined,
     limit: number,
-  ) {
+  ): Promise<{ items: PublicUserResponse[]; hasMore: boolean; nextCursor?: string }> {
     const page = await this.userRepo.search(query, field, excludeId, cursor, limit);
-    return { ...page, items: page.items.map(toUserResponse) };
+    return { ...page, items: page.items.map(toPublicUserResponse) };
   }
 
   async create(input: CreateUserInput): Promise<User> {
@@ -70,7 +70,7 @@ export class UserService {
 
     try {
       const created = await this.userRepo.create(data);
-      this.logger.log("User created successfully", { userId: created.id, email: created.email });
+      this.logger.log("User created successfully", { userId: created.id });
       return created;
     } catch (err: unknown) {
       const mapped = mapUniqueViolation(err, [

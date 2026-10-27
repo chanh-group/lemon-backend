@@ -6,6 +6,7 @@ export interface NoteResponse {
   content: string;
   background: string | null;
   createdAt: Date;
+  updatedAt: Date;
   expiresAt: Date;
 }
 

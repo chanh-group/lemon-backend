@@ -1,5 +1,18 @@
+import { z } from "zod";
 import { BusinessError } from "../utils/errors/business.js";
+import type { AuthUser } from "./auth/types.js";
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "./pagination.constants.js";
+
+const uuidSchema = z.string().uuid();
+
+export function isUuid(value: string): boolean {
+  return uuidSchema.safeParse(value).success;
+}
+
+/** Stable ordering for a pair stored as two columns or a compound key. */
+export function canonicalPair(userAId: string, userBId: string): [string, string] {
+  return userAId < userBId ? [userAId, userBId] : [userBId, userAId];
+}
 
 export interface CursorPage<T> {
   items: T[];
@@ -31,12 +44,14 @@ export function parseCursorPage(
   size: string | undefined,
   defaultSize = DEFAULT_PAGE_SIZE,
   maxSize = MAX_PAGE_SIZE,
+  options?: { allowOpaque?: boolean },
 ): CursorPageInput {
-  if (
-    cursor !== undefined &&
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cursor)
-  ) {
-    throw new BusinessError("BAD_REQUEST");
+  if (cursor !== undefined) {
+    const validUuid = isUuid(cursor);
+    const isOpaque = options?.allowOpaque && /^[A-Za-z0-9_-]{10,128}$/.test(cursor);
+    if (!validUuid && !isOpaque) {
+      throw new BusinessError("BAD_REQUEST");
+    }
   }
   if (size === undefined) return { cursor, size: defaultSize };
   if (!/^[1-9]\d*$/.test(size)) throw new BusinessError("BAD_REQUEST");
@@ -52,9 +67,7 @@ export function parseCursorPage(
  * headers are NEVER accepted as identity (client-spoofable). Missing or
  * malformed `req.user` fails closed with BusinessError(UNAUTHORIZED) → 401.
  */
-export interface AuthUser {
-  id: string;
-}
+export type { AuthUser } from "./auth/types.js";
 
 export function getAuthUser(req: { user?: unknown }): AuthUser {
   const user = req.user as { id?: unknown } | undefined;

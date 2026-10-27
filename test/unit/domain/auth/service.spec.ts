@@ -121,13 +121,11 @@ describe("AuthService", () => {
   });
 
   describe("requestOtp", () => {
-    it("throws BusinessError USER_ALREADY_EXISTS when email already exists", async () => {
+    it("returns success without issuing an OTP when email already exists", async () => {
       mockUserRepo.findByEmail.mockResolvedValueOnce(mockUser);
 
-      await expectBusinessError(
-        authService.requestOtp({ email: "lemon@example.com" }),
-        "USER_ALREADY_EXISTS",
-      );
+      await expect(authService.requestOtp({ email: "lemon@example.com" })).resolves.toBeUndefined();
+      expect(mockMailService.sendOtp).not.toHaveBeenCalled();
     });
 
     it("stores OTP in cache and enqueues mail when email does not exist", async () => {

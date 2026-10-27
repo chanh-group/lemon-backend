@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { Controller, Get, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { RedisMetricsService } from "../../configs/redis-metrics.js";
+import { get_env } from "../../helpers/index.js";
 import { Public } from "../../utils/decorators.js";
 import { SkipRedisReadiness } from "../../utils/redis-readiness.js";
 
@@ -13,7 +14,7 @@ export class MetricsController {
   @Public()
   @SkipRedisReadiness()
   scrape(@Req() request: Request, @Res() response: Response): Response {
-    const token = process.env.METRICS_TOKEN;
+    const token = get_env("METRICS_TOKEN", "");
     if (!token) return response.status(404).end();
 
     const authorization = request.headers.authorization ?? "";

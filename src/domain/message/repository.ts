@@ -1,5 +1,5 @@
-import type { StoryPreview } from "../story/dto/response.js";
-import type { Message, MessageAttachment } from "./schema.js";
+import type { StoryPreview } from "../story/types.js";
+import type { Message, MessageAttachment, MessageKind } from "./schema.js";
 
 export type MessageWithAttachments = Message & {
   attachments?: MessageAttachment[];
@@ -39,15 +39,7 @@ export interface MessageRepository {
     conversationId: string;
     senderId: string;
     body?: string | null;
-    kind?:
-      | "TEXT"
-      | "IMAGE"
-      | "VIDEO"
-      | "AUDIO"
-      | "FILE"
-      | "SYSTEM"
-      | "STORY_REPLY"
-      | "STORY_REACTION";
+    kind?: MessageKind;
     clientMsgId?: string | null;
     replyToId?: string | null;
     requiredFriendship?: { userAId: string; userBId: string };
@@ -67,7 +59,11 @@ export interface MessageRepository {
     userId: string,
     conversationId: string,
   ): Promise<MessageWithAttachments | null>;
-  updateBody(messageId: string, senderId: string, body: string): Promise<MessageWithAttachments | null>;
+  updateBody(
+    messageId: string,
+    senderId: string,
+    body: string,
+  ): Promise<MessageWithAttachments | null>;
   softDelete(messageId: string, senderId: string): Promise<MessageWithAttachments | null>;
 }
 

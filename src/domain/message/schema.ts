@@ -15,7 +15,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { created, uuidV7 } from "../../utils/database.js";
 import { conversations } from "../conversation/schema.js";
-import type { StoryPreview } from "../story/dto/response.js";
+import type { StoryPreview } from "../story/types.js";
 import { stories } from "../story/schema.js";
 import { users } from "../user/schema.js";
 import { MESSAGE_MAX_BODY_LENGTH } from "./constants.js";
@@ -30,6 +30,7 @@ export const messageKindEnum = pgEnum("message_kind", [
   "STORY_REPLY",
   "STORY_REACTION",
 ]);
+export type MessageKind = (typeof messageKindEnum.enumValues)[number];
 
 export const attachmentKindEnum = pgEnum("attachment_kind", ["IMAGE", "VIDEO", "AUDIO", "FILE"]);
 
@@ -70,7 +71,7 @@ export const messages = pgTable(
       .on(table.conversationId, table.senderId, table.clientMsgId)
       .where(sql`${table.clientMsgId} IS NOT NULL`),
     index("messages_timeline_idx")
-      .on(table.conversationId, table.id.desc())
+      .on(table.conversationId, table.createdAt.desc(), table.id.desc())
       .where(sql`${table.deletedAt} IS NULL`),
     index("messages_sender_idx").on(table.senderId, table.id.desc()),
     index("messages_reply_idx").on(table.replyToId),

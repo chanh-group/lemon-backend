@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
 import type { DrizzleDb } from "../../configs/database.js";
@@ -16,7 +16,6 @@ export class NotePgRepository implements NoteRepository {
     userId: string,
     data: { content: string; background?: string | null; expiresAt: Date },
   ): Promise<Note> {
-    const now = new Date();
     const [row] = await this.db
       .insert(notes)
       .values({
@@ -31,7 +30,7 @@ export class NotePgRepository implements NoteRepository {
           content: data.content,
           background: data.background ?? null,
           expiresAt: data.expiresAt,
-          createdAt: now,
+          updatedAt: sql`now()`,
         },
       })
       .returning();
@@ -42,7 +41,7 @@ export class NotePgRepository implements NoteRepository {
     const rows = await this.db
       .select()
       .from(notes)
-      .where(and(eq(notes.userId, userId), gt(notes.expiresAt, new Date())))
+      .where(and(eq(notes.userId, userId), gt(notes.expiresAt, sql`now()`)))
       .limit(1);
 
     return rows[0] ?? null;
@@ -63,7 +62,8 @@ export class NotePgRepository implements NoteRepository {
       })
       .from(notes)
       .innerJoin(users, eq(notes.userId, users.id))
-      .where(and(inArray(notes.userId, userIds), gt(notes.expiresAt, new Date())));
+      .where(and(inArray(notes.userId, userIds), gt(notes.expiresAt, sql`now()`)))
+      .orderBy(desc(notes.updatedAt), desc(notes.id));
   }
 
   async getFriendUserIds(userId: string): Promise<string[]> {

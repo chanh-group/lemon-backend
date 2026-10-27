@@ -44,7 +44,6 @@ describe("UserController", () => {
         data: expect.objectContaining({
           id: mockUser.id,
           username: "lemon_user",
-          email: "lemon@example.com",
         }),
       });
     });
@@ -73,7 +72,6 @@ describe("UserController", () => {
         data: expect.objectContaining({
           id: mockUser.id,
           username: "lemon_user",
-          email: "lemon@example.com",
         }),
       });
     });

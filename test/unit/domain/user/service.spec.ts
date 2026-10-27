@@ -187,7 +187,7 @@ describe("UserService", () => {
 
       await expect(service.create(validDto)).rejects.toMatchObject({
         code: "CONFLICT",
-        rawMessage: "username already exists: lemon_user",
+        rawMessage: undefined,
       });
     });
   });

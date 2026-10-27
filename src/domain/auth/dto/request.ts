@@ -1,11 +1,6 @@
 import { z } from "zod";
 import { vmsg } from "../../../utils/validation.js";
-import {
-  FULL_NAME_MAX_LENGTH,
-  FULL_NAME_MIN_LENGTH,
-  USERNAME_MAX_LENGTH,
-  USERNAME_MIN_LENGTH,
-} from "../../user/constants.js";
+import { emailSchema, fullNameSchema, usernameSchema } from "../../user/dto/fields.js";
 
 export const requestOtpSchema = z.object({
   email: z.string().trim().toLowerCase().email(vmsg("VALIDATION_EMAIL")),
@@ -25,28 +20,9 @@ export type VerifyOtpDto = z.infer<typeof verifyOtpSchema>;
 export type VerifyOtpInput = z.input<typeof verifyOtpSchema>;
 
 export const signupSchema = z.object({
-  email: z.string().trim().toLowerCase().email(vmsg("VALIDATION_EMAIL")),
-  fullName: z
-    .string()
-    .trim()
-    .min(
-      FULL_NAME_MIN_LENGTH,
-      vmsg("VALIDATION_FULL_NAME_MIN", { min: String(FULL_NAME_MIN_LENGTH) }),
-    )
-    .max(
-      FULL_NAME_MAX_LENGTH,
-      vmsg("VALIDATION_FULL_NAME_MAX", { max: String(FULL_NAME_MAX_LENGTH) }),
-    ),
-  username: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .min(USERNAME_MIN_LENGTH, vmsg("VALIDATION_USERNAME_MIN", { min: String(USERNAME_MIN_LENGTH) }))
-    .max(USERNAME_MAX_LENGTH, vmsg("VALIDATION_USERNAME_MAX", { max: String(USERNAME_MAX_LENGTH) }))
-    .regex(
-      new RegExp(`^[a-z0-9_]{${USERNAME_MIN_LENGTH},${USERNAME_MAX_LENGTH}}$`),
-      vmsg("VALIDATION_USERNAME_FORMAT"),
-    ),
+  email: emailSchema,
+  fullName: fullNameSchema,
+  username: usernameSchema,
   password: z.string().min(6, vmsg("VALIDATION_PASSWORD_MIN", { min: "6" })),
   otp: z
     .string()

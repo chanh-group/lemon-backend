@@ -18,16 +18,18 @@ import {
 } from "../../utils/cache/constants.js";
 import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
-import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, eq, isNull } from "drizzle-orm";
-import type { DrizzleDb } from "../../configs/database.js";
-import { conversationParticipants } from "../conversation/schema.js";
-import { users } from "../user/schema.js";
+import { ConversationPgRepository } from "../conversation/pg.js";
+import { UserService } from "../user/service.js";
 import { convRoom, userRoom } from "./rooms.js";
 import { JWT_CONFIG } from "../auth/constants.js";
 import type { JwtConfig } from "../auth/jwt.js";
+import { get_env } from "../../helpers/index.js";
 
 const logger = new Logger("ChatGateway");
+const frontendUrl = get_env("FRONTEND_URL", "http://localhost:5173");
+const allowedOrigins = frontendUrl.includes(",")
+  ? frontendUrl.split(",").map((origin) => origin.trim())
+  : [frontendUrl, "http://localhost:5173", "http://localhost:3000"];
 
 export interface SocketUser {
   userId: string;
@@ -35,7 +37,7 @@ export interface SocketUser {
 
 @WebSocketGateway({
   cors: {
-    origin: "*",
+    origin: allowedOrigins,
     credentials: true,
   },
 })
@@ -51,7 +53,8 @@ export class ChatGateway
   private readonly graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
-    @InjectDrizzle() private readonly db: DrizzleDb,
+    private readonly conversationRepo: ConversationPgRepository,
+    private readonly userService: UserService,
     @Inject(JWT_CONFIG) private readonly jwt: JwtConfig,
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
   ) {
@@ -72,10 +75,7 @@ export class ChatGateway
     const userId = await this.extractUserId(client);
     if (!userId) {
       logger.warn(`Unauthorized socket connection rejected: ${client.id}`);
-      client.emit("error", {
-        code: "UNAUTHORIZED",
-        message: "Chưa xác thực người dùng",
-      });
+      client.emit("error", { code: "UNAUTHORIZED" });
       client.disconnect(true);
       return;
     }
@@ -84,14 +84,9 @@ export class ChatGateway
     await client.join(userRoom(userId));
 
     // Auto-join every conversation the user is an active participant of
-    const convRows = await this.db
-      .select({ conversationId: conversationParticipants.conversationId })
-      .from(conversationParticipants)
-      .where(
-        and(eq(conversationParticipants.userId, userId), isNull(conversationParticipants.leftAt)),
-      );
-    for (const row of convRows) {
-      await client.join(convRoom(row.conversationId));
+    const conversationIds = await this.conversationRepo.getActiveConversationIds(userId);
+    for (const conversationId of conversationIds) {
+      await client.join(convRoom(conversationId));
     }
 
     // Cancel grace period timer if reconnecting
@@ -160,26 +155,11 @@ export class ChatGateway
     if (!userId) return;
 
     // Verify user is an active participant in this conversation
-    const [membership] = await this.db
-      .select({ conversationId: conversationParticipants.conversationId })
-      .from(conversationParticipants)
-      .where(
-        and(
-          eq(conversationParticipants.conversationId, data.conversationId),
-          eq(conversationParticipants.userId, userId),
-          isNull(conversationParticipants.leftAt),
-        ),
-      )
-      .limit(1);
-
-    if (!membership) {
+    if (!(await this.conversationRepo.isParticipant(data.conversationId, userId))) {
       logger.warn(
         `Unauthorized conv:join attempt by user ${userId} for conversation ${data.conversationId}`,
       );
-      client.emit("error", {
-        code: "NOT_PARTICIPANT",
-        message: "Bạn không phải thành viên của cuộc trò chuyện này",
-      });
+      client.emit("error", { code: "NOT_PARTICIPANT" });
       return { success: false, conversationId: data.conversationId };
     }
 
@@ -311,8 +291,7 @@ export class ChatGateway
           logger.log(
             `Presence offline deferred for ${userId}: another node may still heartbeat (ttl ${ttl}s)`,
           );
-          const retryDelayMs =
-            (ttl - PRESENCE_OTHER_NODE_TTL_SECONDS) * 1000 + 1000;
+          const retryDelayMs = (ttl - PRESENCE_OTHER_NODE_TTL_SECONDS) * 1000 + 1000;
           const timer = setTimeout(() => {
             void this.finalizeOffline(userId);
           }, retryDelayMs);
@@ -330,7 +309,7 @@ export class ChatGateway
 
   private async touchLastSeen(userId: string): Promise<void> {
     try {
-      await this.db.update(users).set({ lastSeenAt: new Date() }).where(eq(users.id, userId));
+      await this.userService.updateLastSeen(userId);
     } catch (err) {
       logger.warn(`Failed to touch lastSeen for ${userId}: ${String(err)}`);
     }

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import type { UserSummary } from "../user/dto/response.js";
+import type { MessageResponse } from "../message/dto/response.js";
 import { ChatGateway } from "./chat.gateway.js";
 import { convRoom, userRoom } from "./rooms.js";
 
@@ -24,7 +25,7 @@ export class RealtimeService {
   /**
    * Broadcast a newly created message to the conversation room
    */
-  emitNewMessage(conversationId: string, message: unknown): void {
+  emitNewMessage(conversationId: string, message: MessageResponse): void {
     if (!this.gateway?.server) return;
     try {
       this.gateway.server.to(convRoom(conversationId)).emit("message:new", message);
@@ -36,7 +37,7 @@ export class RealtimeService {
   /**
    * Broadcast message update (edit)
    */
-  emitMessageUpdated(conversationId: string, updated: unknown): void {
+  emitMessageUpdated(conversationId: string, updated: MessageResponse): void {
     if (!this.gateway?.server) return;
     try {
       this.gateway.server.to(convRoom(conversationId)).emit("message:updated", updated);

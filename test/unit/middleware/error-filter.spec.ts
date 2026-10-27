@@ -61,7 +61,7 @@ describe("ErrorFilter", () => {
     );
   });
 
-  it("renders rawMessage verbatim (legacy validation details are not localized)", () => {
+  it("does not expose rawMessage to the client", () => {
     const { host, status, json } = createHost("en");
 
     filter.catch(new BusinessError("VALIDATION_ERROR", undefined, "content: too_small"), host);
@@ -70,7 +70,7 @@ describe("ErrorFilter", () => {
     expect(json).toHaveBeenCalledWith({
       success: false,
       code: "VALIDATION_ERROR",
-      message: "content: too_small",
+      message: "Invalid data",
     });
   });
 

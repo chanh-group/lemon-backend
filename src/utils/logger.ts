@@ -8,7 +8,7 @@ type JsonLogOptions = {
   logLevel: LogLevel;
   writeStreamType?: "stdout" | "stderr";
   errorStack?: unknown;
-  params?: Record<string, any>;
+  params?: Record<string, unknown>;
   error?: Error;
 };
 

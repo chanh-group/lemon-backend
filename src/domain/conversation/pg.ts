@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
@@ -9,7 +9,7 @@ import { messages } from "../message/schema.js";
 import { users } from "../user/schema.js";
 import type { ConversationRepository, ConversationWithPartner } from "./repository.js";
 import { conversationParticipants, conversations } from "./schema.js";
-import { toCursorPage } from "../shared.js";
+import { canonicalPair, toCursorPage } from "../shared.js";
 
 const partnerParticipants = alias(conversationParticipants, "partner_participants");
 
@@ -18,12 +18,8 @@ export class ConversationPgRepository implements ConversationRepository {
   constructor(@InjectDrizzle() private readonly db: DrizzleDb) {}
 
   private getDirectKey(userAId: string, userBId: string): string {
-    const [low, high] = this.canonicalParticipants(userAId, userBId);
+    const [low, high] = canonicalPair(userAId, userBId);
     return `${low}:${high}`;
-  }
-
-  private canonicalParticipants(userAId: string, userBId: string): [string, string] {
-    return userAId < userBId ? [userAId, userBId] : [userBId, userAId];
   }
 
   async findDirectByParticipants(
@@ -66,7 +62,7 @@ export class ConversationPgRepository implements ConversationRepository {
         const [existingConv] = await tx
           .select()
           .from(conversations)
-          .where(eq(conversations.directKey, directKey))
+          .where(and(eq(conversations.directKey, directKey), isNull(conversations.deletedAt)))
           .limit(1);
 
         let convId: string;
@@ -92,7 +88,7 @@ export class ConversationPgRepository implements ConversationRepository {
         }
 
         // Ensure both participants exist
-        const [participantLow, participantHigh] = this.canonicalParticipants(userAId, userBId);
+        const [participantLow, participantHigh] = canonicalPair(userAId, userBId);
         await tx
           .insert(conversationParticipants)
           .values([
@@ -315,17 +311,32 @@ export class ConversationPgRepository implements ConversationRepository {
     return rows.map((r) => r.userId);
   }
 
+  async getActiveConversationIds(userId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ conversationId: conversationParticipants.conversationId })
+      .from(conversationParticipants)
+      .where(
+        and(eq(conversationParticipants.userId, userId), isNull(conversationParticipants.leftAt)),
+      );
+    return rows.map((row) => row.conversationId);
+  }
+
   async updateLastRead(conversationId: string, userId: string, messageId: string): Promise<void> {
     await this.db
       .update(conversationParticipants)
       .set({
         lastReadMessageId: messageId,
-        lastReadAt: new Date(),
+        lastReadAt: sql`now()`,
       })
       .where(
         and(
           eq(conversationParticipants.conversationId, conversationId),
           eq(conversationParticipants.userId, userId),
+          sql`(
+            ${conversationParticipants.lastReadMessageId} IS NULL
+            OR (SELECT m.created_at, m.id FROM messages m WHERE m.id = ${messageId})
+              > (SELECT m.created_at, m.id FROM messages m WHERE m.id = ${conversationParticipants.lastReadMessageId})
+          )`,
         ),
       );
   }
@@ -348,7 +359,11 @@ export class ConversationPgRepository implements ConversationRepository {
           ne(messages.senderId, userId),
           or(
             isNull(conversationParticipants.lastReadMessageId),
-            gt(messages.id, conversationParticipants.lastReadMessageId),
+            sql`(${messages.createdAt}, ${messages.id}) > (
+              SELECT m.created_at, m.id
+              FROM messages m
+              WHERE m.id = ${conversationParticipants.lastReadMessageId}
+            )`,
           ),
         ),
       );
@@ -382,7 +397,11 @@ export class ConversationPgRepository implements ConversationRepository {
           ne(messages.senderId, userId),
           or(
             isNull(conversationParticipants.lastReadMessageId),
-            gt(messages.id, conversationParticipants.lastReadMessageId),
+            sql`(${messages.createdAt}, ${messages.id}) > (
+              SELECT m.created_at, m.id
+              FROM messages m
+              WHERE m.id = ${conversationParticipants.lastReadMessageId}
+            )`,
           ),
         ),
       )
