@@ -379,7 +379,8 @@ export class StoryService {
   }
 
   async unlikeStory(userId: string, storyId: string): Promise<void> {
-    return this.unreactStory(userId, storyId);
+    const removed = await this.storyRepo.deleteReaction(storyId, userId, "LIKE");
+    if (!removed) throw new BusinessError("NOT_FOUND");
   }
 
   private async mirrorReactionToDirectConversation(

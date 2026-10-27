@@ -62,7 +62,7 @@ export interface StoryRepository {
     kind?: StoryReactionKind,
     anonymous?: boolean,
   ): Promise<StoryReactionResult>;
-  deleteReaction(storyId: string, userId: string): Promise<boolean>;
+  deleteReaction(storyId: string, userId: string, kind?: StoryReactionKind): Promise<boolean>;
   findReactionsByStoryId(
     storyId: string,
     cursor: string | undefined,

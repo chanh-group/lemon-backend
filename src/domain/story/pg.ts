@@ -410,10 +410,20 @@ export class StoryPgRepository implements StoryRepository {
     });
   }
 
-  async deleteReaction(storyId: string, userId: string): Promise<boolean> {
+  async deleteReaction(
+    storyId: string,
+    userId: string,
+    kind?: StoryReactionKind,
+  ): Promise<boolean> {
     const rows = await this.db
       .delete(storyReactions)
-      .where(and(eq(storyReactions.storyId, storyId), eq(storyReactions.userId, userId)))
+      .where(
+        and(
+          eq(storyReactions.storyId, storyId),
+          eq(storyReactions.userId, userId),
+          kind ? eq(storyReactions.kind, kind) : undefined,
+        ),
+      )
       .returning({ storyId: storyReactions.storyId });
     return rows.length > 0;
   }
