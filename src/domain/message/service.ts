@@ -229,6 +229,12 @@ export class MessageService {
     after?: string,
   ): Promise<MessageTimelineResponse> {
     await this.assertDirectConversationAllowed(conversationId, userId);
+    if (
+      (cursor && !(await this.convRepo.isMessageInConversation(conversationId, cursor))) ||
+      (after && !(await this.convRepo.isMessageInConversation(conversationId, after)))
+    ) {
+      throw new BusinessError("MESSAGE_NOT_FOUND");
+    }
 
     return await toMessageTimelineAsync(
       await this.messageRepo.findTimeline(conversationId, cursor, limit, after),
