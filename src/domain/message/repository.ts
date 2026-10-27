@@ -1,5 +1,5 @@
 import type { StoryPreview } from "../story/dto/response.js";
-import type { Message, MessageAttachment } from "./schema.js";
+import type { Message, MessageAttachment, MessageKind } from "./schema.js";
 
 export type MessageWithAttachments = Message & {
   attachments?: MessageAttachment[];
@@ -39,15 +39,7 @@ export interface MessageRepository {
     conversationId: string;
     senderId: string;
     body?: string | null;
-    kind?:
-      | "TEXT"
-      | "IMAGE"
-      | "VIDEO"
-      | "AUDIO"
-      | "FILE"
-      | "SYSTEM"
-      | "STORY_REPLY"
-      | "STORY_REACTION";
+    kind?: MessageKind;
     clientMsgId?: string | null;
     replyToId?: string | null;
     requiredFriendship?: { userAId: string; userBId: string };

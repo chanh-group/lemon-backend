@@ -30,6 +30,7 @@ export const messageKindEnum = pgEnum("message_kind", [
   "STORY_REPLY",
   "STORY_REACTION",
 ]);
+export type MessageKind = (typeof messageKindEnum.enumValues)[number];
 
 export const attachmentKindEnum = pgEnum("attachment_kind", ["IMAGE", "VIDEO", "AUDIO", "FILE"]);
 

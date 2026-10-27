@@ -1,4 +1,5 @@
 import type { StoryPreview } from "../../story/dto/response.js";
+import type { MessageKind } from "../schema.js";
 
 export interface MessageAttachmentResponse {
   id: string;
@@ -17,7 +18,7 @@ export interface MessageResponse {
   id: string;
   conversationId: string;
   senderId: string;
-  kind: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "FILE" | "SYSTEM" | "STORY_REPLY" | "STORY_REACTION";
+  kind: MessageKind;
   body: string | null;
   replyToId: string | null;
   storyId?: string | null;
