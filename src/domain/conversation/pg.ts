@@ -334,8 +334,13 @@ export class ConversationPgRepository implements ConversationRepository {
           eq(conversationParticipants.userId, userId),
           sql`(
             ${conversationParticipants.lastReadMessageId} IS NULL
-            OR (SELECT m.created_at, m.id FROM messages m WHERE m.id = ${messageId})
-              > (SELECT m.created_at, m.id FROM messages m WHERE m.id = ${conversationParticipants.lastReadMessageId})
+            OR ROW(
+              (SELECT m.created_at FROM messages m WHERE m.id = ${messageId}),
+              ${messageId}::uuid
+            ) > ROW(
+              (SELECT m.created_at FROM messages m WHERE m.id = ${conversationParticipants.lastReadMessageId}),
+              ${conversationParticipants.lastReadMessageId}
+            )
           )`,
         ),
       );
@@ -359,10 +364,9 @@ export class ConversationPgRepository implements ConversationRepository {
           ne(messages.senderId, userId),
           or(
             isNull(conversationParticipants.lastReadMessageId),
-            sql`(${messages.createdAt}, ${messages.id}) > (
-              SELECT m.created_at, m.id
-              FROM messages m
-              WHERE m.id = ${conversationParticipants.lastReadMessageId}
+            sql`ROW(${messages.createdAt}, ${messages.id}) > ROW(
+              (SELECT m.created_at FROM messages m WHERE m.id = ${conversationParticipants.lastReadMessageId}),
+              ${conversationParticipants.lastReadMessageId}
             )`,
           ),
         ),
@@ -397,10 +401,9 @@ export class ConversationPgRepository implements ConversationRepository {
           ne(messages.senderId, userId),
           or(
             isNull(conversationParticipants.lastReadMessageId),
-            sql`(${messages.createdAt}, ${messages.id}) > (
-              SELECT m.created_at, m.id
-              FROM messages m
-              WHERE m.id = ${conversationParticipants.lastReadMessageId}
+            sql`ROW(${messages.createdAt}, ${messages.id}) > ROW(
+              (SELECT m.created_at FROM messages m WHERE m.id = ${conversationParticipants.lastReadMessageId}),
+              ${conversationParticipants.lastReadMessageId}
             )`,
           ),
         ),

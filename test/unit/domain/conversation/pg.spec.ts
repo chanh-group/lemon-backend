@@ -262,8 +262,9 @@ describe("ConversationPgRepository.countUnread", () => {
     expect(where.sql).toContain('"messages"."deleted_at" is null');
     expect(where.sql).toContain('"messages"."sender_id" <>');
     expect(where.sql).toContain('"conversation_participants"."last_read_message_id" is null');
-    expect(where.sql).toContain('("messages"."created_at", "messages"."id") >');
-    expect(where.sql).toContain("SELECT m.created_at, m.id");
+    expect(where.sql).toContain('ROW("messages"."created_at", "messages"."id") > ROW(');
+    expect(where.sql).toContain("SELECT m.created_at FROM messages m");
+    expect(where.sql).not.toContain("SELECT m.created_at, m.id");
     expect(where.sql).toContain('m.id = "conversation_participants"."last_read_message_id"');
     expect(where.params).toEqual([convRow.id, userAId]);
   });
@@ -299,9 +300,10 @@ describe("ConversationPgRepository.updateLastRead", () => {
     expect(render(values.lastReadAt).sql).toBe("now()");
     const where = render(chain.whereMock.mock.calls[0][0]);
     expect(where.sql).toContain('"conversation_participants"."last_read_message_id" IS NULL');
-    expect(where.sql).toContain("SELECT m.created_at, m.id FROM messages m");
-    expect(where.sql).toMatch(/m\.id = \$3\)\s*>\s*\(SELECT/);
-    expect(where.sql).toContain('m.id = "conversation_participants"."last_read_message_id")');
+    expect(where.sql).toContain("ROW(");
+    expect(where.sql).toContain("SELECT m.created_at FROM messages m");
+    expect(where.sql).not.toContain("SELECT m.created_at, m.id");
+    expect(where.sql).toContain('"conversation_participants"."last_read_message_id"');
   });
 });
 
