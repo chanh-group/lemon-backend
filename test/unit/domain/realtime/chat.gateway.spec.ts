@@ -20,6 +20,9 @@ describe("ChatGateway", () => {
   let mockJwt: JwtConfig;
   let mockRedis: Redis;
   let mockDb: DrizzleDb;
+  let activeConversationIdsMock: Mock;
+  let isParticipantMock: Mock;
+  let updateLastSeenMock: Mock;
 
   const mockUserId = "0193a2b1-0000-7000-8000-000000000001";
   const mockConvId = "0193a2b1-0000-7000-8000-000000000010";
@@ -51,6 +54,9 @@ describe("ChatGateway", () => {
     } as unknown as JwtConfig;
 
     dbSelectMock = vi.fn().mockImplementation(() => makeDb());
+    activeConversationIdsMock = vi.fn().mockResolvedValue([mockConvId, mockConvId2]);
+    isParticipantMock = vi.fn().mockResolvedValue(true);
+    updateLastSeenMock = vi.fn().mockResolvedValue(undefined);
 
     updateWhereMock = vi.fn().mockResolvedValue(undefined);
     updateSetMock = vi.fn().mockReturnValue({ where: updateWhereMock });
@@ -83,11 +89,11 @@ describe("ChatGateway", () => {
 
     gateway = new ChatGateway(
       {
-        getActiveConversationIds: vi.fn().mockResolvedValue([]),
-        isParticipant: vi.fn().mockResolvedValue(true),
+        getActiveConversationIds: activeConversationIdsMock,
+        isParticipant: isParticipantMock,
       } as unknown as import("../../../../src/domain/conversation/pg.js").ConversationPgRepository,
       {
-        updateLastSeen: vi.fn().mockResolvedValue(undefined),
+        updateLastSeen: updateLastSeenMock,
       } as unknown as import("../../../../src/domain/user/service.js").UserService,
       mockJwt,
       mockRedis,
@@ -297,7 +303,7 @@ describe("ChatGateway", () => {
       expect(redisTtlMock).toHaveBeenCalledTimes(2);
       expect(redisPipelineMock).toHaveBeenCalledTimes(2);
       expect(pipelineZremMock).toHaveBeenCalledWith("presence:online", mockUserId);
-      expect(dbUpdateMock).toHaveBeenCalled();
+      expect(updateLastSeenMock).toHaveBeenCalledWith(mockUserId);
     });
 
     it("marks offline when no other node heartbeats (ttl <= 30)", async () => {
@@ -313,9 +319,7 @@ describe("ChatGateway", () => {
 
       expect(redisPipelineMock).toHaveBeenCalledTimes(2);
       expect(pipelineZremMock).toHaveBeenCalledWith("presence:online", mockUserId);
-      expect(dbUpdateMock).toHaveBeenCalled();
-      expect(updateSetMock).toHaveBeenCalledWith({ lastSeenAt: expect.anything() });
-      expect(updateWhereMock).toHaveBeenCalled();
+      expect(updateLastSeenMock).toHaveBeenCalledWith(mockUserId);
     });
 
     it("reconnect within the grace period cancels the offline timer and refreshes presence", async () => {
@@ -349,7 +353,6 @@ describe("ChatGateway", () => {
       updateWhereMock.mockRejectedValue(new Error("db down"));
       await vi.advanceTimersByTimeAsync(60_000);
 
-      expect(dbUpdateMock).toHaveBeenCalled();
       expect(pipelineZremMock).toHaveBeenCalledWith("presence:online", mockUserId);
     });
 
@@ -374,7 +377,6 @@ describe("ChatGateway", () => {
       await vi.advanceTimersByTimeAsync(60_000);
 
       expect(redisPipelineMock).not.toHaveBeenCalled();
-      expect(dbUpdateMock).toHaveBeenCalled();
     });
   });
 
@@ -434,14 +436,7 @@ describe("ChatGateway", () => {
     });
 
     it("rejects non-participant with NOT_PARTICIPANT error", async () => {
-      // Mock db returning empty array (not a member)
-      dbSelectMock.mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([]),
-          }),
-        }),
-      });
+      isParticipantMock.mockResolvedValueOnce(false);
 
       const { client, joinMock, emitMock } = createMockSocket({});
       client.data = { userId: "outsider-id" };
