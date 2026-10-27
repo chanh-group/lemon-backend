@@ -315,6 +315,16 @@ export class ConversationPgRepository implements ConversationRepository {
     return rows.map((r) => r.userId);
   }
 
+  async getActiveConversationIds(userId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ conversationId: conversationParticipants.conversationId })
+      .from(conversationParticipants)
+      .where(
+        and(eq(conversationParticipants.userId, userId), isNull(conversationParticipants.leftAt)),
+      );
+    return rows.map((row) => row.conversationId);
+  }
+
   async updateLastRead(conversationId: string, userId: string, messageId: string): Promise<void> {
     await this.db
       .update(conversationParticipants)

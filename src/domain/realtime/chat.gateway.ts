@@ -18,11 +18,8 @@ import {
 } from "../../utils/cache/constants.js";
 import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
-import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, eq, isNull, sql } from "drizzle-orm";
-import type { DrizzleDb } from "../../configs/database.js";
-import { conversationParticipants } from "../conversation/schema.js";
-import { users } from "../user/schema.js";
+import { ConversationPgRepository } from "../conversation/pg.js";
+import { UserService } from "../user/service.js";
 import { convRoom, userRoom } from "./rooms.js";
 import { JWT_CONFIG } from "../auth/constants.js";
 import type { JwtConfig } from "../auth/jwt.js";
@@ -56,7 +53,8 @@ export class ChatGateway
   private readonly graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
-    @InjectDrizzle() private readonly db: DrizzleDb,
+    private readonly conversationRepo: ConversationPgRepository,
+    private readonly userService: UserService,
     @Inject(JWT_CONFIG) private readonly jwt: JwtConfig,
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
   ) {
@@ -89,14 +87,9 @@ export class ChatGateway
     await client.join(userRoom(userId));
 
     // Auto-join every conversation the user is an active participant of
-    const convRows = await this.db
-      .select({ conversationId: conversationParticipants.conversationId })
-      .from(conversationParticipants)
-      .where(
-        and(eq(conversationParticipants.userId, userId), isNull(conversationParticipants.leftAt)),
-      );
-    for (const row of convRows) {
-      await client.join(convRoom(row.conversationId));
+    const conversationIds = await this.conversationRepo.getActiveConversationIds(userId);
+    for (const conversationId of conversationIds) {
+      await client.join(convRoom(conversationId));
     }
 
     // Cancel grace period timer if reconnecting
@@ -165,19 +158,7 @@ export class ChatGateway
     if (!userId) return;
 
     // Verify user is an active participant in this conversation
-    const [membership] = await this.db
-      .select({ conversationId: conversationParticipants.conversationId })
-      .from(conversationParticipants)
-      .where(
-        and(
-          eq(conversationParticipants.conversationId, data.conversationId),
-          eq(conversationParticipants.userId, userId),
-          isNull(conversationParticipants.leftAt),
-        ),
-      )
-      .limit(1);
-
-    if (!membership) {
+    if (!(await this.conversationRepo.isParticipant(data.conversationId, userId))) {
       logger.warn(
         `Unauthorized conv:join attempt by user ${userId} for conversation ${data.conversationId}`,
       );
@@ -334,10 +315,7 @@ export class ChatGateway
 
   private async touchLastSeen(userId: string): Promise<void> {
     try {
-      await this.db
-        .update(users)
-        .set({ lastSeenAt: sql`now()` })
-        .where(eq(users.id, userId));
+      await this.userService.updateLastSeen(userId);
     } catch (err) {
       logger.warn(`Failed to touch lastSeen for ${userId}: ${String(err)}`);
     }

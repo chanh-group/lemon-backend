@@ -81,7 +81,17 @@ describe("ChatGateway", () => {
       update: dbUpdateMock,
     } as unknown as DrizzleDb;
 
-    gateway = new ChatGateway(mockDb, mockJwt, mockRedis);
+    gateway = new ChatGateway(
+      {
+        getActiveConversationIds: vi.fn().mockResolvedValue([]),
+        isParticipant: vi.fn().mockResolvedValue(true),
+      } as unknown as import("../../../../src/domain/conversation/pg.js").ConversationPgRepository,
+      {
+        updateLastSeen: vi.fn().mockResolvedValue(undefined),
+      } as unknown as import("../../../../src/domain/user/service.js").UserService,
+      mockJwt,
+      mockRedis,
+    );
   });
 
   afterEach(() => {
@@ -345,7 +355,17 @@ describe("ChatGateway", () => {
 
     it("degrades safely in memory mode without a redis client", async () => {
       vi.useFakeTimers();
-      const memoryGateway = new ChatGateway(mockDb, mockJwt, null);
+      const memoryGateway = new ChatGateway(
+        {
+          getActiveConversationIds: vi.fn().mockResolvedValue([]),
+          isParticipant: vi.fn().mockResolvedValue(true),
+        } as unknown as import("../../../../src/domain/conversation/pg.js").ConversationPgRepository,
+        {
+          updateLastSeen: vi.fn().mockResolvedValue(undefined),
+        } as unknown as import("../../../../src/domain/user/service.js").UserService,
+        mockJwt,
+        null,
+      );
       verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
       const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
 
