@@ -26,8 +26,13 @@ import { users } from "../user/schema.js";
 import { convRoom, userRoom } from "./rooms.js";
 import { JWT_CONFIG } from "../auth/constants.js";
 import type { JwtConfig } from "../auth/jwt.js";
+import { get_env } from "../../helpers/index.js";
 
 const logger = new Logger("ChatGateway");
+const frontendUrl = get_env("FRONTEND_URL", "http://localhost:5173");
+const allowedOrigins = frontendUrl.includes(",")
+  ? frontendUrl.split(",").map((origin) => origin.trim())
+  : [frontendUrl, "http://localhost:5173", "http://localhost:3000"];
 
 export interface SocketUser {
   userId: string;
@@ -35,7 +40,7 @@ export interface SocketUser {
 
 @WebSocketGateway({
   cors: {
-    origin: "*",
+    origin: allowedOrigins,
     credentials: true,
   },
 })

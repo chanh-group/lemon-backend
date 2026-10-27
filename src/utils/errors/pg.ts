@@ -44,6 +44,5 @@ export function mapUniqueViolation(
     return error;
   }
 
-  const [pattern, value] = match;
-  return new BusinessError("CONFLICT", undefined, `${pattern} already exists: ${value}`);
+  return new BusinessError("CONFLICT");
 }

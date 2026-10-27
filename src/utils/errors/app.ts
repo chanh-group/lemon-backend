@@ -59,11 +59,7 @@ export function toAppError(error: unknown): AppError {
     (hasErrorCode(error) ? error.code : undefined) ??
     (hasErrorCode(cause) ? cause.code : undefined);
   if (pgCode === "22P02") {
-    return new BusinessError(
-      "BAD_REQUEST",
-      undefined,
-      "Định dạng ID không hợp lệ (yêu cầu định dạng UUID)",
-    );
+    return new BusinessError("BAD_REQUEST");
   }
   if (error instanceof HttpException) {
     const status = error.getStatus();

@@ -63,10 +63,6 @@ export class ErrorFilter implements ExceptionFilter {
       return error.issues.map((issue) => this.formatIssue(issue, lang)).join("; ");
     }
 
-    if (error instanceof BusinessError && error.rawMessage !== undefined) {
-      return error.rawMessage;
-    }
-
     const translated = t(code, lang, error instanceof BusinessError ? error.params : undefined);
     if (translated !== code) {
       return translated;

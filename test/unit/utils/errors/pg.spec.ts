@@ -3,7 +3,7 @@ import { BusinessError } from "../../../../src/utils/errors/business.js";
 import { isUniqueViolation, mapUniqueViolation } from "../../../../src/utils/errors/pg.js";
 
 describe("mapUniqueViolation", () => {
-  it("maps a matching constraint to a conflict with field context", () => {
+  it("maps a matching constraint to a generic conflict without PII", () => {
     const mapped = mapUniqueViolation({ code: "23505", constraint: "users_email_uq" }, [
       ["email", "a@b.c"],
       ["username", "lemon"],
@@ -12,7 +12,7 @@ describe("mapUniqueViolation", () => {
     expect(mapped).toBeInstanceOf(BusinessError);
     expect(mapped).toMatchObject({
       code: "CONFLICT",
-      rawMessage: "email already exists: a@b.c",
+      rawMessage: undefined,
     });
   });
 
