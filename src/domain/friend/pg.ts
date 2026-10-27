@@ -1,12 +1,27 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { users } from "../user/schema.js";
 import { conversationParticipants, conversations } from "../conversation/schema.js";
 import type { AcceptedFriendRequest, FriendRepository } from "./repository.js";
 import { friendships } from "./schema.js";
 import { toCursorPage } from "../shared.js";
+
+function encodeCursor(createdAt: Date, id: string): string {
+  return Buffer.from(`${createdAt.toISOString()}|${id}`).toString("base64url");
+}
+
+function decodeCursor(cursor: string | undefined): { createdAt: Date; id: string } | undefined {
+  if (!cursor) return undefined;
+  try {
+    const [rawDate, id] = Buffer.from(cursor, "base64url").toString("utf8").split("|");
+    const createdAt = new Date(rawDate);
+    return id && !Number.isNaN(createdAt.getTime()) ? { createdAt, id } : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 @Injectable()
 export class FriendPgRepository implements FriendRepository {
@@ -44,11 +59,19 @@ export class FriendPgRepository implements FriendRepository {
   }
 
   async listFriendsPage(userId: string, cursor: string | undefined, limit: number) {
-    const cursorFilter = cursor ? gt(users.id, cursor) : undefined;
+    const decoded = decodeCursor(cursor);
+    const cursorFilter = decoded
+      ? or(
+          lt(friendships.createdAt, decoded.createdAt),
+          and(eq(friendships.createdAt, decoded.createdAt), lt(friendships.id, decoded.id)),
+        )
+      : undefined;
     const [outgoing, incoming] = await Promise.all([
       this.db
         .select({
           id: users.id,
+          createdAt: friendships.createdAt,
+          friendshipId: friendships.id,
           name: users.fullName,
           username: users.username,
           avatarUrl: users.avatarUrl,
@@ -63,11 +86,13 @@ export class FriendPgRepository implements FriendRepository {
             cursorFilter,
           ),
         )
-        .orderBy(asc(users.id))
+        .orderBy(desc(friendships.createdAt), desc(friendships.id))
         .limit(limit + 1),
       this.db
         .select({
           id: users.id,
+          createdAt: friendships.createdAt,
+          friendshipId: friendships.id,
           name: users.fullName,
           username: users.username,
           avatarUrl: users.avatarUrl,
@@ -82,13 +107,20 @@ export class FriendPgRepository implements FriendRepository {
             cursorFilter,
           ),
         )
-        .orderBy(asc(users.id))
+        .orderBy(desc(friendships.createdAt), desc(friendships.id))
         .limit(limit + 1),
     ]);
-    const merged = [...outgoing, ...incoming].sort((a, b) =>
-      a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+    const merged = [...outgoing, ...incoming].sort(
+      (a, b) =>
+        b.createdAt.getTime() - a.createdAt.getTime() || (a.friendshipId < b.friendshipId ? 1 : -1),
     );
-    return toCursorPage(merged.slice(0, limit + 1), limit, (friend) => friend.id);
+    const page = toCursorPage(merged.slice(0, limit + 1), limit, (friend) =>
+      encodeCursor(friend.createdAt, friend.friendshipId),
+    );
+    return {
+      ...page,
+      items: page.items.map(({ createdAt: _, friendshipId: __, ...friend }) => friend),
+    };
   }
 
   async findAcceptedFriendIds(userId: string, candidates: string[]): Promise<Set<string>> {
@@ -133,10 +165,18 @@ export class FriendPgRepository implements FriendRepository {
             eq(friendships.addresseeId, userId),
             eq(friendships.status, "PENDING"),
             isNull(users.deletedAt),
-            incomingCursor ? gt(friendships.id, incomingCursor) : undefined,
+            decodeCursor(incomingCursor)
+              ? or(
+                  lt(friendships.createdAt, decodeCursor(incomingCursor)!.createdAt),
+                  and(
+                    eq(friendships.createdAt, decodeCursor(incomingCursor)!.createdAt),
+                    lt(friendships.id, decodeCursor(incomingCursor)!.id),
+                  ),
+                )
+              : undefined,
           ),
         )
-        .orderBy(asc(friendships.id))
+        .orderBy(desc(friendships.createdAt), desc(friendships.id))
         .limit(limit + 1),
       this.db
         .select({
@@ -156,22 +196,30 @@ export class FriendPgRepository implements FriendRepository {
             eq(friendships.requesterId, userId),
             eq(friendships.status, "PENDING"),
             isNull(users.deletedAt),
-            outgoingCursor ? gt(friendships.id, outgoingCursor) : undefined,
+            decodeCursor(outgoingCursor)
+              ? or(
+                  lt(friendships.createdAt, decodeCursor(outgoingCursor)!.createdAt),
+                  and(
+                    eq(friendships.createdAt, decodeCursor(outgoingCursor)!.createdAt),
+                    lt(friendships.id, decodeCursor(outgoingCursor)!.id),
+                  ),
+                )
+              : undefined,
           ),
         )
-        .orderBy(asc(friendships.id))
+        .orderBy(desc(friendships.createdAt), desc(friendships.id))
         .limit(limit + 1),
     ]);
     return {
       incoming: toCursorPage(
         incomingRows.map((row) => ({ ...row, direction: "incoming" as const })),
         limit,
-        (row) => row.id,
+        (row) => encodeCursor(row.createdAt, row.id),
       ),
       outgoing: toCursorPage(
         outgoingRows.map((row) => ({ ...row, direction: "outgoing" as const })),
         limit,
-        (row) => row.id,
+        (row) => encodeCursor(row.createdAt, row.id),
       ),
     };
   }

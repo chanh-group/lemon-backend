@@ -69,8 +69,12 @@ export class FriendController {
     @Query("limit") limit?: string,
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
-    const incomingPage = parseCursorPage(incomingCursor, limit);
-    const outgoingPage = parseCursorPage(outgoingCursor, limit);
+    const incomingPage = parseCursorPage(incomingCursor, limit, undefined, undefined, {
+      allowOpaque: true,
+    });
+    const outgoingPage = parseCursorPage(outgoingCursor, limit, undefined, undefined, {
+      allowOpaque: true,
+    });
     const data = await this.service.listRequestsPage(
       userId,
       incomingPage.cursor,
@@ -123,7 +127,7 @@ export class FriendController {
     @Query("limit") limit?: string,
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
-    const page = parseCursorPage(cursor, limit);
+    const page = parseCursorPage(cursor, limit, undefined, undefined, { allowOpaque: true });
     return ok(await this.service.listFriendsPage(userId, page.cursor, page.size));
   }
 
