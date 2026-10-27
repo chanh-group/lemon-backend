@@ -5,10 +5,10 @@ import {
   RATE_LIMIT_PRESIGN_IP_MAX,
   RATE_LIMIT_PRESIGN_USER_MAX,
   RATE_LIMIT_WINDOW_SECS,
+  assertMixedRateLimit,
   extractClientIp,
   type RateLimiter,
 } from "../../middleware/ratelimit.js";
-import { BusinessError } from "../../utils/errors/business.js";
 import { getAuthUser } from "../shared.js";
 
 @Injectable()
@@ -22,7 +22,8 @@ export class UploadRateLimitInterceptor implements NestInterceptor {
       socket?: { remoteAddress?: string | null };
     }>();
     const { id: userId } = getAuthUser(req);
-    const allowed = await this.rateLimiter.checkMixedLimit(
+    await assertMixedRateLimit(
+      this.rateLimiter,
       "upload-file",
       userId,
       extractClientIp(req),
@@ -30,7 +31,6 @@ export class UploadRateLimitInterceptor implements NestInterceptor {
       RATE_LIMIT_PRESIGN_IP_MAX,
       RATE_LIMIT_WINDOW_SECS,
     );
-    if (!allowed) throw new BusinessError("TOO_MANY_REQUESTS");
     return next.handle();
   }
 }

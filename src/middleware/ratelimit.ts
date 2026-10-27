@@ -2,6 +2,7 @@ import { Logger } from "@nestjs/common";
 import type { RedisHealthService } from "../configs/redis-health.js";
 import type { RedisMetricsService } from "../configs/redis-metrics.js";
 import { SystemError } from "../utils/errors/system.js";
+import { BusinessError } from "../utils/errors/business.js";
 
 export const RATE_LIMIT_WINDOW_SECS = 60;
 export const RATE_LIMIT_EMAIL_WINDOW_SECS = 3600;
@@ -37,6 +38,21 @@ export interface RateLimiter {
     ipMax: number,
     windowSecs: number,
   ): Promise<boolean>;
+}
+
+/** Enforce the standard user-and-IP limit used by authenticated endpoints. */
+export async function assertMixedRateLimit(
+  limiter: RateLimiter,
+  action: string,
+  userId: string,
+  ip: string,
+  userMax: number,
+  ipMax: number,
+  windowSecs: number,
+): Promise<void> {
+  if (!(await limiter.checkMixedLimit(action, userId, ip, userMax, ipMax, windowSecs))) {
+    throw new BusinessError("TOO_MANY_REQUESTS");
+  }
 }
 
 export const RATE_LIMITER: unique symbol = Symbol("RATE_LIMITER");

@@ -17,10 +17,10 @@ import {
   RATE_LIMIT_FRIEND_REQUEST_IP_MAX,
   RATE_LIMIT_FRIEND_REQUEST_USER_MAX,
   RATE_LIMIT_FRIEND_REQUEST_WINDOW_SECS,
+  assertMixedRateLimit,
   extractClientIp,
   type RateLimiter,
 } from "../../middleware/ratelimit.js";
-import { BusinessError } from "../../utils/errors/business.js";
 import { Lang } from "../../utils/decorators.js";
 import { t } from "../../utils/i18n/index.js";
 import { created, messageOnly, ok, withMessage } from "../../utils/response.js";
@@ -45,18 +45,15 @@ export class FriendController {
     @Lang() lang: string,
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
-    if (
-      !(await this.rateLimiter.checkMixedLimit(
-        "friend-request",
-        userId,
-        extractClientIp(req),
-        RATE_LIMIT_FRIEND_REQUEST_USER_MAX,
-        RATE_LIMIT_FRIEND_REQUEST_IP_MAX,
-        RATE_LIMIT_FRIEND_REQUEST_WINDOW_SECS,
-      ))
-    ) {
-      throw new BusinessError("TOO_MANY_REQUESTS");
-    }
+    await assertMixedRateLimit(
+      this.rateLimiter,
+      "friend-request",
+      userId,
+      extractClientIp(req),
+      RATE_LIMIT_FRIEND_REQUEST_USER_MAX,
+      RATE_LIMIT_FRIEND_REQUEST_IP_MAX,
+      RATE_LIMIT_FRIEND_REQUEST_WINDOW_SECS,
+    );
     await this.service.sendRequest(userId, dto.userId);
     return created(undefined, t("FRIEND_REQUEST_SENT", lang));
   }

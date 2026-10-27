@@ -16,6 +16,7 @@ import {
   RATE_LIMIT_PRESIGN_IP_MAX,
   RATE_LIMIT_PRESIGN_USER_MAX,
   RATE_LIMIT_WINDOW_SECS,
+  assertMixedRateLimit,
   extractClientIp,
   type RateLimiter,
 } from "../../middleware/ratelimit.js";
@@ -49,18 +50,15 @@ export class FileController {
     @Body({ schema: presignFileSchema }) dto: PresignFileDto,
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
-    if (
-      !(await this.rateLimiter.checkMixedLimit(
-        "presign-file",
-        userId,
-        extractClientIp(req),
-        RATE_LIMIT_PRESIGN_USER_MAX,
-        RATE_LIMIT_PRESIGN_IP_MAX,
-        RATE_LIMIT_WINDOW_SECS,
-      ))
-    ) {
-      throw new BusinessError("TOO_MANY_REQUESTS");
-    }
+    await assertMixedRateLimit(
+      this.rateLimiter,
+      "presign-file",
+      userId,
+      extractClientIp(req),
+      RATE_LIMIT_PRESIGN_USER_MAX,
+      RATE_LIMIT_PRESIGN_IP_MAX,
+      RATE_LIMIT_WINDOW_SECS,
+    );
     const data = await this.fileService.presign(userId, dto);
     return ok(data);
   }
