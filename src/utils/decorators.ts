@@ -1,10 +1,6 @@
-import {
-  createParamDecorator,
-  type ExecutionContext,
-  SetMetadata,
-  UnauthorizedException,
-} from "@nestjs/common";
+import { createParamDecorator, type ExecutionContext, SetMetadata } from "@nestjs/common";
 import type { Request } from "express";
+import { BusinessError } from "./errors/business.js";
 import { getLanguageFromHeader } from "./i18n/index.js";
 
 export const IS_PUBLIC_KEY = "isPublic";
@@ -23,10 +19,7 @@ export const CurrentUser = createParamDecorator(
   (_data: unknown, ctx: ExecutionContext): { id: string } => {
     const request = ctx.switchToHttp().getRequest<Request & { user?: { id: string } }>();
     if (!request.user) {
-      throw new UnauthorizedException({
-        code: "UNAUTHORIZED",
-        message: "Chưa xác thực người dùng",
-      });
+      throw new BusinessError("UNAUTHORIZED");
     }
     return request.user;
   },

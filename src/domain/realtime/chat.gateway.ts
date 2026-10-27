@@ -75,10 +75,7 @@ export class ChatGateway
     const userId = await this.extractUserId(client);
     if (!userId) {
       logger.warn(`Unauthorized socket connection rejected: ${client.id}`);
-      client.emit("error", {
-        code: "UNAUTHORIZED",
-        message: "Chưa xác thực người dùng",
-      });
+      client.emit("error", { code: "UNAUTHORIZED" });
       client.disconnect(true);
       return;
     }
@@ -162,10 +159,7 @@ export class ChatGateway
       logger.warn(
         `Unauthorized conv:join attempt by user ${userId} for conversation ${data.conversationId}`,
       );
-      client.emit("error", {
-        code: "NOT_PARTICIPANT",
-        message: "Bạn không phải thành viên của cuộc trò chuyện này",
-      });
+      client.emit("error", { code: "NOT_PARTICIPANT" });
       return { success: false, conversationId: data.conversationId };
     }
 
