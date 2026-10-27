@@ -67,7 +67,11 @@ export interface MessageRepository {
     userId: string,
     conversationId: string,
   ): Promise<MessageWithAttachments | null>;
-  updateBody(messageId: string, senderId: string, body: string): Promise<MessageWithAttachments | null>;
+  updateBody(
+    messageId: string,
+    senderId: string,
+    body: string,
+  ): Promise<MessageWithAttachments | null>;
   softDelete(messageId: string, senderId: string): Promise<MessageWithAttachments | null>;
 }
 

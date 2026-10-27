@@ -103,7 +103,10 @@ export const storyReactions = pgTable(
     kind: storyReactionKindEnum("kind").notNull().default("REACTION"),
     // `created_at` stays immutable: it is the moment the reaction was first
     // made and the stable sort key of the reaction list.
-    createdAt: created("created_at"),
+    // The opaque cursor serializes Date at millisecond precision.
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date", precision: 3 })
+      .defaultNow()
+      .notNull(),
     updatedAt: updated("updated_at"),
   },
   (table) => [

@@ -46,7 +46,9 @@ describe("FileController", () => {
   });
 
   it("handles uploadFile fallback endpoint", async () => {
-    const uploadMock = vi.fn().mockResolvedValue({ objectKey: "chat/c1/file.png" });
+    const uploadMock = vi.fn().mockResolvedValue({
+      objectKey: "chat/0193a2b1-0000-7000-8000-000000000010/user-1/file.png",
+    });
     const c = new FileController(
       { presign: presignMock, upload: uploadMock } as unknown as FileService,
       new MemoryRateLimiter(),
@@ -61,14 +63,14 @@ describe("FileController", () => {
         originalname: "file.png",
       },
       "CHAT_IMAGE",
-      "c1",
+      "0193a2b1-0000-7000-8000-000000000010",
     );
 
     expect(uploadMock).toHaveBeenCalledTimes(1);
     expect(result).toEqual({
       success: true,
       message: "OK",
-      data: { objectKey: "chat/c1/file.png" },
+      data: { objectKey: "chat/0193a2b1-0000-7000-8000-000000000010/user-1/file.png" },
     });
   });
 

@@ -31,11 +31,11 @@ import type {
   StoryReactionResult,
   StoryRepository,
   UserReactionDetail,
+  UserStorySettingsValues,
 } from "./repository.js";
 import {
   type NewStory,
   type Story,
-  type UserStorySettings,
   stories,
   storyAudiences,
   storyMutes,
@@ -44,21 +44,26 @@ import {
   userStorySettings,
 } from "./schema.js";
 import { BusinessError } from "../../utils/errors/business.js";
-import { toCursorPage, type CursorPage } from "../shared.js";
-import {
-  decodeReactionCursor,
-  encodeReactionCursor,
-  isUuid,
-  toStoryItemResponse,
-} from "./dto/mapper.js";
+import { STORY_TTL_MS } from "../../utils/cache/constants.js";
+import { isUuid, toCursorPage, type CursorPage } from "../shared.js";
+import { decodeReactionCursor, encodeReactionCursor, toStoryItemResponse } from "./dto/mapper.js";
 
 @Injectable()
 export class StoryPgRepository implements StoryRepository {
   constructor(@InjectDrizzle() private readonly db: DrizzleDb) {}
 
-  async create(data: NewStory, audienceUserIds?: string[]): Promise<Story> {
+  async create(
+    data: Omit<NewStory, "createdAt" | "expiresAt">,
+    audienceUserIds?: string[],
+  ): Promise<Story> {
     return this.db.transaction(async (tx) => {
-      const [created] = await tx.insert(stories).values(data).returning();
+      const [created] = await tx
+        .insert(stories)
+        .values({
+          ...data,
+          expiresAt: sql`now() + ${STORY_TTL_MS} * interval '1 millisecond'`,
+        })
+        .returning();
       if (data.audienceMode !== "ALL_FRIENDS" && audienceUserIds && audienceUserIds.length > 0) {
         await tx.insert(storyAudiences).values(
           audienceUserIds.map((userId) => ({
@@ -80,14 +85,13 @@ export class StoryPgRepository implements StoryRepository {
   }
 
   async findActiveById(id: string): Promise<Story | null> {
-    const now = new Date();
     const [story] = await this.db
       .select()
       .from(stories)
       .where(
         and(
           eq(stories.id, id),
-          gt(stories.expiresAt, now),
+          gt(stories.expiresAt, sql`now()`),
           isNull(stories.deletedAt),
           isNull(stories.archivedAt),
         ),
@@ -97,11 +101,10 @@ export class StoryPgRepository implements StoryRepository {
 
   async findActiveByUserIds(userIds: string[], viewerId?: string): Promise<Story[]> {
     if (userIds.length === 0) return [];
-    const now = new Date();
 
     const conditions = [
       inArray(stories.userId, userIds),
-      gt(stories.expiresAt, now),
+      gt(stories.expiresAt, sql`now()`),
       isNull(stories.deletedAt),
       isNull(stories.archivedAt),
     ];
@@ -260,16 +263,13 @@ export class StoryPgRepository implements StoryRepository {
   }
 
   async markAsViewed(storyId: string, userId: string, anonymous: boolean = false): Promise<void> {
-    await this.db
-      .insert(storyViews)
-      .values({ storyId, userId, anonymous, viewedAt: new Date() })
-      .onConflictDoNothing();
+    await this.db.insert(storyViews).values({ storyId, userId, anonymous }).onConflictDoNothing();
   }
 
   async markDeleted(id: string): Promise<boolean> {
     const rows = await this.db
       .update(stories)
-      .set({ deletedAt: new Date() })
+      .set({ deletedAt: sql`now()` })
       .where(and(eq(stories.id, id), isNull(stories.deletedAt)))
       .returning({ id: stories.id });
     return rows.length > 0;
@@ -309,21 +309,38 @@ export class StoryPgRepository implements StoryRepository {
   }
 
   async findPurgeable(limit: number): Promise<PurgeableStory[]> {
-    return this.db
+    const rows = await this.db
       .select({
         id: stories.id,
         objectKey: stories.objectKey,
         userId: stories.userId,
+        archivedAt: stories.archivedAt,
+        deletedAt: stories.deletedAt,
+        archiveEnabled: userStorySettings.archiveEnabled,
       })
       .from(stories)
+      .leftJoin(userStorySettings, eq(userStorySettings.userId, stories.userId))
       .where(
-        and(
-          isNull(stories.archivedAt),
-          or(lt(stories.expiresAt, sql`now()`), isNotNull(stories.deletedAt)),
+        or(
+          and(
+            isNull(stories.archivedAt),
+            or(lt(stories.expiresAt, sql`now()`), isNotNull(stories.deletedAt)),
+          ),
+          and(
+            isNotNull(stories.archivedAt),
+            or(
+              eq(userStorySettings.archiveEnabled, false),
+              and(
+                isNotNull(userStorySettings.archiveDurationSecs),
+                sql`${stories.archivedAt} + ${userStorySettings.archiveDurationSecs} * interval '1 second' <= now()`,
+              ),
+            ),
+          ),
         ),
       )
       .orderBy(asc(stories.expiresAt))
       .limit(limit);
+    return rows.map((row) => ({ ...row, archiveEnabled: row.archiveEnabled ?? true }));
   }
 
   async deleteByIds(ids: string[]): Promise<number> {
@@ -341,13 +358,11 @@ export class StoryPgRepository implements StoryRepository {
       // Set messages.story_id to null so snapshot is preserved without dangling FK
       await tx.update(messages).set({ storyId: null }).where(inArray(messages.storyId, ids));
 
-      // Mark stories as archived and clear S3 pointers
+      // Keep media pointers so archived stories remain viewable.
       const rows = await tx
         .update(stories)
         .set({
-          archivedAt: new Date(),
-          objectKey: null,
-          bucket: null,
+          archivedAt: sql`now()`,
         })
         .where(inArray(stories.id, ids))
         .returning({ id: stories.id });
@@ -362,19 +377,15 @@ export class StoryPgRepository implements StoryRepository {
     kind: StoryReactionKind = "REACTION",
     anonymous: boolean = false,
   ): Promise<StoryReactionResult> {
-    const now = new Date();
     return this.db.transaction(async (tx) => {
-      await tx
-        .insert(storyViews)
-        .values({ storyId, userId, anonymous, viewedAt: now })
-        .onConflictDoNothing();
+      await tx.insert(storyViews).values({ storyId, userId, anonymous }).onConflictDoNothing();
 
       const [row] = await tx
         .insert(storyReactions)
-        .values({ storyId, userId, emoji, kind, createdAt: now, updatedAt: now })
+        .values({ storyId, userId, emoji, kind })
         .onConflictDoUpdate({
           target: [storyReactions.storyId, storyReactions.userId],
-          set: { emoji, kind, updatedAt: now },
+          set: { emoji, kind, updatedAt: sql`now()` },
         })
         .returning({
           storyId: storyReactions.storyId,
@@ -423,10 +434,7 @@ export class StoryPgRepository implements StoryRepository {
         conditions.push(
           or(
             lt(storyReactions.createdAt, decoded.createdAt),
-            and(
-              eq(storyReactions.createdAt, decoded.createdAt),
-              lt(users.id, decoded.userId),
-            ),
+            and(eq(storyReactions.createdAt, decoded.createdAt), lt(users.id, decoded.userId)),
           )!,
         );
       } else if (isUuid(cursor)) {
@@ -513,9 +521,14 @@ export class StoryPgRepository implements StoryRepository {
   }
 
   // Settings
-  async getUserStorySettings(userId: string): Promise<UserStorySettings> {
+  async getUserStorySettings(userId: string): Promise<UserStorySettingsValues> {
     const [settings] = await this.db
-      .select()
+      .select({
+        userId: userStorySettings.userId,
+        viewedReceiptsEnabled: userStorySettings.viewedReceiptsEnabled,
+        archiveEnabled: userStorySettings.archiveEnabled,
+        archiveDurationSecs: userStorySettings.archiveDurationSecs,
+      })
       .from(userStorySettings)
       .where(eq(userStorySettings.userId, userId));
 
@@ -528,8 +541,6 @@ export class StoryPgRepository implements StoryRepository {
       viewedReceiptsEnabled: true,
       archiveEnabled: true,
       archiveDurationSecs: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
     };
   }
 
@@ -540,8 +551,7 @@ export class StoryPgRepository implements StoryRepository {
       archiveEnabled?: boolean;
       archiveDurationSecs?: number | null;
     },
-  ): Promise<UserStorySettings> {
-    const now = new Date();
+  ): Promise<UserStorySettingsValues> {
     const [row] = await this.db
       .insert(userStorySettings)
       .values({
@@ -549,8 +559,6 @@ export class StoryPgRepository implements StoryRepository {
         viewedReceiptsEnabled: data.viewedReceiptsEnabled ?? true,
         archiveEnabled: data.archiveEnabled ?? true,
         archiveDurationSecs: data.archiveDurationSecs ?? null,
-        createdAt: now,
-        updatedAt: now,
       })
       .onConflictDoUpdate({
         target: [userStorySettings.userId],
@@ -564,10 +572,15 @@ export class StoryPgRepository implements StoryRepository {
           ...(data.archiveDurationSecs !== undefined && {
             archiveDurationSecs: data.archiveDurationSecs,
           }),
-          updatedAt: now,
+          updatedAt: sql`now()`,
         },
       })
-      .returning();
+      .returning({
+        userId: userStorySettings.userId,
+        viewedReceiptsEnabled: userStorySettings.viewedReceiptsEnabled,
+        archiveEnabled: userStorySettings.archiveEnabled,
+        archiveDurationSecs: userStorySettings.archiveDurationSecs,
+      });
     return row;
   }
 
@@ -591,10 +604,7 @@ export class StoryPgRepository implements StoryRepository {
 
   // Mutes
   async muteAuthor(userId: string, authorId: string): Promise<void> {
-    await this.db
-      .insert(storyMutes)
-      .values({ userId, authorId, createdAt: new Date() })
-      .onConflictDoNothing();
+    await this.db.insert(storyMutes).values({ userId, authorId }).onConflictDoNothing();
   }
 
   async unmuteAuthor(userId: string, authorId: string): Promise<boolean> {

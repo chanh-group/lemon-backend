@@ -106,9 +106,7 @@ export async function toMessageTimelineAsync(
   result: MessageTimelineResult,
   storage?: StorageService,
 ): Promise<MessageTimelineResponse> {
-  const items = await Promise.all(
-    result.items.map((m) => toMessageResponseAsync(m, storage)),
-  );
+  const items = await Promise.all(result.items.map((m) => toMessageResponseAsync(m, storage)));
   return {
     items,
     ...(result.nextCursor !== undefined && { nextCursor: result.nextCursor }),

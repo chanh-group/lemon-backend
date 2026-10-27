@@ -158,7 +158,9 @@ describe("encodeReactionCursor & decodeReactionCursor", () => {
 
   it("returns null when timestamp is invalid or non-positive", () => {
     const nanCursor = Buffer.from("NaN_0193a2b1-0000-7000-8000-000000000001").toString("base64url");
-    const negCursor = Buffer.from("-100_0193a2b1-0000-7000-8000-000000000001").toString("base64url");
+    const negCursor = Buffer.from("-100_0193a2b1-0000-7000-8000-000000000001").toString(
+      "base64url",
+    );
     const zeroCursor = Buffer.from("0_0193a2b1-0000-7000-8000-000000000001").toString("base64url");
     expect(decodeReactionCursor(nanCursor)).toBeNull();
     expect(decodeReactionCursor(negCursor)).toBeNull();

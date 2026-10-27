@@ -22,7 +22,7 @@
   "STORY_VIEWERS_FORBIDDEN": "Chỉ chủ story mới xem được danh sách người xem",
   "STORY_DELETE_FORBIDDEN": "Bạn chỉ có thể xoá story của chính mình",
   "INVALID_MEDIA_TYPE": "Story ảnh/video phải có objectKey",
-  "INVALID_OBJECT_KEY": "objectKey phải nằm trong thư mục stories của bạn",
+  "INVALID_OBJECT_KEY": "Tệp không hợp lệ hoặc nằm ngoài phạm vi được phép",
   "TEXT_STORY_REQUIRES_CONTENT": "Story dạng chữ cần có caption hoặc background",
   "FILE_TOO_LARGE": "File vượt quá giới hạn cho phép ({maxMb}MB) — hãy chọn file nhỏ hơn {maxMb}MB",
   "FILE_TYPE_NOT_ALLOWED": "Định dạng file không được hỗ trợ",

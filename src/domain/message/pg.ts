@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, asc, desc, eq, gt, inArray, isNull, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../utils/errors/pg.js";
@@ -16,12 +16,7 @@ import type {
   MessageWithAttachments,
 } from "./repository.js";
 import type { StoryPreview } from "../story/dto/response.js";
-import {
-  type Message,
-  type MessageAttachment,
-  messageAttachments,
-  messages,
-} from "./schema.js";
+import { type Message, type MessageAttachment, messageAttachments, messages } from "./schema.js";
 
 /**
  * Conversation inbox preview. A story reaction carries the emoji as its body,
@@ -141,7 +136,7 @@ export class MessagePgRepository implements MessageRepository {
             .values(
               messageData.attachments.map((att) => ({
                 messageId: newMsg.id,
-                kind: att.kind ?? (messageData.kind as any) ?? "FILE",
+                kind: att.kind ?? "FILE",
                 bucket: att.bucket,
                 objectKey: att.objectKey,
                 fileName: att.fileName,
@@ -164,7 +159,7 @@ export class MessagePgRepository implements MessageRepository {
             lastMessageId: newMsg.id,
             lastMessageAt: newMsg.createdAt,
             lastMessagePreview: preview,
-            updatedAt: new Date(),
+            updatedAt: sql`now()`,
           })
           .where(
             and(
@@ -181,9 +176,7 @@ export class MessagePgRepository implements MessageRepository {
           );
 
         return {
-          message: insertedAttachments
-            ? { ...newMsg, attachments: insertedAttachments }
-            : newMsg,
+          message: insertedAttachments ? { ...newMsg, attachments: insertedAttachments } : newMsg,
           isNew: true,
         };
       });
@@ -215,18 +208,39 @@ export class MessagePgRepository implements MessageRepository {
     const conditions = [eq(messages.conversationId, conversationId), isNull(messages.deletedAt)];
 
     if (cursor) {
-      conditions.push(lt(messages.id, cursor));
+      const cursorCreatedAt = sql`(
+        SELECT m.created_at FROM messages m
+        WHERE m.id = ${cursor} AND m.conversation_id = ${conversationId}
+      )`;
+      conditions.push(
+        or(
+          lt(messages.createdAt, cursorCreatedAt),
+          and(eq(messages.createdAt, cursorCreatedAt), lt(messages.id, cursor)),
+        )!,
+      );
     }
 
     if (after) {
-      conditions.push(gt(messages.id, after));
+      const afterCreatedAt = sql`(
+        SELECT m.created_at FROM messages m
+        WHERE m.id = ${after} AND m.conversation_id = ${conversationId}
+      )`;
+      conditions.push(
+        or(
+          gt(messages.createdAt, afterCreatedAt),
+          and(eq(messages.createdAt, afterCreatedAt), gt(messages.id, after)),
+        )!,
+      );
     }
 
     const rows = await this.db
       .select()
       .from(messages)
       .where(and(...conditions))
-      .orderBy(after ? asc(messages.id) : desc(messages.id))
+      .orderBy(
+        after ? asc(messages.createdAt) : desc(messages.createdAt),
+        after ? asc(messages.id) : desc(messages.id),
+      )
       .limit(queryLimit + 1);
 
     const hasMore = rows.length > queryLimit;
@@ -301,7 +315,7 @@ export class MessagePgRepository implements MessageRepository {
         .update(messages)
         .set({
           body,
-          editedAt: new Date(),
+          editedAt: sql`now()`,
         })
         .where(
           and(
@@ -320,7 +334,7 @@ export class MessagePgRepository implements MessageRepository {
         .update(conversations)
         .set({
           lastMessagePreview: preview,
-          updatedAt: new Date(),
+          updatedAt: sql`now()`,
         })
         .where(
           and(
@@ -338,7 +352,7 @@ export class MessagePgRepository implements MessageRepository {
       const [deleted] = await tx
         .update(messages)
         .set({
-          deletedAt: new Date(),
+          deletedAt: sql`now()`,
         })
         .where(
           and(
@@ -356,7 +370,7 @@ export class MessagePgRepository implements MessageRepository {
         .update(conversations)
         .set({
           lastMessagePreview: "Tin nhắn đã bị thu hồi",
-          updatedAt: new Date(),
+          updatedAt: sql`now()`,
         })
         .where(
           and(

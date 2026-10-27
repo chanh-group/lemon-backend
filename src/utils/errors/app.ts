@@ -31,6 +31,10 @@ export function isAppError(error: unknown): error is AppError {
   return error instanceof BusinessError || error instanceof SystemError;
 }
 
+function hasErrorCode(error: unknown): error is { code: unknown } {
+  return typeof error === "object" && error !== null && "code" in error;
+}
+
 export function businessCodeForStatus(status: number): BusinessCode {
   return BUSINESS_CODE_BY_STATUS[status] ?? "BAD_REQUEST";
 }
@@ -46,7 +50,14 @@ export function toAppError(error: unknown): AppError {
   if (isAppError(error)) {
     return error;
   }
-  const pgCode = (error as any)?.code || (error as any)?.cause?.code;
+  if (hasErrorCode(error) && error.code === "LIMIT_FILE_SIZE") {
+    return new BusinessError("FILE_TOO_LARGE");
+  }
+  const cause =
+    typeof error === "object" && error !== null && "cause" in error ? error.cause : undefined;
+  const pgCode =
+    (hasErrorCode(error) ? error.code : undefined) ??
+    (hasErrorCode(cause) ? cause.code : undefined);
   if (pgCode === "22P02") {
     return new BusinessError(
       "BAD_REQUEST",

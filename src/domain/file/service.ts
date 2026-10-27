@@ -32,6 +32,45 @@ const UPLOAD_RULES: Record<
   CHAT_FILE: { maxBytes: CHAT_MAX_FILE_BYTES },
 };
 
+function validateUpload(kind: PresignFileDto["kind"], size: number, mimeType: string) {
+  const rules = UPLOAD_RULES[kind];
+  if (size > rules.maxBytes) {
+    throw new BusinessError("FILE_TOO_LARGE", {
+      maxMb: String(Math.floor(rules.maxBytes / BYTES_PER_MB)),
+    });
+  }
+  if (rules.allowedMimes && !rules.allowedMimes.includes(mimeType)) {
+    throw new BusinessError("FILE_TYPE_NOT_ALLOWED", { mimeType });
+  }
+}
+
+function createObjectKey(
+  userId: string,
+  kind: PresignFileDto["kind"],
+  mimeType: string,
+  fileName: string,
+  conversationId?: string,
+): string {
+  let ext = MIME_EXTENSION_MAP[mimeType];
+  let sanitizedFileName = "";
+
+  if (fileName) {
+    const parts = fileName.split(".");
+    const candidateExt = parts.length > 1 ? parts.pop()?.toLowerCase() : undefined;
+    if (candidateExt && (DISALLOWED_FILE_EXTENSIONS as readonly string[]).includes(candidateExt)) {
+      throw new BusinessError("FILE_TYPE_NOT_ALLOWED", { mimeType });
+    }
+    if (!ext && candidateExt) ext = candidateExt;
+    sanitizedFileName = fileName.replace(/[^\w.-]/g, "_").slice(0, 100);
+  }
+
+  ext ??= "bin";
+  if (kind.startsWith("STORY_")) return `stories/${userId}/${uuidv7()}.${ext}`;
+  if (!conversationId) throw new BusinessError("BAD_REQUEST");
+  const prefix = `chat/${conversationId}/${userId}/${uuidv7()}`;
+  return sanitizedFileName ? `${prefix}-${sanitizedFileName}` : `${prefix}.${ext}`;
+}
+
 @Injectable()
 export class FileService {
   private readonly logger = new Logger(FileService.name);
@@ -39,48 +78,14 @@ export class FileService {
   constructor(@Inject(STORAGE_SERVICE) private readonly storage: StorageService) {}
 
   async presign(userId: string, dto: PresignFileDto): Promise<PresignFileResponse> {
-    const rules = UPLOAD_RULES[dto.kind];
-
-    if (dto.sizeBytes > rules.maxBytes) {
-      throw new BusinessError("FILE_TOO_LARGE", {
-        maxMb: String(Math.floor(rules.maxBytes / BYTES_PER_MB)),
-      });
-    }
-
-    if (rules.allowedMimes && !rules.allowedMimes.includes(dto.mimeType)) {
-      throw new BusinessError("FILE_TYPE_NOT_ALLOWED", { mimeType: dto.mimeType });
-    }
-
-    let ext = MIME_EXTENSION_MAP[dto.mimeType];
-    let sanitizedFileName = "";
-
-    if (dto.fileName) {
-      const parts = dto.fileName.split(".");
-      const candidateExt = parts.length > 1 ? parts.pop()?.toLowerCase() : undefined;
-      if (candidateExt && (DISALLOWED_FILE_EXTENSIONS as readonly string[]).includes(candidateExt)) {
-        throw new BusinessError("FILE_TYPE_NOT_ALLOWED", { mimeType: dto.mimeType });
-      }
-      if (!ext && candidateExt) {
-        ext = candidateExt;
-      }
-      sanitizedFileName = dto.fileName
-        .replace(/[^\w.-]/g, "_")
-        .slice(0, 100);
-    }
-
-    if (!ext) {
-      ext = "bin";
-    }
-
-    let objectKey: string;
-    if (dto.kind.startsWith("STORY_")) {
-      objectKey = `stories/${userId}/${uuidv7()}.${ext}`;
-    } else {
-      const scope = dto.conversationId ?? userId;
-      objectKey = sanitizedFileName
-        ? `chat/${scope}/${uuidv7()}-${sanitizedFileName}`
-        : `chat/${scope}/${uuidv7()}.${ext}`;
-    }
+    validateUpload(dto.kind, dto.sizeBytes, dto.mimeType);
+    const objectKey = createObjectKey(
+      userId,
+      dto.kind,
+      dto.mimeType,
+      dto.fileName ?? "",
+      dto.conversationId,
+    );
 
     try {
       const { uploadUrl } = await this.storage.presignPut({ objectKey, mimeType: dto.mimeType });
@@ -100,48 +105,14 @@ export class FileService {
     kind: PresignFileDto["kind"],
     conversationId?: string,
   ): Promise<{ objectKey: string }> {
-    const rules = UPLOAD_RULES[kind];
-
-    if (file.size > rules.maxBytes) {
-      throw new BusinessError("FILE_TOO_LARGE", {
-        maxMb: String(Math.floor(rules.maxBytes / BYTES_PER_MB)),
-      });
-    }
-
-    if (rules.allowedMimes && !rules.allowedMimes.includes(file.mimetype)) {
-      throw new BusinessError("FILE_TYPE_NOT_ALLOWED", { mimeType: file.mimetype });
-    }
-
-    let ext = MIME_EXTENSION_MAP[file.mimetype];
-    let sanitizedFileName = "";
-
-    if (file.originalname) {
-      const parts = file.originalname.split(".");
-      const candidateExt = parts.length > 1 ? parts.pop()?.toLowerCase() : undefined;
-      if (candidateExt && (DISALLOWED_FILE_EXTENSIONS as readonly string[]).includes(candidateExt)) {
-        throw new BusinessError("FILE_TYPE_NOT_ALLOWED", { mimeType: file.mimetype });
-      }
-      if (!ext && candidateExt) {
-        ext = candidateExt;
-      }
-      sanitizedFileName = file.originalname
-        .replace(/[^\w.-]/g, "_")
-        .slice(0, 100);
-    }
-
-    if (!ext) {
-      ext = "bin";
-    }
-
-    let objectKey: string;
-    if (kind.startsWith("STORY_")) {
-      objectKey = `stories/${userId}/${uuidv7()}.${ext}`;
-    } else {
-      const scope = conversationId ?? userId;
-      objectKey = sanitizedFileName
-        ? `chat/${scope}/${uuidv7()}-${sanitizedFileName}`
-        : `chat/${scope}/${uuidv7()}.${ext}`;
-    }
+    validateUpload(kind, file.size, file.mimetype);
+    const objectKey = createObjectKey(
+      userId,
+      kind,
+      file.mimetype,
+      file.originalname,
+      conversationId,
+    );
 
     try {
       await this.storage.putObject({

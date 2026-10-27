@@ -22,7 +22,7 @@
   "STORY_VIEWERS_FORBIDDEN": "Only the story owner can view the viewers list",
   "STORY_DELETE_FORBIDDEN": "You can only delete your own stories",
   "INVALID_MEDIA_TYPE": "Media story requires an objectKey",
-  "INVALID_OBJECT_KEY": "objectKey must be scoped to your stories folder",
+  "INVALID_OBJECT_KEY": "The file reference is invalid or outside its allowed scope",
   "TEXT_STORY_REQUIRES_CONTENT": "A text story requires a caption or background",
   "FILE_TOO_LARGE": "File exceeds the allowed limit ({maxMb}MB) — choose a file under {maxMb}MB",
   "FILE_TYPE_NOT_ALLOWED": "File type is not supported",

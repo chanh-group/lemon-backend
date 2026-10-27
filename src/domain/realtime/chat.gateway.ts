@@ -311,8 +311,7 @@ export class ChatGateway
           logger.log(
             `Presence offline deferred for ${userId}: another node may still heartbeat (ttl ${ttl}s)`,
           );
-          const retryDelayMs =
-            (ttl - PRESENCE_OTHER_NODE_TTL_SECONDS) * 1000 + 1000;
+          const retryDelayMs = (ttl - PRESENCE_OTHER_NODE_TTL_SECONDS) * 1000 + 1000;
           const timer = setTimeout(() => {
             void this.finalizeOffline(userId);
           }, retryDelayMs);

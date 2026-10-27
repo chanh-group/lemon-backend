@@ -466,13 +466,18 @@ describe("MessageService", () => {
         presignGet: vi.fn().mockImplementation(async (params: any) => ({
           downloadUrl: `https://r2.example/${params.disposition}/${params.objectKey}`,
         })),
-        headObject: vi.fn(),
+        headObject: vi
+          .fn()
+          .mockResolvedValue({ contentLength: 1024, contentType: "application/pdf" }),
         deleteObjects: vi.fn(),
       };
 
       const serviceWithStorage = new MessageService(
         { createMessageWithConversationUpdate: createMessageMock } as any,
-        { getParticipantUserIds: getParticipantUserIdsMock, findById: findConversationByIdMock } as any,
+        {
+          getParticipantUserIds: getParticipantUserIdsMock,
+          findById: findConversationByIdMock,
+        } as any,
         { assertCanChat: assertCanChatMock } as any,
         { emitNewMessage: emitNewMessageMock } as any,
         null,
@@ -482,7 +487,11 @@ describe("MessageService", () => {
       );
 
       getParticipantUserIdsMock.mockResolvedValue([userA, userB]);
-      findConversationByIdMock.mockResolvedValue({ id: convId, kind: "DIRECT", partner: { id: userB } });
+      findConversationByIdMock.mockResolvedValue({
+        id: convId,
+        kind: "DIRECT",
+        partner: { id: userB },
+      });
       assertCanChatMock.mockResolvedValue(true);
 
       const createdMsgWithAtt = {
@@ -495,7 +504,7 @@ describe("MessageService", () => {
             messageId: msgId,
             kind: "FILE" as const,
             bucket: "lemon-chat-storage",
-            objectKey: "chat/c1/report.pdf",
+            objectKey: `chat/${convId}/${userA}/report.pdf`,
             fileName: "Báo Cáo.pdf",
             mimeType: "application/pdf",
             sizeBytes: 1024,
@@ -513,7 +522,7 @@ describe("MessageService", () => {
         kind: "FILE",
         attachments: [
           {
-            objectKey: "chat/c1/report.pdf",
+            objectKey: `chat/${convId}/${userA}/report.pdf`,
             fileName: "Báo Cáo.pdf",
             mimeType: "application/pdf",
             sizeBytes: 1024,
@@ -523,8 +532,12 @@ describe("MessageService", () => {
 
       expect(res.id).toBe(msgId);
       expect(res.attachments).toHaveLength(1);
-      expect(res.attachments![0].previewUrl).toBe("https://r2.example/inline/chat/c1/report.pdf");
-      expect(res.attachments![0].downloadUrl).toBe("https://r2.example/attachment/chat/c1/report.pdf");
+      expect(res.attachments![0].previewUrl).toBe(
+        `https://r2.example/inline/chat/${convId}/${userA}/report.pdf`,
+      );
+      expect(res.attachments![0].downloadUrl).toBe(
+        `https://r2.example/attachment/chat/${convId}/${userA}/report.pdf`,
+      );
       expect(res.attachments![0].fileName).toBe("Báo Cáo.pdf");
     });
   });

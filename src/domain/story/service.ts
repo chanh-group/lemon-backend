@@ -5,7 +5,6 @@ import {
   STORY_FEED_TTL_SECS,
   STORY_MAX_IMAGE_BYTES,
   STORY_MAX_VIDEO_BYTES,
-  STORY_TTL_MS,
 } from "../../utils/cache/constants.js";
 import { CACHE_STORE, type CacheStoreExt } from "../../utils/cache/store.js";
 import { storyFeedKey } from "../../utils/cache/keys.js";
@@ -98,9 +97,6 @@ export class StoryService {
       throw new BusinessError("TEXT_STORY_REQUIRES_CONTENT");
     }
 
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + STORY_TTL_MS);
-
     const audienceMode = dto.audienceMode ?? "ALL_FRIENDS";
     let audienceUserIds: string[] | undefined = undefined;
 
@@ -114,7 +110,7 @@ export class StoryService {
       );
     }
 
-    const newStoryData: NewStory = {
+    const newStoryData: Omit<NewStory, "createdAt" | "expiresAt"> = {
       userId,
       kind: dto.kind,
       bucket,
@@ -128,8 +124,6 @@ export class StoryService {
       allowReplies: dto.allowReplies ?? true,
       allowReactions: dto.allowReactions ?? true,
       audienceMode,
-      createdAt: now,
-      expiresAt,
     };
 
     const created = await this.storyRepo.create(newStoryData, audienceUserIds);
@@ -549,7 +543,10 @@ export class StoryService {
   private async assertCanViewStory(
     story: Story,
     viewerId: string,
-    forbiddenCode: "STORY_VIEW_FORBIDDEN" | "STORY_REACT_FORBIDDEN" | "STORY_REPLY_FORBIDDEN" = "STORY_VIEW_FORBIDDEN",
+    forbiddenCode:
+      | "STORY_VIEW_FORBIDDEN"
+      | "STORY_REACT_FORBIDDEN"
+      | "STORY_REPLY_FORBIDDEN" = "STORY_VIEW_FORBIDDEN",
   ): Promise<void> {
     if (story.userId === viewerId) return;
 

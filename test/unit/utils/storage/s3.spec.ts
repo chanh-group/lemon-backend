@@ -259,7 +259,9 @@ describe("S3StorageService", () => {
     expect(command).toBeInstanceOf(GetObjectCommand);
     const downloadCmd = command as GetObjectCommand;
     expect(downloadCmd.input.ResponseContentDisposition).toContain("attachment;");
-    expect(downloadCmd.input.ResponseContentDisposition).toContain("filename*=UTF-8''B%C3%A1o%20c%C3%A1o%20Q4.pdf");
+    expect(downloadCmd.input.ResponseContentDisposition).toContain(
+      "filename*=UTF-8''B%C3%A1o%20c%C3%A1o%20Q4.pdf",
+    );
     expect(downloadCmd.input.ResponseContentType).toBe("application/pdf");
     expect(options.expiresIn).toBe(3600);
   });

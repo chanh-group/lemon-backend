@@ -72,10 +72,17 @@ export class PurgeJob {
     try {
       const rows = await this.storyRepo.findPurgeable(PURGE_BATCH_LIMIT);
       if (rows.length === 0) return { stories: 0, objects: 0 };
-      const media = rows.filter(
+      const archiveRows = rows.filter(
+        (row) => !row.archivedAt && !row.deletedAt && row.archiveEnabled,
+      );
+      const deleteRows = rows.filter((row) => !archiveRows.includes(row));
+      const archived = archiveRows.length
+        ? await this.storyRepo.archiveStories(archiveRows.map((row) => row.id))
+        : 0;
+      const media = deleteRows.filter(
         (row): row is PurgeableStory & { objectKey: string } => row.objectKey !== null,
       );
-      const textIds = rows.filter((row) => row.objectKey === null).map((row) => row.id);
+      const textIds = deleteRows.filter((row) => row.objectKey === null).map((row) => row.id);
       let deletedKeys = new Set<string>();
       if (media.length > 0) {
         try {
@@ -94,9 +101,8 @@ export class PurgeJob {
         .filter((row) => deletedKeys.has(row.objectKey))
         .map((row) => row.id);
       const ids = [...textIds, ...confirmedIds];
-      if (ids.length === 0) return { stories: 0, objects: 0 };
-      const stories = await this.storyRepo.archiveStories(ids);
-      return { stories, objects: confirmedIds.length };
+      const deleted = ids.length ? await this.storyRepo.deleteByIds(ids) : 0;
+      return { stories: archived + deleted, objects: confirmedIds.length };
     } catch (err) {
       this.logger.error("Purge story phase failed", { err });
       return { stories: 0, objects: 0 };

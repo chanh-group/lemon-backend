@@ -1,7 +1,10 @@
 import type { Story } from "../schema.js";
 import type { UserSummary } from "../../user/dto/response.js";
 import type { StoryReactionKind } from "../constants.js";
+import { isUuid } from "../../shared.js";
 import type { StoryItemResponse, StoryPreview, UserStoryFeedResponse } from "./response.js";
+
+export { isUuid } from "../../shared.js";
 
 export function toStoryPreview(story: Story): StoryPreview {
   return {
@@ -98,13 +101,6 @@ export function groupStoriesByUser(
   }
 
   return result;
-}
-
-export const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-export function isUuid(value: string): boolean {
-  return UUID_REGEX.test(value);
 }
 
 export function encodeReactionCursor(createdAt: Date, userId: string): string {

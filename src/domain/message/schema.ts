@@ -70,7 +70,7 @@ export const messages = pgTable(
       .on(table.conversationId, table.senderId, table.clientMsgId)
       .where(sql`${table.clientMsgId} IS NOT NULL`),
     index("messages_timeline_idx")
-      .on(table.conversationId, table.id.desc())
+      .on(table.conversationId, table.createdAt.desc(), table.id.desc())
       .where(sql`${table.deletedAt} IS NULL`),
     index("messages_sender_idx").on(table.senderId, table.id.desc()),
     index("messages_reply_idx").on(table.replyToId),

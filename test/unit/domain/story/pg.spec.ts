@@ -5,7 +5,12 @@ import type { DrizzleDb } from "../../../../src/configs/database.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
 import { StoryPgRepository } from "../../../../src/domain/story/pg.js";
 import { encodeReactionCursor } from "../../../../src/domain/story/dto/mapper.js";
-import { stories, storyReactions, storyViews } from "../../../../src/domain/story/schema.js";
+import {
+  stories,
+  storyReactions,
+  storyViews,
+  userStorySettings,
+} from "../../../../src/domain/story/schema.js";
 import { friendships } from "../../../../src/domain/friend/schema.js";
 
 function makeDb(rows: unknown[] = []) {
@@ -92,7 +97,16 @@ describe("StoryPgRepository purge queries", () => {
   describe("findPurgeable", () => {
     it("findPurgeable selects id and object_key with the batch limit", async () => {
       const { db, selectMock, whereMock, orderByMock, limitMock } = makeDb();
-      const rows = [{ id: "s1", objectKey: "k1", userId: "u1" }];
+      const rows = [
+        {
+          id: "s1",
+          objectKey: "k1",
+          userId: "u1",
+          archivedAt: null,
+          deletedAt: null,
+          archiveEnabled: true,
+        },
+      ];
       limitMock.mockResolvedValue(rows);
       const repo = new StoryPgRepository(db);
 
@@ -102,6 +116,9 @@ describe("StoryPgRepository purge queries", () => {
         id: stories.id,
         objectKey: stories.objectKey,
         userId: stories.userId,
+        archivedAt: stories.archivedAt,
+        deletedAt: stories.deletedAt,
+        archiveEnabled: userStorySettings.archiveEnabled,
       });
       expect(limitMock).toHaveBeenCalledWith(500);
       expect(result).toEqual(rows);
@@ -315,9 +332,9 @@ describe("StoryPgRepository purge queries", () => {
       const { db } = makeDb();
       const repo = new StoryPgRepository(db);
 
-      await expect(
-        repo.findReactionsByStoryId("s1", "not-a-valid-cursor", 20),
-      ).rejects.toThrow(BusinessError);
+      await expect(repo.findReactionsByStoryId("s1", "not-a-valid-cursor", 20)).rejects.toThrow(
+        BusinessError,
+      );
     });
 
     it("findUserReactions returns empty map when storyIds is empty", async () => {

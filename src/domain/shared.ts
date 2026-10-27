@@ -1,5 +1,12 @@
+import { z } from "zod";
 import { BusinessError } from "../utils/errors/business.js";
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "./pagination.constants.js";
+
+const uuidSchema = z.string().uuid();
+
+export function isUuid(value: string): boolean {
+  return uuidSchema.safeParse(value).success;
+}
 
 export interface CursorPage<T> {
   items: T[];
@@ -34,10 +41,9 @@ export function parseCursorPage(
   options?: { allowOpaque?: boolean },
 ): CursorPageInput {
   if (cursor !== undefined) {
-    const isUuid =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cursor);
+    const validUuid = isUuid(cursor);
     const isOpaque = options?.allowOpaque && /^[A-Za-z0-9_-]{10,128}$/.test(cursor);
-    if (!isUuid && !isOpaque) {
+    if (!validUuid && !isOpaque) {
       throw new BusinessError("BAD_REQUEST");
     }
   }

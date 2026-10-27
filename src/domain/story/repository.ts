@@ -8,7 +8,14 @@ import type { StoryReactionKind } from "./constants.js";
 import type { UserSummary } from "../user/dto/response.js";
 import type { CursorPage } from "../shared.js";
 
-export type PurgeableStory = { id: string; objectKey: string | null; userId: string };
+export type PurgeableStory = {
+  id: string;
+  objectKey: string | null;
+  userId: string;
+  archivedAt: Date | null;
+  deletedAt: Date | null;
+  archiveEnabled: boolean;
+};
 
 export interface StoryReactionResult {
   reaction: StoryReaction;
@@ -20,8 +27,16 @@ export interface UserReactionDetail {
   kind: StoryReactionKind;
 }
 
+export type UserStorySettingsValues = Pick<
+  UserStorySettings,
+  "userId" | "viewedReceiptsEnabled" | "archiveEnabled" | "archiveDurationSecs"
+>;
+
 export interface StoryRepository {
-  create(data: NewStory, audienceUserIds?: string[]): Promise<Story>;
+  create(
+    data: Omit<NewStory, "createdAt" | "expiresAt">,
+    audienceUserIds?: string[],
+  ): Promise<Story>;
   findById(id: string): Promise<Story | null>;
   findActiveById(id: string): Promise<Story | null>;
   findActiveByUserIds(userIds: string[], viewerId?: string): Promise<Story[]>;
@@ -58,7 +73,7 @@ export interface StoryRepository {
   countReactions(storyIds: string[]): Promise<Map<string, number>>;
 
   // Settings
-  getUserStorySettings(userId: string): Promise<UserStorySettings>;
+  getUserStorySettings(userId: string): Promise<UserStorySettingsValues>;
   upsertUserStorySettings(
     userId: string,
     data: {
@@ -66,7 +81,7 @@ export interface StoryRepository {
       archiveEnabled?: boolean;
       archiveDurationSecs?: number | null;
     },
-  ): Promise<UserStorySettings>;
+  ): Promise<UserStorySettingsValues>;
 
   // Audience
   findStoryAudienceUserIds(storyId: string): Promise<string[]>;
