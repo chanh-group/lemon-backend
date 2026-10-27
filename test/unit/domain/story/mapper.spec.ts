@@ -107,11 +107,10 @@ describe("groupStoriesByUser", () => {
     expect(feed[0].stories.map((s) => s.id)).toEqual(["old", "new"]);
   });
 
-  it("falls back to a placeholder profile for unknown users", () => {
+  it("omits stories whose author is no longer available", () => {
     const feed = groupStoriesByUser(users, [makeStory({ id: "s9", userId: "ghost" })], new Set());
 
-    expect(feed[0].user.id).toBe("ghost");
-    expect(feed[0].stories).toHaveLength(1);
+    expect(feed).toEqual([]);
   });
 
   it("populates myReaction from the lookup map and leaves the global count out", () => {

@@ -86,12 +86,8 @@ export function groupStoriesByUser(
 
   const result: UserStoryFeedResponse[] = [];
   for (const [userId, userStories] of userStoriesMap.entries()) {
-    const user = usersMap.get(userId) ?? {
-      id: userId,
-      username: "user",
-      fullName: "User",
-      avatarUrl: null,
-    };
+    const user = usersMap.get(userId);
+    if (!user) continue;
     // Sort chronological: oldest to newest for viewing experience
     userStories.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
     result.push({
