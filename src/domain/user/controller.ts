@@ -18,7 +18,9 @@ export class UserController {
     @Query("cursor") cursor?: string,
     @Query("limit") limit?: string,
   ) {
-    const page = parseCursorPage(cursor, limit);
+    const page = parseCursorPage(cursor, limit, undefined, undefined, {
+      allowOpaque: field === "username",
+    });
     const value = query?.trim() ?? "";
     if (value.length < USER_SEARCH_MIN_LENGTH || value.length > USER_SEARCH_MAX_LENGTH) {
       return { items: [], hasMore: false };
