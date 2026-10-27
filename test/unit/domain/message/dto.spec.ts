@@ -84,11 +84,12 @@ describe("Message DTOs", () => {
       ).toEqual(["VALIDATION_BODY_MAX|max=4000"]);
     });
 
-    it("accepts IMAGE or FILE kind without body", () => {
+    it("requires attachments for media messages and rejects SYSTEM", () => {
       const result = sendMessageSchema.safeParse({
         kind: "IMAGE",
       });
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
+      expect(sendMessageSchema.safeParse({ kind: "SYSTEM", body: "spoofed" }).success).toBe(false);
     });
 
     it("strips client-supplied storyId and storyPreview from the parsed payload", () => {

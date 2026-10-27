@@ -98,6 +98,15 @@ export class MessageService {
       throw new BusinessError("BAD_REQUEST");
     }
 
+    if (dto.kind !== "TEXT") {
+      if (!hasAttachments || (dto.body && dto.body.trim().length > 0)) {
+        throw new BusinessError("BAD_REQUEST");
+      }
+      if (dto.attachments?.some((attachment) => attachment.kind && attachment.kind !== dto.kind)) {
+        throw new BusinessError("BAD_REQUEST");
+      }
+    }
+
     const attachments = dto.attachments;
     if (attachments?.length) {
       const storage = this.storage;

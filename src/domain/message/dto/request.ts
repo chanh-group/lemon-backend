@@ -25,7 +25,7 @@ export const sendMessageSchema = z
         vmsg("VALIDATION_BODY_MAX", { max: String(MESSAGE_MAX_BODY_LENGTH) }),
       )
       .optional(),
-    kind: z.enum(["TEXT", "IMAGE", "VIDEO", "AUDIO", "FILE", "SYSTEM"]).default("TEXT"),
+    kind: z.enum(["TEXT", "IMAGE", "VIDEO", "AUDIO", "FILE"]).default("TEXT"),
     clientMsgId: z.string().uuid(vmsg("VALIDATION_UUID_CLIENT_MSG")).optional(),
     replyToId: z.string().uuid(vmsg("VALIDATION_UUID_REPLY_TO")).optional(),
     attachments: z.array(messageAttachmentInputSchema).max(10).optional(),
@@ -36,7 +36,7 @@ export const sendMessageSchema = z
       if (data.kind === "TEXT" && !hasAttachments) {
         return typeof data.body === "string" && data.body.trim().length > 0;
       }
-      return true;
+      return data.kind === "TEXT" || (hasAttachments && !data.body?.trim());
     },
     { message: vmsg("VALIDATION_MESSAGE_BODY_REQUIRED"), path: ["body"] },
   );
