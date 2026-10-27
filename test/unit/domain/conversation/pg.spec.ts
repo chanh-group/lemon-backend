@@ -67,6 +67,15 @@ function makeCountUnreadChain() {
   return { selectMock, fromMock, innerJoinMock, whereMock };
 }
 
+function makeUpdateChain() {
+  const whereMock = vi.fn<(condition: SQL) => Promise<unknown>>().mockResolvedValue([]);
+  const setMock = vi.fn<(values: unknown) => unknown>(() => ({ where: whereMock }));
+  const updateMock = vi.fn<(table: unknown) => unknown>(() => ({ set: setMock }));
+  const db = { update: updateMock } as unknown as DrizzleDb;
+
+  return { db, updateMock, setMock, whereMock };
+}
+
 const dialect = new PgDialect();
 const render = (condition: SQL) => dialect.sqlToQuery(condition);
 
@@ -253,9 +262,9 @@ describe("ConversationPgRepository.countUnread", () => {
     expect(where.sql).toContain('"messages"."deleted_at" is null');
     expect(where.sql).toContain('"messages"."sender_id" <>');
     expect(where.sql).toContain('"conversation_participants"."last_read_message_id" is null');
-    expect(where.sql).toContain(
-      '"messages"."id" > "conversation_participants"."last_read_message_id"',
-    );
+    expect(where.sql).toContain('("messages"."created_at", "messages"."id") >');
+    expect(where.sql).toContain("SELECT m.created_at, m.id");
+    expect(where.sql).toContain('m.id = "conversation_participants"."last_read_message_id"');
     expect(where.params).toEqual([convRow.id, userAId]);
   });
 
@@ -275,6 +284,24 @@ describe("ConversationPgRepository.countUnread", () => {
     const repo = new ConversationPgRepository(db);
 
     await expect(repo.countUnread(convRow.id, userAId)).resolves.toBe(0);
+  });
+});
+
+describe("ConversationPgRepository.updateLastRead", () => {
+  it("only advances the read marker using message creation time and ID", async () => {
+    const chain = makeUpdateChain();
+    const repo = new ConversationPgRepository(chain.db);
+
+    await repo.updateLastRead(convRow.id, userAId, "0193a2b1-0000-7000-8000-000000000099");
+
+    expect(chain.updateMock).toHaveBeenCalledWith(conversationParticipants);
+    const values = chain.setMock.mock.calls[0][0] as { lastReadAt: SQL };
+    expect(render(values.lastReadAt).sql).toBe("now()");
+    const where = render(chain.whereMock.mock.calls[0][0]);
+    expect(where.sql).toContain('"conversation_participants"."last_read_message_id" IS NULL');
+    expect(where.sql).toContain("SELECT m.created_at, m.id FROM messages m");
+    expect(where.sql).toMatch(/m\.id = \$3\)\s*>\s*\(SELECT/);
+    expect(where.sql).toContain('m.id = "conversation_participants"."last_read_message_id")');
   });
 });
 

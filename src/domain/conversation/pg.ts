@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
@@ -320,12 +320,17 @@ export class ConversationPgRepository implements ConversationRepository {
       .update(conversationParticipants)
       .set({
         lastReadMessageId: messageId,
-        lastReadAt: new Date(),
+        lastReadAt: sql`now()`,
       })
       .where(
         and(
           eq(conversationParticipants.conversationId, conversationId),
           eq(conversationParticipants.userId, userId),
+          sql`(
+            ${conversationParticipants.lastReadMessageId} IS NULL
+            OR (SELECT m.created_at, m.id FROM messages m WHERE m.id = ${messageId})
+              > (SELECT m.created_at, m.id FROM messages m WHERE m.id = ${conversationParticipants.lastReadMessageId})
+          )`,
         ),
       );
   }
@@ -348,7 +353,11 @@ export class ConversationPgRepository implements ConversationRepository {
           ne(messages.senderId, userId),
           or(
             isNull(conversationParticipants.lastReadMessageId),
-            gt(messages.id, conversationParticipants.lastReadMessageId),
+            sql`(${messages.createdAt}, ${messages.id}) > (
+              SELECT m.created_at, m.id
+              FROM messages m
+              WHERE m.id = ${conversationParticipants.lastReadMessageId}
+            )`,
           ),
         ),
       );
@@ -382,7 +391,11 @@ export class ConversationPgRepository implements ConversationRepository {
           ne(messages.senderId, userId),
           or(
             isNull(conversationParticipants.lastReadMessageId),
-            gt(messages.id, conversationParticipants.lastReadMessageId),
+            sql`(${messages.createdAt}, ${messages.id}) > (
+              SELECT m.created_at, m.id
+              FROM messages m
+              WHERE m.id = ${conversationParticipants.lastReadMessageId}
+            )`,
           ),
         ),
       )
