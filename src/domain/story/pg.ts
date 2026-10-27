@@ -226,7 +226,7 @@ export class StoryPgRepository implements StoryRepository {
       this.db
         .select({ total: sql<number>`count(*)::int` })
         .from(storyViews)
-        .where(eq(storyViews.storyId, storyId)),
+        .where(and(...conditions)),
     ]);
 
     const totalViewsCount = Number(countResult[0]?.total ?? 0);
@@ -263,7 +263,13 @@ export class StoryPgRepository implements StoryRepository {
   }
 
   async markAsViewed(storyId: string, userId: string, anonymous: boolean = false): Promise<void> {
-    await this.db.insert(storyViews).values({ storyId, userId, anonymous }).onConflictDoNothing();
+    await this.db
+      .insert(storyViews)
+      .values({ storyId, userId, anonymous })
+      .onConflictDoUpdate({
+        target: [storyViews.storyId, storyViews.userId],
+        set: { anonymous, viewedAt: sql`now()` },
+      });
   }
 
   async markDeleted(id: string): Promise<boolean> {
