@@ -45,7 +45,7 @@ import {
 } from "./schema.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { STORY_TTL_MS } from "../../utils/cache/constants.js";
-import { isUuid, toCursorPage, type CursorPage } from "../shared.js";
+import { canonicalPair, isUuid, toCursorPage, type CursorPage } from "../shared.js";
 import { decodeReactionCursor, encodeReactionCursor, toStoryItemResponse } from "./dto/mapper.js";
 
 @Injectable()
@@ -299,7 +299,7 @@ export class StoryPgRepository implements StoryRepository {
   }
 
   async isAcceptedFriend(userAId: string, userBId: string): Promise<boolean> {
-    const [userLow, userHigh] = userAId < userBId ? [userAId, userBId] : [userBId, userAId];
+    const [userLow, userHigh] = canonicalPair(userAId, userBId);
     const [relation] = await this.db
       .select({ id: friendships.id })
       .from(friendships)
