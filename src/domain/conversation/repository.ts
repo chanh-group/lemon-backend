@@ -10,6 +10,7 @@ export interface ConversationWithPartner {
     isOnline?: boolean;
   };
   lastMessagePreview: string | null;
+  lastMessageSenderId?: string | null;
   lastMessageAt: Date | null;
   unreadCount?: number;
   lastReadMessageId?: string | null;

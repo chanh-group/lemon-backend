@@ -11,6 +11,7 @@ export interface ConversationResponse {
   kind: "DIRECT" | "GROUP";
   partner?: ConversationPartnerResponse;
   lastMessagePreview: string | null;
+  lastMessageSenderId?: string | null;
   lastMessageAt: Date | null;
   unreadCount: number;
   createdAt: Date;

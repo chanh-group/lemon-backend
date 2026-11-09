@@ -34,6 +34,7 @@ export class ConversationPgRepository implements ConversationRepository {
         kind: conversations.kind,
         directKey: conversations.directKey,
         lastMessagePreview: conversations.lastMessagePreview,
+        lastMessageSenderId: messages.senderId,
         lastMessageAt: conversations.lastMessageAt,
         createdAt: conversations.createdAt,
         partner: {
@@ -45,6 +46,7 @@ export class ConversationPgRepository implements ConversationRepository {
       })
       .from(conversations)
       .innerJoin(users, eq(users.id, userBId))
+      .leftJoin(messages, eq(conversations.lastMessageId, messages.id))
       .where(and(eq(conversations.directKey, directKey), isNull(conversations.deletedAt)))
       .limit(1);
 
@@ -68,6 +70,7 @@ export class ConversationPgRepository implements ConversationRepository {
         let convId: string;
         let createdAt: Date;
         let lastMessagePreview: string | null = null;
+        let lastMessageSenderId: string | null = null;
         let lastMessageAt: Date | null = null;
 
         if (existingConv) {
@@ -75,6 +78,14 @@ export class ConversationPgRepository implements ConversationRepository {
           createdAt = existingConv.createdAt;
           lastMessagePreview = existingConv.lastMessagePreview;
           lastMessageAt = existingConv.lastMessageAt;
+          if (existingConv.lastMessageId) {
+            const [lastMsg] = await tx
+              .select({ senderId: messages.senderId })
+              .from(messages)
+              .where(eq(messages.id, existingConv.lastMessageId))
+              .limit(1);
+            lastMessageSenderId = lastMsg?.senderId ?? null;
+          }
         } else {
           const [newConv] = await tx
             .insert(conversations)
@@ -113,6 +124,7 @@ export class ConversationPgRepository implements ConversationRepository {
           kind: "DIRECT",
           directKey,
           lastMessagePreview,
+          lastMessageSenderId,
           lastMessageAt,
           createdAt,
           partner,
@@ -158,12 +170,14 @@ export class ConversationPgRepository implements ConversationRepository {
         kind: conversations.kind,
         directKey: conversations.directKey,
         lastMessagePreview: conversations.lastMessagePreview,
+        lastMessageSenderId: messages.senderId,
         lastMessageAt: conversations.lastMessageAt,
         createdAt: conversations.createdAt,
         lastReadMessageId: conversationParticipants.lastReadMessageId,
       })
       .from(conversationParticipants)
       .innerJoin(conversations, eq(conversationParticipants.conversationId, conversations.id))
+      .leftJoin(messages, eq(conversations.lastMessageId, messages.id))
       .where(and(...conditions))
       .orderBy(desc(activityOrder), desc(conversations.id))
       .limit(limit + 1);
@@ -214,6 +228,7 @@ export class ConversationPgRepository implements ConversationRepository {
         kind: conversations.kind,
         directKey: conversations.directKey,
         lastMessagePreview: conversations.lastMessagePreview,
+        lastMessageSenderId: messages.senderId,
         lastMessageAt: conversations.lastMessageAt,
         createdAt: conversations.createdAt,
         lastReadMessageId: conversationParticipants.lastReadMessageId,
@@ -240,6 +255,7 @@ export class ConversationPgRepository implements ConversationRepository {
         ),
       )
       .leftJoin(users, eq(partnerParticipants.userId, users.id))
+      .leftJoin(messages, eq(conversations.lastMessageId, messages.id))
       .where(and(eq(conversations.id, conversationId), isNull(conversations.deletedAt)))
       .limit(1);
 
@@ -250,6 +266,7 @@ export class ConversationPgRepository implements ConversationRepository {
       kind: row.kind,
       directKey: row.directKey,
       lastMessagePreview: row.lastMessagePreview,
+      lastMessageSenderId: row.lastMessageSenderId,
       lastMessageAt: row.lastMessageAt,
       createdAt: row.createdAt,
       partner:

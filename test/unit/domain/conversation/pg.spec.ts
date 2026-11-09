@@ -190,6 +190,7 @@ describe("ConversationPgRepository.createDirectConversation", () => {
       kind: "DIRECT",
       directKey,
       lastMessagePreview: null,
+      lastMessageSenderId: null,
       lastMessageAt: null,
       createdAt: newConvRow.createdAt,
       partner: partnerRow,

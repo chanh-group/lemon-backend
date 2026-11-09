@@ -40,12 +40,18 @@ describe("toConversationResponse", () => {
         isOnline: true,
       },
       lastMessagePreview: "Hello",
+      lastMessageSenderId: null,
       lastMessageAt: new Date("2026-10-18T10:00:00Z"),
       unreadCount: 5,
       createdAt: new Date("2026-10-18T09:00:00Z"),
     });
     expect(dto).not.toHaveProperty("directKey");
     expect(dto).not.toHaveProperty("lastReadMessageId");
+  });
+
+  it("maps lastMessageSenderId when present", () => {
+    const dto = toConversationResponse(makeConversation({ lastMessageSenderId: "u2" }));
+    expect(dto.lastMessageSenderId).toBe("u2");
   });
 
   it("defaults unreadCount to 0 when missing", () => {

@@ -15,6 +15,7 @@ export function toConversationResponse(conv: ConversationWithPartner): Conversat
       },
     }),
     lastMessagePreview: conv.lastMessagePreview,
+    lastMessageSenderId: conv.lastMessageSenderId ?? null,
     lastMessageAt: conv.lastMessageAt,
     unreadCount: conv.unreadCount ?? 0,
     createdAt: conv.createdAt,
