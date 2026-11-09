@@ -4,7 +4,7 @@ import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-or
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../utils/errors/pg.js";
-import { conversations } from "../conversation/schema.js";
+import { conversations, conversationParticipants } from "../conversation/schema.js";
 import { friendships } from "../friend/schema.js";
 import { DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE } from "../pagination.constants.js";
 import {
@@ -20,7 +20,16 @@ import type {
   MessageWithAttachments,
 } from "./repository.js";
 import type { StoryPreview } from "../story/types.js";
-import { type Message, type MessageAttachment, messageAttachments, messages } from "./schema.js";
+import {
+  type Message,
+  type MessageAttachment,
+  type MessageReaction,
+  messageAttachments,
+  messageReactions,
+  messages,
+} from "./schema.js";
+import { groupReactions } from "./dto/mapper.js";
+import type { MessageReactionSummary } from "./dto/response.js";
 
 /**
  * Conversation inbox preview. A story reaction carries the emoji as its body,
@@ -74,6 +83,7 @@ export class MessagePgRepository implements MessageRepository {
     storyId?: string | null;
     storyPreview?: StoryPreview | null;
     attachments?: AttachmentInsertData[];
+    isForwarded?: boolean;
   }): Promise<CreatedMessageResult> {
     try {
       return await this.db.transaction(async (tx) => {
@@ -130,6 +140,7 @@ export class MessagePgRepository implements MessageRepository {
             replyToId: messageData.replyToId ?? null,
             storyId: messageData.storyId ?? null,
             storyPreview: messageData.storyPreview ?? null,
+            isForwarded: messageData.isForwarded ?? false,
           })
           .returning();
 
@@ -260,10 +271,16 @@ export class MessagePgRepository implements MessageRepository {
     }
 
     const messageIds = items.map((m) => m.id);
-    const attachmentRows = await this.db
-      .select()
-      .from(messageAttachments)
-      .where(inArray(messageAttachments.messageId, messageIds));
+    const [attachmentRows, reactionRows] = await Promise.all([
+      this.db
+        .select()
+        .from(messageAttachments)
+        .where(inArray(messageAttachments.messageId, messageIds)),
+      this.db
+        .select()
+        .from(messageReactions)
+        .where(inArray(messageReactions.messageId, messageIds)),
+    ]);
 
     const attachmentsByMessageId = new Map<string, MessageAttachment[]>();
     for (const att of attachmentRows) {
@@ -272,9 +289,17 @@ export class MessagePgRepository implements MessageRepository {
       attachmentsByMessageId.set(att.messageId, list);
     }
 
+    const reactionsByMessageId = new Map<string, MessageReaction[]>();
+    for (const r of reactionRows) {
+      const list = reactionsByMessageId.get(r.messageId) ?? [];
+      list.push(r);
+      reactionsByMessageId.set(r.messageId, list);
+    }
+
     const itemsWithAttachments = items.map((m) => ({
       ...m,
       attachments: attachmentsByMessageId.get(m.id) ?? [],
+      reactions: reactionsByMessageId.get(m.id) ?? [],
     }));
 
     return {
@@ -287,11 +312,17 @@ export class MessagePgRepository implements MessageRepository {
   async findById(messageId: string): Promise<MessageWithAttachments | null> {
     const [msg] = await this.db.select().from(messages).where(eq(messages.id, messageId)).limit(1);
     if (!msg) return null;
-    const attachments = await this.db
-      .select()
-      .from(messageAttachments)
-      .where(eq(messageAttachments.messageId, messageId));
-    return { ...msg, attachments };
+    const [attachments, reactions] = await Promise.all([
+      this.db
+        .select()
+        .from(messageAttachments)
+        .where(eq(messageAttachments.messageId, messageId)),
+      this.db
+        .select()
+        .from(messageReactions)
+        .where(eq(messageReactions.messageId, messageId)),
+    ]);
+    return { ...msg, attachments, reactions };
   }
 
   async resolveWriteMiss(
@@ -385,5 +416,88 @@ export class MessagePgRepository implements MessageRepository {
 
       return deleted;
     });
+  }
+
+  async reactMessage(
+    userId: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<{ reactions: MessageReactionSummary[]; conversationId: string }> {
+    const [msg] = await this.db
+      .select({
+        id: messages.id,
+        conversationId: messages.conversationId,
+        deletedAt: messages.deletedAt,
+      })
+      .from(messages)
+      .where(eq(messages.id, messageId))
+      .limit(1);
+
+    if (!msg || msg.deletedAt) {
+      throw new BusinessError("MESSAGE_NOT_FOUND");
+    }
+
+    const [participant] = await this.db
+      .select({ userId: conversationParticipants.userId })
+      .from(conversationParticipants)
+      .where(
+        and(
+          eq(conversationParticipants.conversationId, msg.conversationId),
+          eq(conversationParticipants.userId, userId),
+          isNull(conversationParticipants.leftAt),
+        ),
+      )
+      .limit(1);
+
+    if (!participant) {
+      throw new BusinessError("NOT_PARTICIPANT");
+    }
+
+    const [existing] = await this.db
+      .select()
+      .from(messageReactions)
+      .where(
+        and(
+          eq(messageReactions.messageId, messageId),
+          eq(messageReactions.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    if (existing && existing.emoji === emoji) {
+      await this.db
+        .delete(messageReactions)
+        .where(
+          and(
+            eq(messageReactions.messageId, messageId),
+            eq(messageReactions.userId, userId),
+          ),
+        );
+    } else {
+      await this.db
+        .insert(messageReactions)
+        .values({
+          messageId,
+          userId,
+          emoji,
+        })
+        .onConflictDoUpdate({
+          target: [messageReactions.messageId, messageReactions.userId],
+          set: {
+            emoji,
+            createdAt: sql`now()`,
+          },
+        });
+    }
+
+    const allReactions = await this.db
+      .select({ emoji: messageReactions.emoji, userId: messageReactions.userId })
+      .from(messageReactions)
+      .where(eq(messageReactions.messageId, messageId));
+
+    return {
+      reactions: groupReactions(allReactions) ?? [],
+      conversationId: msg.conversationId,
+    };
   }
 }

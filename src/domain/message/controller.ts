@@ -33,6 +33,8 @@ import { DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE } from "../pagination.
 import {
   editMessageSchema,
   type EditMessageDto,
+  reactMessageSchema,
+  type ReactMessageDto,
   sendMessageSchema,
   type SendMessageDto,
 } from "./dto/request.js";
@@ -114,5 +116,16 @@ export class MessageController {
     const { id: userId }: AuthUser = getAuthUser(req);
     const data = await this.messageService.revokeMessage(userId, messageId);
     return withMessage(data, t("MESSAGE_DELETED", lang));
+  }
+
+  @Post("messages/:id/react")
+  async reactMessage(
+    @Req() req: { user?: unknown },
+    @Param("id", ParseUUIDPipe) messageId: string,
+    @Body({ schema: reactMessageSchema }) dto: ReactMessageDto,
+  ) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    const data = await this.messageService.reactToMessage(userId, messageId, dto.emoji);
+    return ok(data);
   }
 }

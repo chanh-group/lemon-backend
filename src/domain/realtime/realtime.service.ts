@@ -1,6 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import type { UserSummary } from "../user/dto/response.js";
-import type { MessageResponse } from "../message/dto/response.js";
+import type { MessageReactionSummary, MessageResponse } from "../message/dto/response.js";
 import { ChatGateway } from "./chat.gateway.js";
 import { convRoom, userRoom } from "./rooms.js";
 
@@ -76,6 +76,29 @@ export class RealtimeService {
       });
     } catch (err) {
       logger.warn(`Failed to emit read:updated: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Broadcast message reaction update to conversation room
+   */
+  emitMessageReaction(
+    conversationId: string,
+    payload: {
+      messageId: string;
+      userId: string;
+      emoji: string;
+      reactions: MessageReactionSummary[];
+    },
+  ): void {
+    if (!this.gateway?.server) return;
+    try {
+      this.gateway.server.to(convRoom(conversationId)).emit("message:reaction", {
+        ...payload,
+        conversationId,
+      });
+    } catch (err) {
+      logger.warn(`Failed to emit message:reaction for conv ${conversationId}: ${String(err)}`);
     }
   }
 

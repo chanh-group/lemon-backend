@@ -3,6 +3,7 @@ import type { MessageAttachment } from "../schema.js";
 import type { StorageService } from "../../../utils/storage/store.js";
 import type {
   MessageAttachmentResponse,
+  MessageReactionSummary,
   MessageResponse,
   MessageTimelineResponse,
 } from "./response.js";
@@ -74,10 +75,28 @@ export async function mapAttachmentsToResponse(
   );
 }
 
+export function groupReactions(
+  reactions?: { emoji: string; userId: string }[],
+): MessageReactionSummary[] | undefined {
+  if (!reactions || reactions.length === 0) return undefined;
+  const map = new Map<string, string[]>();
+  for (const r of reactions) {
+    const list = map.get(r.emoji) ?? [];
+    list.push(r.userId);
+    map.set(r.emoji, list);
+  }
+  return Array.from(map.entries()).map(([emoji, userIds]) => ({
+    emoji,
+    count: userIds.length,
+    userIds,
+  }));
+}
+
 export function toMessageResponse(
   message: MessageWithAttachments,
   attachments?: MessageAttachmentResponse[],
 ): MessageResponse {
+  const reactions = groupReactions(message.reactions);
   return {
     id: message.id,
     conversationId: message.conversationId,
@@ -88,6 +107,8 @@ export function toMessageResponse(
     storyId: message.storyId ?? null,
     storyPreview: message.storyPreview ?? null,
     ...(attachments && { attachments }),
+    ...(reactions && { reactions }),
+    ...(message.isForwarded && { isForwarded: true }),
     createdAt: message.createdAt,
     editedAt: message.editedAt,
     deletedAt: message.deletedAt,

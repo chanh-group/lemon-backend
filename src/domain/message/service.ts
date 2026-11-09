@@ -11,7 +11,11 @@ import type { Redis } from "ioredis";
 import { UNREAD_TTL_SECONDS } from "../../utils/cache/constants.js";
 import { unreadCountKey } from "../../utils/cache/keys.js";
 import type { SendMessageDto } from "./dto/request.js";
-import type { MessageResponse, MessageTimelineResponse } from "./dto/response.js";
+import type {
+  MessageReactionSummary,
+  MessageResponse,
+  MessageTimelineResponse,
+} from "./dto/response.js";
 import { toMessageResponseAsync, toMessageTimelineAsync } from "./dto/mapper.js";
 import { FriendService } from "../friend/service.js";
 import { SystemError } from "../../utils/errors/system.js";
@@ -118,7 +122,10 @@ export class MessageService {
               maxMb: String(Math.floor(CHAT_MAX_FILE_BYTES / (1024 * 1024))),
             });
           }
-          if (!attachment.objectKey.startsWith(`chat/${conversationId}/${senderId}/`)) {
+          const isValidKey = dto.isForwarded
+            ? attachment.objectKey.startsWith("chat/")
+            : attachment.objectKey.startsWith(`chat/${conversationId}/${senderId}/`);
+          if (!isValidKey) {
             throw new BusinessError("INVALID_OBJECT_KEY");
           }
           const object = await storage.headObject(attachment.objectKey);
@@ -171,6 +178,7 @@ export class MessageService {
       clientMsgId: dto.clientMsgId,
       replyToId: dto.replyToId,
       attachments: attachmentsToInsert,
+      isForwarded: dto.isForwarded,
       ...(directPartnerId
         ? { requiredFriendship: { userAId: senderId, userBId: directPartnerId } }
         : {}),
@@ -318,6 +326,25 @@ export class MessageService {
       deletedAt: response.deletedAt!,
     });
     return response;
+  }
+
+  async reactToMessage(
+    userId: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<{ messageId: string; reactions: MessageReactionSummary[] }> {
+    const { reactions, conversationId } = await this.messageRepo.reactMessage(
+      userId,
+      messageId,
+      emoji,
+    );
+    this.realtimeService.emitMessageReaction(conversationId, {
+      messageId,
+      userId,
+      emoji,
+      reactions,
+    });
+    return { messageId, reactions };
   }
 
   private async resolveWriteMiss(

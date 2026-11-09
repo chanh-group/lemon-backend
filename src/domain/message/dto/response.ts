@@ -14,6 +14,12 @@ export interface MessageAttachmentResponse {
   downloadUrl: string;
 }
 
+export interface MessageReactionSummary {
+  emoji: string;
+  count: number;
+  userIds: string[];
+}
+
 export interface MessageResponse {
   id: string;
   conversationId: string;
@@ -24,6 +30,8 @@ export interface MessageResponse {
   storyId?: string | null;
   storyPreview?: StoryPreview | null;
   attachments?: MessageAttachmentResponse[];
+  reactions?: MessageReactionSummary[];
+  isForwarded?: boolean;
   createdAt: Date;
   editedAt: Date | null;
   deletedAt: Date | null;

@@ -1,8 +1,10 @@
 import type { StoryPreview } from "../story/types.js";
-import type { Message, MessageAttachment, MessageKind } from "./schema.js";
+import type { Message, MessageAttachment, MessageKind, MessageReaction } from "./schema.js";
+import type { MessageReactionSummary } from "./dto/response.js";
 
 export type MessageWithAttachments = Message & {
   attachments?: MessageAttachment[];
+  reactions?: MessageReaction[];
 };
 
 export interface AttachmentInsertData {
@@ -46,6 +48,7 @@ export interface MessageRepository {
     storyId?: string | null;
     storyPreview?: StoryPreview | null;
     attachments?: AttachmentInsertData[];
+    isForwarded?: boolean;
   }): Promise<CreatedMessageResult>;
   findTimeline(
     conversationId: string,
@@ -65,6 +68,11 @@ export interface MessageRepository {
     body: string,
   ): Promise<MessageWithAttachments | null>;
   softDelete(messageId: string, senderId: string): Promise<MessageWithAttachments | null>;
+  reactMessage(
+    userId: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<{ reactions: MessageReactionSummary[]; conversationId: string }>;
 }
 
 export const MESSAGE_REPOSITORY = Symbol("MESSAGE_REPOSITORY");

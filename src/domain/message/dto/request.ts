@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { vmsg } from "../../../utils/validation.js";
-import { MESSAGE_MAX_BODY_LENGTH } from "../constants.js";
+import { ALLOWED_MESSAGE_REACTIONS, MESSAGE_MAX_BODY_LENGTH } from "../constants.js";
 
 export const messageAttachmentInputSchema = z.object({
   objectKey: z.string().min(1).max(512),
@@ -29,6 +29,7 @@ export const sendMessageSchema = z
     clientMsgId: z.string().uuid(vmsg("VALIDATION_UUID_CLIENT_MSG")).optional(),
     replyToId: z.string().uuid(vmsg("VALIDATION_UUID_REPLY_TO")).optional(),
     attachments: z.array(messageAttachmentInputSchema).max(10).optional(),
+    isForwarded: z.boolean().optional(),
   })
   .refine(
     (data) => {
@@ -54,3 +55,9 @@ export const editMessageSchema = z.object({
 });
 
 export type EditMessageDto = z.infer<typeof editMessageSchema>;
+
+export const reactMessageSchema = z.object({
+  emoji: z.enum(ALLOWED_MESSAGE_REACTIONS),
+});
+
+export type ReactMessageDto = z.infer<typeof reactMessageSchema>;
