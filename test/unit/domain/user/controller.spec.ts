@@ -149,10 +149,7 @@ describe("UserController", () => {
         updatedAt: new Date("2026-01-02T00:00:00Z"),
       });
 
-      const res = await controller.updateProfile(
-        { id: mockUser.id },
-        { avatarUrl: null },
-      );
+      const res = await controller.updateProfile({ id: mockUser.id }, { avatarUrl: null });
 
       expect(updateProfile).toHaveBeenCalledWith(mockUser.id, { avatarUrl: null });
       expect(res.data?.avatarUrl).toBeNull();
@@ -173,10 +170,7 @@ describe("UserController", () => {
         updatedAt: new Date("2026-01-02T00:00:00Z"),
       });
 
-      const res = await controller.updateProfile(
-        { id: mockUser.id },
-        { bio: "Only new bio" },
-      );
+      const res = await controller.updateProfile({ id: mockUser.id }, { bio: "Only new bio" });
 
       expect(updateProfile).toHaveBeenCalledWith(mockUser.id, { bio: "Only new bio" });
       expect(res.data?.bio).toBe("Only new bio");

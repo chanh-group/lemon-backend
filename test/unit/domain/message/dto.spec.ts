@@ -162,7 +162,9 @@ describe("Message DTOs", () => {
         sendMessageSchema.safeParse({
           isForwarded: true,
           kind: "IMAGE",
-          attachments: [{ objectKey: "chat/other/key", fileName: "a.png", mimeType: "image/png", sizeBytes: 1 }],
+          attachments: [
+            { objectKey: "chat/other/key", fileName: "a.png", mimeType: "image/png", sizeBytes: 1 },
+          ],
         }).success,
       ).toBe(false);
     });
