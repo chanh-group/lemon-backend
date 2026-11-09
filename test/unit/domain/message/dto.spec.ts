@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   editMessageSchema,
+  reactMessageSchema,
   sendMessageSchema,
 } from "../../../../src/domain/message/dto/request.js";
 
@@ -138,6 +139,33 @@ describe("Message DTOs", () => {
       expect(messagesFor(editMessageSchema, { body: "x".repeat(4001) }, "body")).toEqual([
         "VALIDATION_BODY_MAX|max=4000",
       ]);
+    });
+  });
+
+  describe("sendMessageSchema - isForwarded", () => {
+    it("accepts message with isForwarded true", () => {
+      const result = sendMessageSchema.safeParse({
+        body: "Forwarded text",
+        isForwarded: true,
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.isForwarded).toBe(true);
+      }
+    });
+  });
+
+  describe("reactMessageSchema", () => {
+    it("accepts allowed emoji reactions", () => {
+      for (const emoji of ["👍", "❤️", "😆", "😮", "😢", "😡"]) {
+        const result = reactMessageSchema.safeParse({ emoji });
+        expect(result.success).toBe(true);
+      }
+    });
+
+    it("rejects disallowed emoji", () => {
+      const result = reactMessageSchema.safeParse({ emoji: "🚀" });
+      expect(result.success).toBe(false);
     });
   });
 });

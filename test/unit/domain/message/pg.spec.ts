@@ -9,18 +9,22 @@ import {
   ATTACHMENT_PREVIEW_TOKEN,
   STORY_REACTION_PREVIEW_TOKEN,
 } from "../../../../src/domain/message/constants.js";
-import { type Message, messages } from "../../../../src/domain/message/schema.js";
+import { type Message, messages, messageReactions } from "../../../../src/domain/message/schema.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
 
 function makeSelectChain() {
-  const limitMock = vi.fn<(limit: number) => Promise<unknown[]>>();
+  const limitMock = vi.fn<(limit: number) => Promise<unknown[]>>().mockResolvedValue([]);
   const forMock = vi.fn(() => ({ limit: limitMock }));
   const orderByMock = vi.fn(() => ({ limit: limitMock }));
-  const whereMock = vi.fn<(condition: SQL) => unknown>(() => ({
+  const whereObj = {
     limit: limitMock,
     for: forMock,
     orderBy: orderByMock,
-  }));
+    // oxlint-disable-next-line unicorn/no-thenable
+    then: (resolve: (val: unknown) => unknown, reject?: (err: unknown) => unknown) =>
+      limitMock(0).then(resolve, reject),
+  };
+  const whereMock = vi.fn<(condition: SQL) => typeof whereObj>(() => whereObj);
   const fromMock = vi.fn(() => ({ where: whereMock }));
   const selectMock = vi.fn(() => ({ from: fromMock }));
 
@@ -40,11 +44,20 @@ function makeDb() {
 
   const dbSelect = makeSelectChain();
 
+  const deleteWhereMock = vi.fn<(condition: SQL) => Promise<unknown>>().mockResolvedValue([]);
+  const deleteMock = vi.fn<(table: unknown) => unknown>(() => ({ where: deleteWhereMock }));
+
+  const dbOnConflictMock = vi.fn().mockResolvedValue([]);
+  const dbValuesMock = vi.fn(() => ({ onConflictDoUpdate: dbOnConflictMock, returning: returningMock }));
+  const dbInsertMock = vi.fn(() => ({ values: dbValuesMock }));
+
   const tx = { select: txSelect.selectMock, insert: insertMock, update: updateMock };
   const transactionMock = vi.fn((cb: (t: typeof tx) => Promise<unknown>) => cb(tx));
   const db = {
     select: dbSelect.selectMock,
     transaction: transactionMock,
+    delete: deleteMock,
+    insert: dbInsertMock,
   } as unknown as DrizzleDb;
 
   return {
@@ -57,6 +70,11 @@ function makeDb() {
     updateMock,
     setMock,
     updateWhereMock,
+    deleteMock,
+    deleteWhereMock,
+    dbInsertMock,
+    dbValuesMock,
+    dbOnConflictMock,
     transactionMock,
   };
 }
@@ -78,6 +96,7 @@ const existingRow: Message = {
   storyId: null,
   storyPreview: null,
   clientMsgId,
+  isForwarded: false,
   editedAt: null,
   deletedAt: null,
   createdAt: new Date("2026-10-19T00:00:00Z"),
@@ -387,5 +406,81 @@ describe("MessagePgRepository.resolveWriteMiss", () => {
     expect(result).toBeNull();
     const lookup = render(dbSelect.whereMock.mock.calls[0][0]);
     expect(lookup.params).toEqual([messageId, conversationId, senderId]);
+  });
+});
+
+describe("MessagePgRepository.reactMessage", () => {
+  it("throws MESSAGE_NOT_FOUND when message does not exist", async () => {
+    const { db, dbSelect } = makeDb();
+    dbSelect.limitMock.mockResolvedValueOnce([]); // find message
+    const repo = new MessagePgRepository(db);
+
+    await expect(repo.reactMessage(senderId, messageId, "❤️")).rejects.toThrow(
+      new BusinessError("MESSAGE_NOT_FOUND"),
+    );
+  });
+
+  it("throws MESSAGE_NOT_FOUND when message is revoked", async () => {
+    const { db, dbSelect } = makeDb();
+    dbSelect.limitMock.mockResolvedValueOnce([
+      { conversationId, deletedAt: new Date("2026-10-19T01:00:00Z") },
+    ]);
+    const repo = new MessagePgRepository(db);
+
+    await expect(repo.reactMessage(senderId, messageId, "❤️")).rejects.toThrow(
+      new BusinessError("MESSAGE_NOT_FOUND"),
+    );
+  });
+
+  it("throws NOT_PARTICIPANT when user is not an active participant", async () => {
+    const { db, dbSelect } = makeDb();
+    dbSelect.limitMock.mockResolvedValueOnce([{ conversationId, deletedAt: null }]); // msg exists
+    dbSelect.limitMock.mockResolvedValueOnce([]); // no participant
+    const repo = new MessagePgRepository(db);
+
+    await expect(repo.reactMessage(senderId, messageId, "❤️")).rejects.toThrow(
+      new BusinessError("NOT_PARTICIPANT"),
+    );
+  });
+
+  it("removes reaction when reacting with the same emoji (toggle off)", async () => {
+    const { db, dbSelect, deleteMock, deleteWhereMock } = makeDb();
+    dbSelect.limitMock.mockResolvedValueOnce([{ conversationId, deletedAt: null }]); // msg exists
+    dbSelect.limitMock.mockResolvedValueOnce([{ userId: senderId }]); // participant exists
+    dbSelect.limitMock.mockResolvedValueOnce([{ emoji: "❤️", userId: senderId }]); // existing reaction
+    dbSelect.limitMock.mockResolvedValueOnce([]); // allReactions after removal
+    const repo = new MessagePgRepository(db);
+
+    const result = await repo.reactMessage(senderId, messageId, "❤️");
+
+    expect(deleteMock).toHaveBeenCalledWith(messageReactions);
+    expect(deleteWhereMock).toHaveBeenCalled();
+    expect(result).toEqual({ reactions: [], conversationId });
+  });
+
+  it("upserts reaction when reacting with a new or different emoji", async () => {
+    const { db, dbSelect, dbInsertMock, dbValuesMock, dbOnConflictMock } = makeDb();
+    dbSelect.limitMock.mockResolvedValueOnce([{ conversationId, deletedAt: null }]); // msg exists
+    dbSelect.limitMock.mockResolvedValueOnce([{ userId: senderId }]); // participant exists
+    dbSelect.limitMock.mockResolvedValueOnce([{ emoji: "👍", userId: senderId }]); // existing reaction differs
+    dbSelect.limitMock.mockResolvedValueOnce([
+      { emoji: "❤️", userId: senderId },
+      { emoji: "❤️", userId: "user-2" },
+    ]); // allReactions query
+    const repo = new MessagePgRepository(db);
+
+    const result = await repo.reactMessage(senderId, messageId, "❤️");
+
+    expect(dbInsertMock).toHaveBeenCalledWith(messageReactions);
+    expect(dbValuesMock).toHaveBeenCalledWith({
+      messageId,
+      userId: senderId,
+      emoji: "❤️",
+    });
+    expect(dbOnConflictMock).toHaveBeenCalled();
+    expect(result.conversationId).toBe(conversationId);
+    expect(result.reactions).toHaveLength(1);
+    expect(result.reactions[0].emoji).toBe("❤️");
+    expect(result.reactions[0].count).toBe(2);
   });
 });

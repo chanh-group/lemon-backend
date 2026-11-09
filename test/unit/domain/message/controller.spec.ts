@@ -33,6 +33,13 @@ describe("MessageController", () => {
     (userId: string, messageId: string, body: string) => Promise<MessageResponse>
   >;
   let revokeMessageMock: Mock<(userId: string, messageId: string) => Promise<MessageResponse>>;
+  let reactToMessageMock: Mock<
+    (
+      userId: string,
+      messageId: string,
+      emoji: string,
+    ) => Promise<{ messageId: string; reactions: { emoji: string; count: number; userIds: string[] }[] }>
+  >;
 
   const mockUserId = "0193a2b1-0000-7000-8000-000000000001";
   const mockConvId = "0193a2b1-0000-7000-8000-000000000010";
@@ -88,11 +95,25 @@ describe("MessageController", () => {
         deletedAt: new Date("2026-10-18T12:00:00Z"),
       });
 
+    reactToMessageMock = vi
+      .fn<
+        (
+          userId: string,
+          messageId: string,
+          emoji: string,
+        ) => Promise<{ messageId: string; reactions: { emoji: string; count: number; userIds: string[] }[] }>
+      >()
+      .mockResolvedValue({
+        messageId: mockMsgId,
+        reactions: [{ emoji: "❤️", count: 1, userIds: [mockUserId] }],
+      });
+
     const mockService = {
       sendMessage: sendMessageMock,
       getTimeline: getTimelineMock,
       editMessage: editMessageMock,
       revokeMessage: revokeMessageMock,
+      reactToMessage: reactToMessageMock,
     } as unknown as MessageService;
 
     controller = new MessageController(mockService, new MemoryRateLimiter());
@@ -252,6 +273,26 @@ describe("MessageController", () => {
           ...mockMessage,
           body: null,
           deletedAt: new Date("2026-10-18T12:00:00Z"),
+        },
+      });
+    });
+  });
+
+  describe("reactMessage", () => {
+    it("calls reactToMessage on the service and returns ok response", async () => {
+      const response = await controller.reactMessage(
+        { user: { id: mockUserId } },
+        mockMsgId,
+        { emoji: "❤️" },
+      );
+
+      expect(reactToMessageMock).toHaveBeenCalledWith(mockUserId, mockMsgId, "❤️");
+      expect(response).toEqual({
+        success: true,
+        message: "OK",
+        data: {
+          messageId: mockMsgId,
+          reactions: [{ emoji: "❤️", count: 1, userIds: [mockUserId] }],
         },
       });
     });

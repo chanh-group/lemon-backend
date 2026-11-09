@@ -13,6 +13,7 @@ function makeMessage(overrides: Partial<Message> = {}): Message {
     storyId: null,
     storyPreview: null,
     clientMsgId: "client-1",
+    isForwarded: false,
     editedAt: null,
     deletedAt: null,
     createdAt: new Date("2026-10-18T10:00:00Z"),

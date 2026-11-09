@@ -8,6 +8,7 @@ import type { Message } from "../../../../src/domain/message/schema.js";
 import type { FriendService } from "../../../../src/domain/friend/service.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
 import type { RedisHealthService } from "../../../../src/configs/redis-health.js";
+import type { StorageService } from "../../../../src/utils/storage/store.js";
 
 describe("MessageService", () => {
   let service: MessageService;
@@ -18,6 +19,8 @@ describe("MessageService", () => {
   let updateBodyMock: Mock;
   let softDeleteMock: Mock;
   let resolveWriteMissMock: Mock;
+  let reactMessageMock: Mock;
+  let emitMessageReactionMock: Mock;
 
   let getParticipantUserIdsMock: Mock;
   let findConversationByIdMock: Mock;
@@ -48,6 +51,7 @@ describe("MessageService", () => {
     storyId: null,
     storyPreview: null,
     clientMsgId: null,
+    isForwarded: false,
     editedAt: null,
     deletedAt: null,
     createdAt: new Date(),
@@ -60,6 +64,7 @@ describe("MessageService", () => {
     updateBodyMock = vi.fn();
     softDeleteMock = vi.fn();
     resolveWriteMissMock = vi.fn();
+    reactMessageMock = vi.fn();
 
     getParticipantUserIdsMock = vi.fn().mockResolvedValue([userA, userB]);
     findConversationByIdMock = vi.fn().mockResolvedValue({ kind: "GROUP" });
@@ -67,6 +72,7 @@ describe("MessageService", () => {
     emitNewMessageMock = vi.fn();
     emitMessageUpdatedMock = vi.fn();
     emitMessageRevokedMock = vi.fn();
+    emitMessageReactionMock = vi.fn();
 
     const mockMessageRepo = {
       createMessageWithConversationUpdate: createMessageMock,
@@ -75,6 +81,7 @@ describe("MessageService", () => {
       updateBody: updateBodyMock,
       softDelete: softDeleteMock,
       resolveWriteMiss: resolveWriteMissMock,
+      reactMessage: reactMessageMock,
     } as unknown as MessageRepository;
 
     const mockConvRepo = {
@@ -89,6 +96,7 @@ describe("MessageService", () => {
       emitNewMessage: emitNewMessageMock,
       emitMessageUpdated: emitMessageUpdatedMock,
       emitMessageRevoked: emitMessageRevokedMock,
+      emitMessageReaction: emitMessageReactionMock,
     } as unknown as RealtimeService;
 
     redisIncrMock = vi.fn().mockReturnThis();
@@ -539,6 +547,91 @@ describe("MessageService", () => {
         `https://r2.example/attachment/chat/${convId}/${userA}/report.pdf`,
       );
       expect(res.attachments![0].fileName).toBe("Báo Cáo.pdf");
+    });
+
+    it("allows forwarding attachments from another conversation when isForwarded is true", async () => {
+      const mockStorage = {
+        headObject: vi.fn().mockResolvedValue({ contentLength: 2048 }),
+        presignGet: vi.fn().mockResolvedValue({ downloadUrl: "https://r2.example/forwarded.png" }),
+        getBucket: vi.fn().mockReturnValue("lemon-chat-storage"),
+      } as unknown as StorageService;
+
+      const serviceWithStorage = new MessageService(
+        { createMessageWithConversationUpdate: createMessageMock } as any,
+        {
+          getParticipantUserIds: getParticipantUserIdsMock,
+          findById: findConversationByIdMock,
+        } as any,
+        { assertCanChat: assertCanChatMock } as any,
+        { emitNewMessage: emitNewMessageMock } as any,
+        null,
+        undefined,
+        undefined,
+        mockStorage as any,
+      );
+
+      createMessageMock.mockResolvedValue({
+        message: {
+          ...mockMessage,
+          isForwarded: true,
+          attachments: [
+            {
+              id: "att-fwd-1",
+              messageId: msgId,
+              bucket: "lemon-chat-storage",
+              objectKey: "chat/other-conv/other-user/photo.png",
+              fileName: "photo.png",
+              mimeType: "image/png",
+              sizeBytes: 2048,
+              kind: "IMAGE",
+            },
+          ],
+        },
+        isNew: true,
+      });
+
+      const res = await serviceWithStorage.sendMessage(userA, convId, {
+        kind: "IMAGE",
+        isForwarded: true,
+        attachments: [
+          {
+            objectKey: "chat/other-conv/other-user/photo.png",
+            fileName: "photo.png",
+            mimeType: "image/png",
+            sizeBytes: 2048,
+          },
+        ],
+      });
+
+      expect(res.id).toBe(msgId);
+      expect(createMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          isForwarded: true,
+        }),
+      );
+    });
+  });
+
+  describe("reactToMessage", () => {
+    it("calls repo.reactMessage and emits message:reaction to conversation room", async () => {
+      reactMessageMock.mockResolvedValue({
+        conversationId: convId,
+        reactions: [{ emoji: "❤️", count: 1, userIds: [userA] }],
+      });
+
+      const result = await service.reactToMessage(userA, msgId, "❤️");
+
+      expect(reactMessageMock).toHaveBeenCalledWith(userA, msgId, "❤️");
+      expect(emitMessageReactionMock).toHaveBeenCalledWith(convId, {
+        messageId: msgId,
+        userId: userA,
+        emoji: "❤️",
+        reactions: [{ emoji: "❤️", count: 1, userIds: [userA] }],
+      });
+      expect(result).toEqual({
+        messageId: msgId,
+        reactions: [{ emoji: "❤️", count: 1, userIds: [userA] }],
+      });
     });
   });
 });
