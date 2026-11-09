@@ -44,7 +44,8 @@ async function bootstrap() {
   app.useWebSocketAdapter(redisIoAdapter);
 
   const port = Number(get_env("PORT", "3000"));
-  await app.listen(port);
+  const host = get_env("HOST", "0.0.0.0");
+  await app.listen(port, host);
 
   app.enableShutdownHooks();
 
