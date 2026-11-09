@@ -1,15 +1,25 @@
-import { Controller, Get, Param, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Query } from "@nestjs/common";
 import { CurrentUser } from "../../utils/decorators.js";
 import type { AuthUser } from "../auth/types.js";
 import { ok } from "../../utils/response.js";
 import { parseCursorPage } from "../shared.js";
 import { USER_SEARCH_MAX_LENGTH, USER_SEARCH_MIN_LENGTH } from "./constants.js";
 import { toPublicUserResponse } from "./dto/mapper.js";
+import { updateUserSchema, type UpdateUserDto } from "./dto/request.js";
 import { UserService } from "./service.js";
 
 @Controller("users")
 export class UserController {
   constructor(private readonly userService: UserService) {}
+
+  @Patch("me")
+  async updateProfile(
+    @CurrentUser() currentUser: AuthUser,
+    @Body({ schema: updateUserSchema }) body: UpdateUserDto,
+  ) {
+    const updated = await this.userService.updateProfile(currentUser.id, body);
+    return ok(updated);
+  }
 
   @Get("search")
   async search(

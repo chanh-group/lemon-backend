@@ -7,6 +7,7 @@ const fileKindSchema = z.enum([
   "CHAT_VIDEO",
   "CHAT_AUDIO",
   "CHAT_FILE",
+  "USER_AVATAR",
 ]);
 
 const fileUploadFieldsSchema = z.object({

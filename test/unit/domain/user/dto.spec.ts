@@ -151,6 +151,27 @@ describe("User DTOs & Validation Schemas", () => {
       expect(parsed.bio).toBe("Just a lemon");
     });
 
+    it("accepts valid https URL and data URL for avatarUrl", () => {
+      const parsedHttp = updateUserSchema.parse({
+        avatarUrl: "https://cdn.example.com/avatars/user123.jpg",
+      });
+      expect(parsedHttp.avatarUrl).toBe("https://cdn.example.com/avatars/user123.jpg");
+
+      const parsedDataUrl = updateUserSchema.parse({
+        avatarUrl: "data:image/jpeg;base64,/9j/4AAQSkZJRg==",
+      });
+      expect(parsedDataUrl.avatarUrl).toBe("data:image/jpeg;base64,/9j/4AAQSkZJRg==");
+    });
+
+    it("accepts null for avatarUrl and bio to remove them", () => {
+      const parsed = updateUserSchema.parse({
+        avatarUrl: null,
+        bio: null,
+      });
+      expect(parsed.avatarUrl).toBeNull();
+      expect(parsed.bio).toBeNull();
+    });
+
     it("rejects invalid avatar URLs with VALIDATION_URL", () => {
       expect(messagesFor(updateUserSchema, { avatarUrl: "not-a-valid-url" }, "avatarUrl")).toEqual([
         "VALIDATION_URL",

@@ -24,10 +24,12 @@ describe("UserController", () => {
 
   const findByUsername = vi.fn();
   const findByEmail = vi.fn();
+  const updateProfile = vi.fn();
 
   const mockUserService = {
     findByUsername,
     findByEmail,
+    updateProfile,
   } as unknown as UserService;
 
   const controller = new UserController(mockUserService);
@@ -85,6 +87,99 @@ describe("UserController", () => {
         message: "OK",
         data: null,
       });
+    });
+  });
+
+  describe("updateProfile", () => {
+    it("updates and returns user response", async () => {
+      updateProfile.mockResolvedValueOnce({
+        id: mockUser.id,
+        email: mockUser.email,
+        username: mockUser.username,
+        fullName: "Updated Full Name",
+        avatarUrl: "https://example.com/new-avatar.png",
+        bio: "Updated Bio",
+        phone: "0123456789",
+        emailVerifiedAt: mockUser.emailVerifiedAt,
+        lastSeenAt: mockUser.lastSeenAt,
+        createdAt: mockUser.createdAt,
+        updatedAt: new Date("2026-01-02T00:00:00Z"),
+      });
+
+      const res = await controller.updateProfile(
+        { id: mockUser.id },
+        {
+          fullName: "Updated Full Name",
+          avatarUrl: "https://example.com/new-avatar.png",
+          bio: "Updated Bio",
+          phone: "0123456789",
+        },
+      );
+
+      expect(updateProfile).toHaveBeenCalledWith(mockUser.id, {
+        fullName: "Updated Full Name",
+        avatarUrl: "https://example.com/new-avatar.png",
+        bio: "Updated Bio",
+        phone: "0123456789",
+      });
+
+      expect(res).toEqual({
+        success: true,
+        message: "OK",
+        data: expect.objectContaining({
+          fullName: "Updated Full Name",
+          avatarUrl: "https://example.com/new-avatar.png",
+          bio: "Updated Bio",
+        }),
+      });
+    });
+
+    it("supports setting avatarUrl to null to remove avatar", async () => {
+      updateProfile.mockResolvedValueOnce({
+        id: mockUser.id,
+        email: mockUser.email,
+        username: mockUser.username,
+        fullName: mockUser.fullName,
+        avatarUrl: null,
+        bio: mockUser.bio,
+        phone: mockUser.phone,
+        emailVerifiedAt: mockUser.emailVerifiedAt,
+        lastSeenAt: mockUser.lastSeenAt,
+        createdAt: mockUser.createdAt,
+        updatedAt: new Date("2026-01-02T00:00:00Z"),
+      });
+
+      const res = await controller.updateProfile(
+        { id: mockUser.id },
+        { avatarUrl: null },
+      );
+
+      expect(updateProfile).toHaveBeenCalledWith(mockUser.id, { avatarUrl: null });
+      expect(res.data?.avatarUrl).toBeNull();
+    });
+
+    it("supports partial update with bio only", async () => {
+      updateProfile.mockResolvedValueOnce({
+        id: mockUser.id,
+        email: mockUser.email,
+        username: mockUser.username,
+        fullName: mockUser.fullName,
+        avatarUrl: mockUser.avatarUrl,
+        bio: "Only new bio",
+        phone: mockUser.phone,
+        emailVerifiedAt: mockUser.emailVerifiedAt,
+        lastSeenAt: mockUser.lastSeenAt,
+        createdAt: mockUser.createdAt,
+        updatedAt: new Date("2026-01-02T00:00:00Z"),
+      });
+
+      const res = await controller.updateProfile(
+        { id: mockUser.id },
+        { bio: "Only new bio" },
+      );
+
+      expect(updateProfile).toHaveBeenCalledWith(mockUser.id, { bio: "Only new bio" });
+      expect(res.data?.bio).toBe("Only new bio");
     });
   });
 });

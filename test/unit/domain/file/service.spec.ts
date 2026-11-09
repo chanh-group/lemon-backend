@@ -41,6 +41,19 @@ describe("FileService", () => {
     });
   });
 
+  it("presigns an avatar upload with an avatars/ prefix", async () => {
+    const result = await service.presign("user-1", {
+      kind: "USER_AVATAR",
+      sizeBytes: 2048,
+      mimeType: "image/png",
+    });
+
+    expect(result.uploadUrl).toBe("https://s3.example/signed");
+    expect(result.objectKey).toMatch(
+      /^avatars\/user-1\/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.png$/,
+    );
+  });
+
   it("maps every allowed image MIME to its extension", async () => {
     const cases = [
       ["image/jpeg", "jpg"],

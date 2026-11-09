@@ -21,15 +21,25 @@ import {
 
 const logger = new Logger("Cache");
 
+function getRedisTimeoutMs(): number {
+  const timeoutMs = Number(get_env("REDIS_CONNECTION_TIMEOUT", String(REDIS_COMMAND_TIMEOUT_MS)));
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("REDIS_CONNECTION_TIMEOUT must be a positive integer");
+  }
+  return timeoutMs;
+}
+
 async function createRedisClient(): Promise<RedisWithCacheCommands> {
   // Dynamic import keeps the driver out of modules that do not initialize the app.
   // NOTE: named `Redis` — the package is CJS, so namespace `.default` has no
   // construct signature under nodenext; the named re-export does.
   const { Redis } = await import("ioredis");
+  const timeoutMs = getRedisTimeoutMs();
   const redis = new Redis(get_env("REDIS_URL", DEFAULT_REDIS_URL), {
     lazyConnect: false,
     maxRetriesPerRequest: REDIS_MAX_RETRIES_PER_REQUEST,
-    commandTimeout: REDIS_COMMAND_TIMEOUT_MS,
+    connectTimeout: timeoutMs,
+    commandTimeout: timeoutMs,
     enableReadyCheck: true,
     retryStrategy: (times: number) =>
       Math.min(times * REDIS_RECONNECT_DELAY_BASE_MS, REDIS_RECONNECT_DELAY_MAX_MS),

@@ -30,6 +30,7 @@ const UPLOAD_RULES: Record<
   CHAT_VIDEO: { maxBytes: CHAT_MAX_FILE_BYTES, allowedMimes: CHAT_ALLOWED_VIDEO_MIME },
   CHAT_AUDIO: { maxBytes: CHAT_MAX_FILE_BYTES, allowedMimes: CHAT_ALLOWED_AUDIO_MIME },
   CHAT_FILE: { maxBytes: CHAT_MAX_FILE_BYTES },
+  USER_AVATAR: { maxBytes: 5 * BYTES_PER_MB, allowedMimes: CHAT_ALLOWED_IMAGE_MIME },
 };
 
 function validateUpload(kind: PresignFileDto["kind"], size: number, mimeType: string) {
@@ -65,6 +66,7 @@ function createObjectKey(
   }
 
   ext ??= "bin";
+  if (kind === "USER_AVATAR") return `avatars/${userId}/${uuidv7()}.${ext}`;
   if (kind.startsWith("STORY_")) return `stories/${userId}/${uuidv7()}.${ext}`;
   if (!conversationId) throw new BusinessError("BAD_REQUEST");
   const prefix = `chat/${conversationId}/${userId}/${uuidv7()}`;
