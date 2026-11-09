@@ -2,12 +2,14 @@ import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   bigint,
+  boolean,
   check,
   index,
   integer,
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -54,6 +56,7 @@ export const messages = pgTable(
     }),
     storyPreview: jsonb("story_preview").$type<StoryPreview>(),
     clientMsgId: text("client_msg_id"),
+    isForwarded: boolean("is_forwarded").notNull().default(false),
     editedAt: timestamp("edited_at", { withTimezone: true, mode: "date" }),
     deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
     createdAt: created("created_at"),
@@ -101,7 +104,28 @@ export const messageAttachments = pgTable(
   (table) => [index("message_attachments_msg_idx").on(table.messageId)],
 );
 
+export const messageReactions = pgTable(
+  "message_reactions",
+  {
+    messageId: uuid("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    emoji: text("emoji").notNull(),
+    createdAt: created("created_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.messageId, table.userId] }),
+    index("message_reactions_msg_idx").on(table.messageId),
+    index("message_reactions_user_idx").on(table.userId),
+  ],
+);
+
 export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
 export type MessageAttachment = typeof messageAttachments.$inferSelect;
 export type NewMessageAttachment = typeof messageAttachments.$inferInsert;
+export type MessageReaction = typeof messageReactions.$inferSelect;
+export type NewMessageReaction = typeof messageReactions.$inferInsert;
