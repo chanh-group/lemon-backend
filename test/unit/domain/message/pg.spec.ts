@@ -25,17 +25,22 @@ function makeSelectChain() {
       limitMock(0).then(resolve, reject),
   };
   const whereMock = vi.fn<(condition: SQL) => typeof whereObj>(() => whereObj);
-  const fromMock = vi.fn(() => ({ where: whereMock }));
+  const innerJoinMock = vi.fn(() => ({ where: whereMock }));
+  const fromMock = vi.fn(() => ({ where: whereMock, innerJoin: innerJoinMock }));
   const selectMock = vi.fn(() => ({ from: fromMock }));
 
-  return { selectMock, fromMock, whereMock, forMock, orderByMock, limitMock };
+  return { selectMock, fromMock, whereMock, innerJoinMock, forMock, orderByMock, limitMock };
 }
 
 function makeDb() {
   const txSelect = makeSelectChain();
 
   const returningMock = vi.fn<(cols?: unknown) => Promise<unknown[]>>().mockResolvedValue([]);
-  const valuesMock = vi.fn<(values: unknown) => unknown>(() => ({ returning: returningMock }));
+  const dbOnConflictMock = vi.fn().mockResolvedValue([]);
+  const valuesMock = vi.fn<(values: unknown) => unknown>(() => ({
+    returning: returningMock,
+    onConflictDoUpdate: dbOnConflictMock,
+  }));
   const insertMock = vi.fn<(table: unknown) => unknown>(() => ({ values: valuesMock }));
 
   const updateWhereMock = vi.fn<(condition: SQL) => Promise<unknown>>().mockResolvedValue([]);
@@ -47,11 +52,18 @@ function makeDb() {
   const deleteWhereMock = vi.fn<(condition: SQL) => Promise<unknown>>().mockResolvedValue([]);
   const deleteMock = vi.fn<(table: unknown) => unknown>(() => ({ where: deleteWhereMock }));
 
-  const dbOnConflictMock = vi.fn().mockResolvedValue([]);
-  const dbValuesMock = vi.fn(() => ({ onConflictDoUpdate: dbOnConflictMock, returning: returningMock }));
+  const dbValuesMock = vi.fn(() => ({
+    onConflictDoUpdate: dbOnConflictMock,
+    returning: returningMock,
+  }));
   const dbInsertMock = vi.fn(() => ({ values: dbValuesMock }));
 
-  const tx = { select: txSelect.selectMock, insert: insertMock, update: updateMock };
+  const tx = {
+    select: txSelect.selectMock,
+    insert: insertMock,
+    update: updateMock,
+    delete: deleteMock,
+  };
   const transactionMock = vi.fn((cb: (t: typeof tx) => Promise<unknown>) => cb(tx));
   const db = {
     select: dbSelect.selectMock,
@@ -411,8 +423,8 @@ describe("MessagePgRepository.resolveWriteMiss", () => {
 
 describe("MessagePgRepository.reactMessage", () => {
   it("throws MESSAGE_NOT_FOUND when message does not exist", async () => {
-    const { db, dbSelect } = makeDb();
-    dbSelect.limitMock.mockResolvedValueOnce([]); // find message
+    const { db, txSelect } = makeDb();
+    txSelect.limitMock.mockResolvedValueOnce([]); // find message
     const repo = new MessagePgRepository(db);
 
     await expect(repo.reactMessage(senderId, messageId, "❤️")).rejects.toThrow(
@@ -421,8 +433,8 @@ describe("MessagePgRepository.reactMessage", () => {
   });
 
   it("throws MESSAGE_NOT_FOUND when message is revoked", async () => {
-    const { db, dbSelect } = makeDb();
-    dbSelect.limitMock.mockResolvedValueOnce([
+    const { db, txSelect } = makeDb();
+    txSelect.limitMock.mockResolvedValueOnce([
       { conversationId, deletedAt: new Date("2026-10-19T01:00:00Z") },
     ]);
     const repo = new MessagePgRepository(db);
@@ -433,9 +445,9 @@ describe("MessagePgRepository.reactMessage", () => {
   });
 
   it("throws NOT_PARTICIPANT when user is not an active participant", async () => {
-    const { db, dbSelect } = makeDb();
-    dbSelect.limitMock.mockResolvedValueOnce([{ conversationId, deletedAt: null }]); // msg exists
-    dbSelect.limitMock.mockResolvedValueOnce([]); // no participant
+    const { db, txSelect } = makeDb();
+    txSelect.limitMock.mockResolvedValueOnce([{ conversationId, deletedAt: null }]); // msg exists
+    txSelect.limitMock.mockResolvedValueOnce([]); // no participant
     const repo = new MessagePgRepository(db);
 
     await expect(repo.reactMessage(senderId, messageId, "❤️")).rejects.toThrow(
@@ -444,26 +456,27 @@ describe("MessagePgRepository.reactMessage", () => {
   });
 
   it("removes reaction when reacting with the same emoji (toggle off)", async () => {
-    const { db, dbSelect, deleteMock, deleteWhereMock } = makeDb();
-    dbSelect.limitMock.mockResolvedValueOnce([{ conversationId, deletedAt: null }]); // msg exists
-    dbSelect.limitMock.mockResolvedValueOnce([{ userId: senderId }]); // participant exists
-    dbSelect.limitMock.mockResolvedValueOnce([{ emoji: "❤️", userId: senderId }]); // existing reaction
-    dbSelect.limitMock.mockResolvedValueOnce([]); // allReactions after removal
+    const { db, txSelect, deleteMock, deleteWhereMock } = makeDb();
+    txSelect.limitMock.mockResolvedValueOnce([{ conversationId, deletedAt: null }]); // msg exists
+    txSelect.limitMock.mockResolvedValueOnce([{ userId: senderId }]); // participant exists
+    txSelect.limitMock.mockResolvedValueOnce([{ emoji: "❤️", userId: senderId }]); // existing reaction
+    txSelect.limitMock.mockResolvedValueOnce([]); // allReactions after removal
     const repo = new MessagePgRepository(db);
 
     const result = await repo.reactMessage(senderId, messageId, "❤️");
 
     expect(deleteMock).toHaveBeenCalledWith(messageReactions);
     expect(deleteWhereMock).toHaveBeenCalled();
+    expect(txSelect.forMock).toHaveBeenCalledWith("update");
     expect(result).toEqual({ reactions: [], conversationId });
   });
 
   it("upserts reaction when reacting with a new or different emoji", async () => {
-    const { db, dbSelect, dbInsertMock, dbValuesMock, dbOnConflictMock } = makeDb();
-    dbSelect.limitMock.mockResolvedValueOnce([{ conversationId, deletedAt: null }]); // msg exists
-    dbSelect.limitMock.mockResolvedValueOnce([{ userId: senderId }]); // participant exists
-    dbSelect.limitMock.mockResolvedValueOnce([{ emoji: "👍", userId: senderId }]); // existing reaction differs
-    dbSelect.limitMock.mockResolvedValueOnce([
+    const { db, txSelect, insertMock, valuesMock, dbOnConflictMock } = makeDb();
+    txSelect.limitMock.mockResolvedValueOnce([{ conversationId, deletedAt: null }]); // msg exists
+    txSelect.limitMock.mockResolvedValueOnce([{ userId: senderId }]); // participant exists
+    txSelect.limitMock.mockResolvedValueOnce([{ emoji: "👍", userId: senderId }]); // existing reaction differs
+    txSelect.limitMock.mockResolvedValueOnce([
       { emoji: "❤️", userId: senderId },
       { emoji: "❤️", userId: "user-2" },
     ]); // allReactions query
@@ -471,8 +484,8 @@ describe("MessagePgRepository.reactMessage", () => {
 
     const result = await repo.reactMessage(senderId, messageId, "❤️");
 
-    expect(dbInsertMock).toHaveBeenCalledWith(messageReactions);
-    expect(dbValuesMock).toHaveBeenCalledWith({
+    expect(insertMock).toHaveBeenCalledWith(messageReactions);
+    expect(valuesMock).toHaveBeenCalledWith({
       messageId,
       userId: senderId,
       emoji: "❤️",
@@ -482,5 +495,20 @@ describe("MessagePgRepository.reactMessage", () => {
     expect(result.reactions).toHaveLength(1);
     expect(result.reactions[0].emoji).toBe("❤️");
     expect(result.reactions[0].count).toBe(2);
+  });
+
+  it("rejects a direct reaction if the friendship is blocked under the transaction lock", async () => {
+    const { db, txSelect, transactionMock } = makeDb();
+    txSelect.limitMock.mockResolvedValueOnce([{ status: "BLOCKED" }]);
+    const repo = new MessagePgRepository(db);
+
+    await expect(
+      repo.reactMessage(senderId, messageId, "❤️", {
+        userAId: senderId,
+        userBId: "0193a2b1-0000-7000-8000-000000000002",
+      }),
+    ).rejects.toMatchObject({ code: "USER_BLOCKED" });
+    expect(transactionMock).toHaveBeenCalledOnce();
+    expect(txSelect.forMock).toHaveBeenCalledWith("share");
   });
 });

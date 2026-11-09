@@ -56,7 +56,7 @@ export interface MessageRepository {
     limit?: number,
     after?: string,
   ): Promise<MessageTimelineResult>;
-  findById(messageId: string): Promise<MessageWithAttachments | null>;
+  findById(messageId: string, includeDetails?: boolean): Promise<MessageWithAttachments | null>;
   resolveWriteMiss(
     messageId: string,
     userId: string,
@@ -72,6 +72,7 @@ export interface MessageRepository {
     userId: string,
     messageId: string,
     emoji: string,
+    requiredFriendship?: { userAId: string; userBId: string },
   ): Promise<{ reactions: MessageReactionSummary[]; conversationId: string }>;
 }
 

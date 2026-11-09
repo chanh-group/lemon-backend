@@ -1,16 +1,26 @@
 import {
   Body,
   Controller,
+  Get,
+  Header,
   HttpCode,
   HttpStatus,
   Inject,
+  Param,
+  ParseUUIDPipe,
   Post,
   Req,
+  Res,
   UploadedFile,
   UseInterceptors,
 } from "@nestjs/common";
+import type { Response } from "express";
 import { FileInterceptor } from "@nestjs/platform-express";
-import { CHAT_MAX_FILE_BYTES, STORY_MAX_VIDEO_BYTES } from "../../utils/cache/constants.js";
+import {
+  CHAT_MAX_FILE_BYTES,
+  STORY_MAX_VIDEO_BYTES,
+  USER_AVATAR_MAX_BYTES,
+} from "../../utils/cache/constants.js";
 import {
   RATE_LIMITER,
   RATE_LIMIT_PRESIGN_IP_MAX,
@@ -27,6 +37,8 @@ import { parseSchemaIssues } from "../../utils/validation.js";
 import { fileUploadSchema, presignFileSchema, type PresignFileDto } from "./dto/request.js";
 import { UploadRateLimitInterceptor } from "./upload-rate-limit.interceptor.js";
 import { FileService } from "./service.js";
+import { Public } from "../../utils/decorators.js";
+import { UserService } from "../user/service.js";
 
 interface UploadedMulterFile {
   buffer: Buffer;
@@ -41,7 +53,21 @@ export class FileController {
     private readonly fileService: FileService,
     @Inject(RATE_LIMITER)
     private readonly rateLimiter: RateLimiter,
+    private readonly userService: UserService,
   ) {}
+
+  @Get("avatars/:userId/:fileName")
+  @Public()
+  @Header("Cache-Control", "no-store")
+  async getAvatar(
+    @Param("userId", ParseUUIDPipe) userId: string,
+    @Param("fileName") fileName: string,
+    @Res() response: Response,
+  ) {
+    const user = await this.userService.findById(userId);
+    const url = await this.fileService.getAvatarDownloadUrl(userId, fileName, user?.avatarUrl);
+    return response.redirect(HttpStatus.FOUND, url);
+  }
 
   @Post("presign")
   @HttpCode(HttpStatus.OK)
@@ -61,6 +87,34 @@ export class FileController {
     );
     const data = await this.fileService.presign(userId, dto);
     return ok(data);
+  }
+
+  @Post("avatars/upload")
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(
+    UploadRateLimitInterceptor,
+    FileInterceptor("file", {
+      limits: { fileSize: USER_AVATAR_MAX_BYTES, files: 1, fields: 2, fieldSize: 256, parts: 3 },
+    }),
+  )
+  async uploadAvatar(
+    @Req() req: { user?: unknown },
+    @UploadedFile() file: UploadedMulterFile | undefined,
+  ) {
+    if (!file) throw new BusinessError("BAD_REQUEST");
+    const { id: userId }: AuthUser = getAuthUser(req);
+    return ok(
+      await this.fileService.upload(
+        userId,
+        {
+          buffer: file.buffer,
+          size: file.size,
+          mimetype: file.mimetype,
+          originalname: file.originalname,
+        },
+        "USER_AVATAR",
+      ),
+    );
   }
 
   @Post("upload")

@@ -7,7 +7,11 @@ export interface PresignGetParams {
 }
 
 export interface StorageService {
-  presignPut(params: { objectKey: string; mimeType: string }): Promise<{ uploadUrl: string }>;
+  presignPut(params: {
+    objectKey: string;
+    mimeType: string;
+    contentLength?: number;
+  }): Promise<{ uploadUrl: string }>;
   presignGet(params: PresignGetParams): Promise<{ downloadUrl: string }>;
   putObject(params: {
     objectKey: string;

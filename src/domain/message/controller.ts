@@ -120,11 +120,20 @@ export class MessageController {
 
   @Post("messages/:id/react")
   async reactMessage(
-    @Req() req: { user?: unknown },
+    @Req() req: { user?: unknown; ip?: string; socket?: { remoteAddress?: string | null } },
     @Param("id", ParseUUIDPipe) messageId: string,
     @Body({ schema: reactMessageSchema }) dto: ReactMessageDto,
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
+    await assertMixedRateLimit(
+      this.rateLimiter,
+      "react-message",
+      userId,
+      extractClientIp(req),
+      RATE_LIMIT_MESSAGE_USER_MAX,
+      RATE_LIMIT_MESSAGE_IP_MAX,
+      RATE_LIMIT_WINDOW_SECS,
+    );
     const data = await this.messageService.reactToMessage(userId, messageId, dto.emoji);
     return ok(data);
   }

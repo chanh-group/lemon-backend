@@ -89,29 +89,55 @@ export class MessageService {
     }
     const directPartnerId = await this.assertDirectConversationAllowed(conversationId, senderId);
 
-    const hasAttachments = Boolean(dto.attachments && dto.attachments.length > 0);
-    if (
-      (!dto.kind || dto.kind === "TEXT") &&
-      !hasAttachments &&
-      (!dto.body || dto.body.trim().length === 0)
-    ) {
-      throw new BusinessError("BAD_REQUEST");
-    }
-
-    if (dto.body && dto.body.length > MESSAGE_MAX_BODY_LENGTH) {
-      throw new BusinessError("BAD_REQUEST");
-    }
-
-    if (dto.kind !== "TEXT") {
-      if (!hasAttachments || (dto.body && dto.body.trim().length > 0)) {
-        throw new BusinessError("BAD_REQUEST");
+    let sourceMessage: Awaited<ReturnType<MessageRepository["findById"]>> = null;
+    if (dto.isForwarded) {
+      if (dto.sourceMessageId) {
+        sourceMessage = await this.messageRepo.findById(dto.sourceMessageId);
       }
-      if (dto.attachments?.some((attachment) => attachment.kind && attachment.kind !== dto.kind)) {
-        throw new BusinessError("BAD_REQUEST");
+      if (!dto.sourceMessageId) throw new BusinessError("BAD_REQUEST");
+      if (!sourceMessage) throw new BusinessError("MESSAGE_NOT_FOUND");
+      if (sourceMessage) {
+        await this.assertDirectConversationAllowed(sourceMessage.conversationId, senderId);
+        if (sourceMessage.deletedAt) throw new BusinessError("MESSAGE_REVOKED");
+        if (!["TEXT", "IMAGE", "VIDEO", "AUDIO", "FILE"].includes(sourceMessage.kind)) {
+          throw new BusinessError("BAD_REQUEST");
+        }
       }
     }
 
-    const attachments = dto.attachments;
+    const kind = sourceMessage ? (sourceMessage.kind as SendMessageDto["kind"]) : dto.kind;
+    const body = sourceMessage ? (sourceMessage.body ?? undefined) : dto.body;
+    const attachments = sourceMessage
+      ? sourceMessage.attachments?.map((attachment) => ({
+          objectKey: attachment.objectKey,
+          fileName: attachment.fileName,
+          mimeType: attachment.mimeType,
+          sizeBytes: Number(attachment.sizeBytes),
+          kind: attachment.kind,
+          width: attachment.width ?? undefined,
+          height: attachment.height ?? undefined,
+          durationMs: attachment.durationMs ?? undefined,
+          checksum: attachment.checksum ?? undefined,
+        }))
+      : dto.attachments;
+    const hasAttachments = Boolean(attachments && attachments.length > 0);
+    if ((!kind || kind === "TEXT") && !hasAttachments && (!body || body.trim().length === 0)) {
+      throw new BusinessError("BAD_REQUEST");
+    }
+
+    if (body && body.length > MESSAGE_MAX_BODY_LENGTH) {
+      throw new BusinessError("BAD_REQUEST");
+    }
+
+    if (kind !== "TEXT") {
+      if (!hasAttachments || (body && body.trim().length > 0)) {
+        throw new BusinessError("BAD_REQUEST");
+      }
+      if (attachments?.some((attachment) => attachment.kind && attachment.kind !== kind)) {
+        throw new BusinessError("BAD_REQUEST");
+      }
+    }
+
     if (attachments?.length) {
       const storage = this.storage;
       if (!storage) throw new BusinessError("OBJECT_NOT_UPLOADED");
@@ -122,8 +148,10 @@ export class MessageService {
               maxMb: String(Math.floor(CHAT_MAX_FILE_BYTES / (1024 * 1024))),
             });
           }
-          const isValidKey = dto.isForwarded
-            ? attachment.objectKey.startsWith("chat/")
+          const isValidKey = sourceMessage
+            ? sourceMessage.attachments?.some(
+                (sourceAttachment) => sourceAttachment.objectKey === attachment.objectKey,
+              )
             : attachment.objectKey.startsWith(`chat/${conversationId}/${senderId}/`);
           if (!isValidKey) {
             throw new BusinessError("INVALID_OBJECT_KEY");
@@ -170,15 +198,15 @@ export class MessageService {
     const { message, isNew } = await this.messageRepo.createMessageWithConversationUpdate({
       conversationId,
       senderId,
-      body: dto.body,
+      body,
       kind:
         story?.kind ??
-        dto.kind ??
-        (hasAttachments && dto.attachments?.[0]?.kind ? dto.attachments[0].kind : "TEXT"),
+        kind ??
+        (hasAttachments && attachments?.[0]?.kind ? attachments[0].kind : "TEXT"),
       clientMsgId: dto.clientMsgId,
       replyToId: dto.replyToId,
       attachments: attachmentsToInsert,
-      isForwarded: dto.isForwarded,
+      isForwarded: Boolean(sourceMessage || dto.isForwarded),
       ...(directPartnerId
         ? { requiredFriendship: { userAId: senderId, userBId: directPartnerId } }
         : {}),
@@ -333,11 +361,16 @@ export class MessageService {
     messageId: string,
     emoji: string,
   ): Promise<{ messageId: string; reactions: MessageReactionSummary[] }> {
-    const { reactions, conversationId } = await this.messageRepo.reactMessage(
-      userId,
-      messageId,
-      emoji,
-    );
+    const message = await this.messageRepo.findById(messageId, false);
+    if (!message || message.deletedAt) throw new BusinessError("MESSAGE_NOT_FOUND");
+    const partnerId = await this.assertDirectConversationAllowed(message.conversationId, userId);
+    const result = partnerId
+      ? await this.messageRepo.reactMessage(userId, messageId, emoji, {
+          userAId: userId,
+          userBId: partnerId,
+        })
+      : await this.messageRepo.reactMessage(userId, messageId, emoji);
+    const { reactions, conversationId } = result;
     this.realtimeService.emitMessageReaction(conversationId, {
       messageId,
       userId,

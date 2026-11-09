@@ -3,6 +3,7 @@ import type { MessageKind } from "../schema.js";
 
 export interface MessageAttachmentResponse {
   id: string;
+  objectKey: string;
   kind: "IMAGE" | "VIDEO" | "AUDIO" | "FILE";
   fileName: string;
   mimeType: string;

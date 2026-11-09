@@ -58,6 +58,21 @@ describe("S3StorageService", () => {
     ).rejects.toBeInstanceOf(StorageError);
   });
 
+  it("signs the exact content length when the upload has a trusted size", async () => {
+    const signer = vi.fn<PresignerFn>().mockResolvedValue("https://s3.example/signed");
+    const { service } = createStorage(vi.fn(), signer);
+
+    await service.presignPut({
+      objectKey: "avatars/u1/a.png",
+      mimeType: "image/png",
+      contentLength: 1024,
+    });
+
+    const [, command, options] = signer.mock.calls[0];
+    expect((command as PutObjectCommand).input.ContentLength).toBe(1024);
+    expect(options.signableHeaders).toEqual(new Set(["content-length", "content-type"]));
+  });
+
   it("uploads object successfully via putObject", async () => {
     const send = vi.fn().mockResolvedValue({});
     const { service } = createStorage(send);
@@ -199,6 +214,23 @@ describe("S3StorageService", () => {
     expect(uploadUrl).not.toContain("x-amz-checksum-crc32");
     expect(uploadUrl).not.toContain("x-amz-sdk-checksum-algorithm");
     expect(uploadUrl).toContain("X-Amz-SignedHeaders=content-type");
+  });
+
+  it("includes content-length in the real signature when requested", async () => {
+    const client = new S3Client({
+      region: "us-east-1",
+      credentials: { accessKeyId: "test-key", secretAccessKey: "test-secret" },
+      requestChecksumCalculation: "WHEN_REQUIRED",
+    });
+    const service = new S3StorageService({ client, bucket: "test-bucket", presignTtlSecs: 300 });
+
+    const { uploadUrl } = await service.presignPut({
+      objectKey: "avatars/u1/a.png",
+      mimeType: "image/png",
+      contentLength: 1024,
+    });
+
+    expect(uploadUrl).toContain("X-Amz-SignedHeaders=content-length%3Bcontent-type");
   });
 
   it("control: an SDK-default client embeds the empty-body checksum params", async () => {

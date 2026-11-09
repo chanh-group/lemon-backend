@@ -481,7 +481,10 @@ describe("MessageService", () => {
       };
 
       const serviceWithStorage = new MessageService(
-        { createMessageWithConversationUpdate: createMessageMock } as any,
+        {
+          createMessageWithConversationUpdate: createMessageMock,
+          findById: findByIdMock,
+        } as any,
         {
           getParticipantUserIds: getParticipantUserIdsMock,
           findById: findConversationByIdMock,
@@ -549,7 +552,23 @@ describe("MessageService", () => {
       expect(res.attachments![0].fileName).toBe("Báo Cáo.pdf");
     });
 
-    it("allows forwarding attachments from another conversation when isForwarded is true", async () => {
+    it("forwards only attachments from an accessible source message", async () => {
+      const sourceConversationId = "0193a2b1-0000-7000-8000-000000000011";
+      const sourceAttachment = {
+        id: "att-source",
+        messageId: msgId,
+        kind: "IMAGE" as const,
+        bucket: "lemon-chat-storage",
+        objectKey: `chat/${sourceConversationId}/${userB}/photo.png`,
+        fileName: "photo.png",
+        mimeType: "image/png",
+        sizeBytes: 2048,
+        width: null,
+        height: null,
+        durationMs: null,
+        checksum: null,
+        createdAt: new Date(),
+      };
       const mockStorage = {
         headObject: vi.fn().mockResolvedValue({ contentLength: 2048 }),
         presignGet: vi.fn().mockResolvedValue({ downloadUrl: "https://r2.example/forwarded.png" }),
@@ -557,7 +576,10 @@ describe("MessageService", () => {
       } as unknown as StorageService;
 
       const serviceWithStorage = new MessageService(
-        { createMessageWithConversationUpdate: createMessageMock } as any,
+        {
+          createMessageWithConversationUpdate: createMessageMock,
+          findById: findByIdMock,
+        } as any,
         {
           getParticipantUserIds: getParticipantUserIdsMock,
           findById: findConversationByIdMock,
@@ -569,6 +591,13 @@ describe("MessageService", () => {
         undefined,
         mockStorage as any,
       );
+      findByIdMock.mockResolvedValue({
+        ...mockMessage,
+        conversationId: sourceConversationId,
+        kind: "IMAGE",
+        body: null,
+        attachments: [sourceAttachment],
+      });
 
       createMessageMock.mockResolvedValue({
         message: {
@@ -579,7 +608,7 @@ describe("MessageService", () => {
               id: "att-fwd-1",
               messageId: msgId,
               bucket: "lemon-chat-storage",
-              objectKey: "chat/other-conv/other-user/photo.png",
+              objectKey: sourceAttachment.objectKey,
               fileName: "photo.png",
               mimeType: "image/png",
               sizeBytes: 2048,
@@ -591,14 +620,16 @@ describe("MessageService", () => {
       });
 
       const res = await serviceWithStorage.sendMessage(userA, convId, {
-        kind: "IMAGE",
+        kind: "TEXT",
         isForwarded: true,
+        sourceMessageId: msgId,
         attachments: [
           {
-            objectKey: "chat/other-conv/other-user/photo.png",
-            fileName: "photo.png",
+            objectKey: "chat/unrelated-conversation/other-user/private.png",
+            fileName: "private.png",
             mimeType: "image/png",
             sizeBytes: 2048,
+            kind: "IMAGE",
           },
         ],
       });
@@ -607,13 +638,30 @@ describe("MessageService", () => {
       expect(createMessageMock).toHaveBeenCalledWith(
         expect.objectContaining({
           isForwarded: true,
+          attachments: [expect.objectContaining({ objectKey: sourceAttachment.objectKey })],
         }),
       );
+    });
+
+    it("does not forward a source message the sender cannot access", async () => {
+      const sourceConversationId = "0193a2b1-0000-7000-8000-000000000011";
+      findByIdMock.mockResolvedValue({ ...mockMessage, conversationId: sourceConversationId });
+      findConversationByIdMock.mockResolvedValueOnce({ kind: "GROUP" }).mockResolvedValueOnce(null);
+
+      await expect(
+        service.sendMessage(userA, convId, {
+          kind: "TEXT",
+          isForwarded: true,
+          sourceMessageId: msgId,
+        }),
+      ).rejects.toMatchObject({ code: "NOT_PARTICIPANT" });
+      expect(createMessageMock).not.toHaveBeenCalled();
     });
   });
 
   describe("reactToMessage", () => {
     it("calls repo.reactMessage and emits message:reaction to conversation room", async () => {
+      findByIdMock.mockResolvedValue(mockMessage);
       reactMessageMock.mockResolvedValue({
         conversationId: convId,
         reactions: [{ emoji: "❤️", count: 1, userIds: [userA] }],
@@ -632,6 +680,18 @@ describe("MessageService", () => {
         messageId: msgId,
         reactions: [{ emoji: "❤️", count: 1, userIds: [userA] }],
       });
+    });
+
+    it("rejects reactions after a direct conversation is blocked", async () => {
+      findByIdMock.mockResolvedValue(mockMessage);
+      findConversationByIdMock.mockResolvedValue({ kind: "DIRECT", partner: { id: userB } });
+      assertCanChatMock.mockRejectedValue(new BusinessError("USER_BLOCKED"));
+
+      await expect(service.reactToMessage(userA, msgId, "❤️")).rejects.toMatchObject({
+        code: "USER_BLOCKED",
+      });
+      expect(reactMessageMock).not.toHaveBeenCalled();
+      expect(emitMessageReactionMock).not.toHaveBeenCalled();
     });
   });
 });

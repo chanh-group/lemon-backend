@@ -24,3 +24,9 @@ export interface UserRepository {
 }
 
 export const USER_REPOSITORY = Symbol("USER_REPOSITORY");
+
+export interface UserProfileCacheInvalidator {
+  invalidateProfileFeeds(userId: string): Promise<void>;
+}
+
+export const USER_PROFILE_CACHE_INVALIDATOR = Symbol("USER_PROFILE_CACHE_INVALIDATOR");

@@ -309,18 +309,13 @@ export class MessagePgRepository implements MessageRepository {
     };
   }
 
-  async findById(messageId: string): Promise<MessageWithAttachments | null> {
+  async findById(messageId: string, includeDetails = true): Promise<MessageWithAttachments | null> {
     const [msg] = await this.db.select().from(messages).where(eq(messages.id, messageId)).limit(1);
     if (!msg) return null;
+    if (!includeDetails) return msg;
     const [attachments, reactions] = await Promise.all([
-      this.db
-        .select()
-        .from(messageAttachments)
-        .where(eq(messageAttachments.messageId, messageId)),
-      this.db
-        .select()
-        .from(messageReactions)
-        .where(eq(messageReactions.messageId, messageId)),
+      this.db.select().from(messageAttachments).where(eq(messageAttachments.messageId, messageId)),
+      this.db.select().from(messageReactions).where(eq(messageReactions.messageId, messageId)),
     ]);
     return { ...msg, attachments, reactions };
   }
@@ -422,82 +417,80 @@ export class MessagePgRepository implements MessageRepository {
     userId: string,
     messageId: string,
     emoji: string,
+    requiredFriendship?: { userAId: string; userBId: string },
   ): Promise<{ reactions: MessageReactionSummary[]; conversationId: string }> {
-    const [msg] = await this.db
-      .select({
-        id: messages.id,
-        conversationId: messages.conversationId,
-        deletedAt: messages.deletedAt,
-      })
-      .from(messages)
-      .where(eq(messages.id, messageId))
-      .limit(1);
+    return this.db.transaction(async (tx) => {
+      if (requiredFriendship) {
+        const [userLow, userHigh] = [requiredFriendship.userAId, requiredFriendship.userBId].sort();
+        const [relation] = await tx
+          .select({ status: friendships.status })
+          .from(friendships)
+          .where(and(eq(friendships.userLow, userLow), eq(friendships.userHigh, userHigh)))
+          .for("share")
+          .limit(1);
+        if (relation?.status === "BLOCKED") throw new BusinessError("USER_BLOCKED");
+        if (relation?.status !== "ACCEPTED") throw new BusinessError("FRIENDSHIP_REQUIRED");
+      }
 
-    if (!msg || msg.deletedAt) {
-      throw new BusinessError("MESSAGE_NOT_FOUND");
-    }
+      const [msg] = await tx
+        .select({
+          id: messages.id,
+          conversationId: messages.conversationId,
+          deletedAt: messages.deletedAt,
+        })
+        .from(messages)
+        .where(eq(messages.id, messageId))
+        .for("update")
+        .limit(1);
 
-    const [participant] = await this.db
-      .select({ userId: conversationParticipants.userId })
-      .from(conversationParticipants)
-      .where(
-        and(
-          eq(conversationParticipants.conversationId, msg.conversationId),
-          eq(conversationParticipants.userId, userId),
-          isNull(conversationParticipants.leftAt),
-        ),
-      )
-      .limit(1);
+      if (!msg || msg.deletedAt) throw new BusinessError("MESSAGE_NOT_FOUND");
 
-    if (!participant) {
-      throw new BusinessError("NOT_PARTICIPANT");
-    }
-
-    const [existing] = await this.db
-      .select()
-      .from(messageReactions)
-      .where(
-        and(
-          eq(messageReactions.messageId, messageId),
-          eq(messageReactions.userId, userId),
-        ),
-      )
-      .limit(1);
-
-    if (existing && existing.emoji === emoji) {
-      await this.db
-        .delete(messageReactions)
+      const [participant] = await tx
+        .select({ userId: conversationParticipants.userId })
+        .from(conversationParticipants)
         .where(
           and(
-            eq(messageReactions.messageId, messageId),
-            eq(messageReactions.userId, userId),
+            eq(conversationParticipants.conversationId, msg.conversationId),
+            eq(conversationParticipants.userId, userId),
+            isNull(conversationParticipants.leftAt),
           ),
-        );
-    } else {
-      await this.db
-        .insert(messageReactions)
-        .values({
-          messageId,
-          userId,
-          emoji,
-        })
-        .onConflictDoUpdate({
-          target: [messageReactions.messageId, messageReactions.userId],
-          set: {
-            emoji,
-            createdAt: sql`now()`,
-          },
-        });
-    }
+        )
+        .for("share")
+        .limit(1);
 
-    const allReactions = await this.db
-      .select({ emoji: messageReactions.emoji, userId: messageReactions.userId })
-      .from(messageReactions)
-      .where(eq(messageReactions.messageId, messageId));
+      if (!participant) throw new BusinessError("NOT_PARTICIPANT");
 
-    return {
-      reactions: groupReactions(allReactions) ?? [],
-      conversationId: msg.conversationId,
-    };
+      const [existing] = await tx
+        .select()
+        .from(messageReactions)
+        .where(and(eq(messageReactions.messageId, messageId), eq(messageReactions.userId, userId)))
+        .limit(1);
+
+      if (existing && existing.emoji === emoji) {
+        await tx
+          .delete(messageReactions)
+          .where(
+            and(eq(messageReactions.messageId, messageId), eq(messageReactions.userId, userId)),
+          );
+      } else {
+        await tx
+          .insert(messageReactions)
+          .values({ messageId, userId, emoji })
+          .onConflictDoUpdate({
+            target: [messageReactions.messageId, messageReactions.userId],
+            set: { emoji, createdAt: sql`now()` },
+          });
+      }
+
+      const allReactions = await tx
+        .select({ emoji: messageReactions.emoji, userId: messageReactions.userId })
+        .from(messageReactions)
+        .where(eq(messageReactions.messageId, messageId));
+
+      return {
+        reactions: groupReactions(allReactions) ?? [],
+        conversationId: msg.conversationId,
+      };
+    });
   }
 }

@@ -38,7 +38,10 @@ describe("MessageController", () => {
       userId: string,
       messageId: string,
       emoji: string,
-    ) => Promise<{ messageId: string; reactions: { emoji: string; count: number; userIds: string[] }[] }>
+    ) => Promise<{
+      messageId: string;
+      reactions: { emoji: string; count: number; userIds: string[] }[];
+    }>
   >;
 
   const mockUserId = "0193a2b1-0000-7000-8000-000000000001";
@@ -101,7 +104,10 @@ describe("MessageController", () => {
           userId: string,
           messageId: string,
           emoji: string,
-        ) => Promise<{ messageId: string; reactions: { emoji: string; count: number; userIds: string[] }[] }>
+        ) => Promise<{
+          messageId: string;
+          reactions: { emoji: string; count: number; userIds: string[] }[];
+        }>
       >()
       .mockResolvedValue({
         messageId: mockMsgId,
@@ -280,11 +286,9 @@ describe("MessageController", () => {
 
   describe("reactMessage", () => {
     it("calls reactToMessage on the service and returns ok response", async () => {
-      const response = await controller.reactMessage(
-        { user: { id: mockUserId } },
-        mockMsgId,
-        { emoji: "❤️" },
-      );
+      const response = await controller.reactMessage({ user: { id: mockUserId } }, mockMsgId, {
+        emoji: "❤️",
+      });
 
       expect(reactToMessageMock).toHaveBeenCalledWith(mockUserId, mockMsgId, "❤️");
       expect(response).toEqual({
@@ -295,6 +299,30 @@ describe("MessageController", () => {
           reactions: [{ emoji: "❤️", count: 1, userIds: [mockUserId] }],
         },
       });
+    });
+
+    it("rate limits reaction requests by user and IP", async () => {
+      const limiter = new MemoryRateLimiter();
+      const checkMixedLimit = vi.spyOn(limiter, "checkMixedLimit").mockResolvedValueOnce(false);
+      const limitedController = new MessageController(
+        { reactToMessage: reactToMessageMock } as unknown as MessageService,
+        limiter,
+      );
+
+      await expect(
+        limitedController.reactMessage({ user: { id: mockUserId }, ip: "192.0.2.1" }, mockMsgId, {
+          emoji: "❤️",
+        }),
+      ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+      expect(checkMixedLimit).toHaveBeenCalledWith(
+        "react-message",
+        mockUserId,
+        "192.0.2.1",
+        60,
+        300,
+        60,
+      );
+      expect(reactToMessageMock).not.toHaveBeenCalled();
     });
   });
 

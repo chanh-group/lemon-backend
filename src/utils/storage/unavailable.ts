@@ -6,6 +6,7 @@ export class UnavailableStorageService implements StorageService {
   async presignPut(_params: {
     objectKey: string;
     mimeType: string;
+    contentLength?: number;
   }): Promise<{ uploadUrl: string }> {
     throw new StorageError("storage is not configured");
   }

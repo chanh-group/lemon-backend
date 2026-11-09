@@ -9,6 +9,7 @@ import { FileService } from "../../../../src/domain/file/service.js";
 import { MemoryRateLimiter, RATE_LIMITER } from "../../../../src/middleware/ratelimit.js";
 import type { PresignFileDto } from "../../../../src/domain/file/dto/request.js";
 import type { PresignFileResponse } from "../../../../src/domain/file/dto/response.js";
+import { UserService } from "../../../../src/domain/user/service.js";
 import { standardSchemaPipe } from "../../../../src/utils/validation.js";
 
 describe("FileController", () => {
@@ -31,6 +32,7 @@ describe("FileController", () => {
     controller = new FileController(
       { presign: presignMock } as unknown as FileService,
       new MemoryRateLimiter(),
+      { findById: vi.fn() } as unknown as UserService,
     );
   });
 
@@ -45,6 +47,31 @@ describe("FileController", () => {
     });
   });
 
+  it("redirects the stable public avatar URL to a fresh signed storage URL", async () => {
+    const userId = "0193a2b1-0000-7000-8000-000000000001";
+    const fileName = "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b.png";
+    const downloadUrl = "https://s3.example/signed-avatar";
+    const getAvatarDownloadUrl = vi.fn().mockResolvedValue(downloadUrl);
+    const findById = vi.fn().mockResolvedValue({ avatarUrl: "https://api.example.com/avatar" });
+    const redirect = vi.fn();
+    const c = new FileController(
+      { getAvatarDownloadUrl } as unknown as FileService,
+      new MemoryRateLimiter(),
+      { findById } as unknown as UserService,
+    );
+    const response = { redirect } as unknown as Response;
+
+    await c.getAvatar(userId, fileName, response);
+
+    expect(findById).toHaveBeenCalledWith(userId);
+    expect(getAvatarDownloadUrl).toHaveBeenCalledWith(
+      userId,
+      fileName,
+      "https://api.example.com/avatar",
+    );
+    expect(redirect).toHaveBeenCalledWith(302, downloadUrl);
+  });
+
   it("handles uploadFile fallback endpoint", async () => {
     const uploadMock = vi.fn().mockResolvedValue({
       objectKey: "chat/0193a2b1-0000-7000-8000-000000000010/user-1/file.png",
@@ -52,6 +79,7 @@ describe("FileController", () => {
     const c = new FileController(
       { presign: presignMock, upload: uploadMock } as unknown as FileService,
       new MemoryRateLimiter(),
+      { findById: vi.fn() } as unknown as UserService,
     );
 
     const result = await c.uploadFile(
@@ -96,8 +124,12 @@ describe("FileController", () => {
         providers: [
           {
             provide: FileService,
-            useValue: { presign: httpPresign } as unknown as FileService,
+            useValue: {
+              presign: httpPresign,
+              getAvatarDownloadUrl: vi.fn(),
+            } as unknown as FileService,
           },
+          { provide: UserService, useValue: { findById: vi.fn() } },
           { provide: RATE_LIMITER, useValue: new MemoryRateLimiter() },
         ],
       }).compile();

@@ -56,6 +56,20 @@ export function resolveStorageConfig(env: StorageEnv): StorageConfig {
     return { mode: "unavailable" };
   }
 
+  const apiPublicUrl = isProduction
+    ? required(env, "API_PUBLIC_URL")
+    : (env.API_PUBLIC_URL ?? "http://localhost:3000");
+  const parsedApiPublicUrl = new URL(apiPublicUrl);
+  if (
+    !/^https?:$/.test(parsedApiPublicUrl.protocol) ||
+    (isProduction && parsedApiPublicUrl.protocol !== "https:") ||
+    parsedApiPublicUrl.pathname !== "/" ||
+    parsedApiPublicUrl.search ||
+    parsedApiPublicUrl.hash
+  ) {
+    throw new Error("API_PUBLIC_URL must be an HTTP(S) origin without query or fragment");
+  }
+
   return {
     mode: "s3",
     bucket,

@@ -142,6 +142,19 @@ export class FriendPgRepository implements FriendRepository {
     return new Set(rows.map((row) => (row.userLow === userId ? row.userHigh : row.userLow)));
   }
 
+  async getAcceptedFriendIds(userId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ userLow: friendships.userLow, userHigh: friendships.userHigh })
+      .from(friendships)
+      .where(
+        and(
+          eq(friendships.status, "ACCEPTED"),
+          or(eq(friendships.userLow, userId), eq(friendships.userHigh, userId)),
+        ),
+      );
+    return rows.map((row) => (row.userLow === userId ? row.userHigh : row.userLow));
+  }
+
   async listRequestsPage(
     userId: string,
     incomingCursor: string | undefined,

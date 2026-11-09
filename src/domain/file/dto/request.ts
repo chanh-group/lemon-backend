@@ -18,7 +18,9 @@ const fileUploadFieldsSchema = z.object({
 const requireChatConversation = <T extends { kind: string; conversationId?: string }>(data: T) =>
   !data.kind.startsWith("CHAT_") || Boolean(data.conversationId);
 
-export const fileUploadSchema = fileUploadFieldsSchema.refine(requireChatConversation);
+export const fileUploadSchema = fileUploadFieldsSchema.refine(
+  (data) => data.kind !== "USER_AVATAR" && requireChatConversation(data),
+);
 
 export const presignFileSchema = fileUploadFieldsSchema
   .extend({

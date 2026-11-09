@@ -116,12 +116,13 @@ export class FriendService {
   }
 
   private async invalidateSocialFeeds(userAId: string, userBId: string): Promise<void> {
-    await this.cache.deleteManyBestEffort([
-      storyFeedKey(userAId),
-      storyFeedKey(userBId),
-      noteFeedKey(userAId),
-      noteFeedKey(userBId),
-    ]);
+    await this.deleteSocialFeedCaches([userAId, userBId]);
+  }
+
+  private async deleteSocialFeedCaches(userIds: string[]): Promise<void> {
+    await this.cache.deleteManyBestEffort(
+      userIds.flatMap((id) => [storyFeedKey(id), noteFeedKey(id)]),
+    );
   }
 
   async assertCanChat(userId: string, targetId: string): Promise<void> {

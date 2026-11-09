@@ -62,6 +62,17 @@ describe("resolveStorageConfig", () => {
     );
   });
 
+  it("requires a public API origin in production", () => {
+    expect(() =>
+      resolveStorageConfig({
+        APP_ENV: "production",
+        S3_BUCKET: "b",
+        S3_ACCESS_KEY_ID: "key",
+        S3_SECRET_ACCESS_KEY: "secret",
+      }),
+    ).toThrow("Environment variable API_PUBLIC_URL is not set");
+  });
+
   it("applies optional overrides (endpoint, region, path style, TTL)", () => {
     expect(
       resolveStorageConfig({

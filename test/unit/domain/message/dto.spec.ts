@@ -142,16 +142,38 @@ describe("Message DTOs", () => {
     });
   });
 
-  describe("sendMessageSchema - isForwarded", () => {
-    it("accepts message with isForwarded true", () => {
+  describe("sendMessageSchema - forwarding", () => {
+    it("accepts a source message ID without client-supplied content", () => {
       const result = sendMessageSchema.safeParse({
-        body: "Forwarded text",
         isForwarded: true,
+        sourceMessageId: "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b",
       });
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.isForwarded).toBe(true);
       }
+    });
+
+    it("requires a source message ID even when attachment keys are supplied", () => {
+      expect(sendMessageSchema.safeParse({ body: "Spoofed", isForwarded: true }).success).toBe(
+        false,
+      );
+      expect(
+        sendMessageSchema.safeParse({
+          isForwarded: true,
+          kind: "IMAGE",
+          attachments: [{ objectKey: "chat/other/key", fileName: "a.png", mimeType: "image/png", sizeBytes: 1 }],
+        }).success,
+      ).toBe(false);
+    });
+
+    it("does not accept a source message ID on a normal message", () => {
+      expect(
+        sendMessageSchema.safeParse({
+          body: "Hello",
+          sourceMessageId: "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b",
+        }).success,
+      ).toBe(false);
     });
   });
 

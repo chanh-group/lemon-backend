@@ -16,6 +16,7 @@ export async function mapAttachmentsToResponse(
   if (!storage) {
     return attachments.map((att) => ({
       id: att.id,
+      objectKey: att.objectKey,
       kind: att.kind,
       fileName: att.fileName,
       mimeType: att.mimeType,
@@ -47,6 +48,7 @@ export async function mapAttachmentsToResponse(
         ]);
         return {
           id: att.id,
+          objectKey: att.objectKey,
           kind: att.kind,
           fileName: att.fileName,
           mimeType: att.mimeType,
@@ -60,6 +62,7 @@ export async function mapAttachmentsToResponse(
       } catch {
         return {
           id: att.id,
+          objectKey: att.objectKey,
           kind: att.kind,
           fileName: att.fileName,
           mimeType: att.mimeType,

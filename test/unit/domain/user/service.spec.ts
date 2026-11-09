@@ -1,8 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UserRepository } from "../../../../src/domain/user/repository.js";
 import type { User } from "../../../../src/domain/user/schema.js";
 import { UserService } from "../../../../src/domain/user/service.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
+import { USER_AVATAR_MAX_BYTES } from "../../../../src/utils/cache/constants.js";
+import { avatarUrlForObjectKey } from "../../../../src/utils/storage/avatar.js";
+import type { StorageService } from "../../../../src/utils/storage/store.js";
+import type { UserProfileCacheInvalidator } from "../../../../src/domain/user/repository.js";
 
 async function expectBusinessError(
   promise: Promise<unknown>,
@@ -65,8 +69,13 @@ describe("UserService", () => {
       softDelete: vi.fn(),
     };
 
-    service = new UserService(mockRepo as unknown as UserRepository);
+    service = new UserService(
+      mockRepo as unknown as UserRepository,
+      { invalidateProfileFeeds: vi.fn() } as unknown as UserProfileCacheInvalidator,
+    );
   });
+
+  afterEach(() => vi.unstubAllEnvs());
 
   describe("findById", () => {
     it("returns user when found", async () => {
@@ -224,6 +233,73 @@ describe("UserService", () => {
         mockUser.id,
         expect.objectContaining({ fullName: "New Full Name" }),
       );
+    });
+
+    it("rejects a data avatar larger than the server upload limit", async () => {
+      const base64 = Buffer.alloc(USER_AVATAR_MAX_BYTES + 1).toString("base64");
+      await expectBusinessError(
+        service.updateProfile(mockUser.id, { avatarUrl: `data:image/png;base64,${base64}` }),
+        "FILE_TOO_LARGE",
+      );
+      expect(mockRepo.updateProfile).not.toHaveBeenCalled();
+    });
+
+    it("verifies the current user's uploaded avatar against storage metadata", async () => {
+      vi.stubEnv("API_PUBLIC_URL", "https://api.example.com");
+      const objectKey = `avatars/${mockUser.id}/0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b.png`;
+      const avatarUrl = avatarUrlForObjectKey(mockUser.id, objectKey);
+      const headObject = vi
+        .fn()
+        .mockResolvedValue({ contentLength: 2048, contentType: "image/png" });
+      const storage = { headObject };
+      mockRepo.updateProfile.mockResolvedValueOnce({ ...mockUser, avatarUrl });
+      const storageService = new UserService(
+        mockRepo as unknown as UserRepository,
+        { invalidateProfileFeeds: vi.fn() } as unknown as UserProfileCacheInvalidator,
+        storage as unknown as StorageService,
+      );
+
+      await storageService.updateProfile(mockUser.id, { avatarUrl });
+
+      expect(headObject).toHaveBeenCalledWith(objectKey);
+      expect(mockRepo.updateProfile).toHaveBeenCalledWith(mockUser.id, { avatarUrl });
+    });
+
+    it("invalidates social-feed caches after changing a public profile field", async () => {
+      const invalidateProfileFeeds = vi.fn().mockResolvedValue(undefined);
+      mockRepo.updateProfile.mockResolvedValueOnce({ ...mockUser, avatarUrl: null });
+      const serviceWithFriendCache = new UserService(
+        mockRepo as unknown as UserRepository,
+        { invalidateProfileFeeds } as unknown as UserProfileCacheInvalidator,
+        undefined,
+      );
+
+      await serviceWithFriendCache.updateProfile(mockUser.id, { avatarUrl: null });
+
+      expect(invalidateProfileFeeds).toHaveBeenCalledWith(mockUser.id);
+    });
+
+    it("rejects an uploaded avatar larger than the limit", async () => {
+      vi.stubEnv("API_PUBLIC_URL", "https://api.example.com");
+      const objectKey = `avatars/${mockUser.id}/0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b.png`;
+      const avatarUrl = avatarUrlForObjectKey(mockUser.id, objectKey);
+      const storage = {
+        headObject: vi.fn().mockResolvedValue({
+          contentLength: USER_AVATAR_MAX_BYTES + 1,
+          contentType: "image/png",
+        }),
+      };
+      const storageService = new UserService(
+        mockRepo as unknown as UserRepository,
+        { invalidateProfileFeeds: vi.fn() } as unknown as UserProfileCacheInvalidator,
+        storage as unknown as StorageService,
+      );
+
+      await expectBusinessError(
+        storageService.updateProfile(mockUser.id, { avatarUrl }),
+        "FILE_TOO_LARGE",
+      );
+      expect(mockRepo.updateProfile).not.toHaveBeenCalled();
     });
 
     it("throws BusinessError USER_NOT_FOUND when user to update does not exist", async () => {

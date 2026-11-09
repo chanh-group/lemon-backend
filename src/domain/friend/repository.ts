@@ -33,6 +33,7 @@ export interface FriendRepository {
     cursor: string | undefined,
     limit: number,
   ): Promise<CursorPage<FriendUser>>;
+  getAcceptedFriendIds(userId: string): Promise<string[]>;
   findAcceptedFriendIds(userId: string, candidates: string[]): Promise<Set<string>>;
   listRequestsPage(
     userId: string,

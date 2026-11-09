@@ -30,9 +30,17 @@ export const sendMessageSchema = z
     replyToId: z.string().uuid(vmsg("VALIDATION_UUID_REPLY_TO")).optional(),
     attachments: z.array(messageAttachmentInputSchema).max(10).optional(),
     isForwarded: z.boolean().optional(),
+    sourceMessageId: z.string().uuid().optional(),
   })
   .refine(
+    (data) =>
+      (!data.sourceMessageId || data.isForwarded === true) &&
+      (data.isForwarded !== true || Boolean(data.sourceMessageId)),
+    { message: vmsg("VALIDATION_MESSAGE_BODY_REQUIRED"), path: ["isForwarded"] },
+  )
+  .refine(
     (data) => {
+      if (data.isForwarded && data.sourceMessageId) return true;
       const hasAttachments = Boolean(data.attachments && data.attachments.length > 0);
       if (data.kind === "TEXT" && !hasAttachments) {
         return typeof data.body === "string" && data.body.trim().length > 0;

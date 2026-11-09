@@ -40,6 +40,7 @@ export class S3StorageService implements StorageService {
   async presignPut(params: {
     objectKey: string;
     mimeType: string;
+    contentLength?: number;
   }): Promise<{ uploadUrl: string }> {
     try {
       const uploadUrl = await this.presigner(
@@ -48,10 +49,15 @@ export class S3StorageService implements StorageService {
           Bucket: this.bucket,
           Key: params.objectKey,
           ContentType: params.mimeType,
+          ...(params.contentLength !== undefined && { ContentLength: params.contentLength }),
         }),
         {
           expiresIn: this.presignTtlSecs,
-          signableHeaders: new Set(["content-type"]),
+          signableHeaders: new Set(
+            params.contentLength === undefined
+              ? ["content-type"]
+              : ["content-length", "content-type"],
+          ),
         },
       );
       return { uploadUrl };

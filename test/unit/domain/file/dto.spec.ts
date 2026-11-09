@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { presignFileSchema } from "../../../../src/domain/file/dto/request.js";
+import { fileUploadSchema, presignFileSchema } from "../../../../src/domain/file/dto/request.js";
 
 describe("presignFileSchema", () => {
   const valid = { kind: "STORY_IMAGE", sizeBytes: 1024, mimeType: "image/jpeg" };
@@ -23,5 +23,9 @@ describe("presignFileSchema", () => {
     expect(presignFileSchema.safeParse({ ...valid, mimeType: "x".repeat(256) }).success).toBe(
       false,
     );
+  });
+
+  it("requires the size-limited avatar upload endpoint for USER_AVATAR", () => {
+    expect(fileUploadSchema.safeParse({ kind: "USER_AVATAR" }).success).toBe(false);
   });
 });

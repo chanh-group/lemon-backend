@@ -1,28 +1,41 @@
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { FileService } from "../../../../src/domain/file/service.js";
 import type { StorageService } from "../../../../src/utils/storage/store.js";
 import { StorageError } from "../../../../src/utils/storage/error.js";
+import { avatarUrlForObjectKey } from "../../../../src/utils/storage/avatar.js";
 
 describe("FileService", () => {
   let service: FileService;
   let presignPutMock: Mock<
-    (params: { objectKey: string; mimeType: string }) => Promise<{ uploadUrl: string }>
+    (params: {
+      objectKey: string;
+      mimeType: string;
+      contentLength?: number;
+    }) => Promise<{ uploadUrl: string }>
   >;
   let putObjectMock: Mock<
     (params: { objectKey: string; body: Buffer; mimeType: string }) => Promise<void>
   >;
+  let headObjectMock: Mock;
+  let presignGetMock: Mock;
 
   const storage = () =>
     ({
       presignPut: presignPutMock,
       putObject: putObjectMock,
+      headObject: headObjectMock,
+      presignGet: presignGetMock,
     }) as unknown as StorageService;
 
   beforeEach(() => {
     presignPutMock = vi.fn().mockResolvedValue({ uploadUrl: "https://s3.example/signed" });
     putObjectMock = vi.fn().mockResolvedValue(undefined);
+    headObjectMock = vi.fn().mockResolvedValue({ contentLength: 1024, contentType: "image/png" });
+    presignGetMock = vi.fn().mockResolvedValue({ downloadUrl: "https://s3.example/avatar" });
     service = new FileService(storage());
   });
+
+  afterEach(() => vi.unstubAllEnvs());
 
   it("presigns an image upload with a server-generated user-scoped key", async () => {
     const result = await service.presign("user-1", {
@@ -42,6 +55,7 @@ describe("FileService", () => {
   });
 
   it("presigns an avatar upload with an avatars/ prefix", async () => {
+    vi.stubEnv("API_PUBLIC_URL", "https://api.example.com");
     const result = await service.presign("user-1", {
       kind: "USER_AVATAR",
       sizeBytes: 2048,
@@ -52,6 +66,41 @@ describe("FileService", () => {
     expect(result.objectKey).toMatch(
       /^avatars\/user-1\/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.png$/,
     );
+    expect(result.avatarUrl).toBe(avatarUrlForObjectKey("user-1", result.objectKey));
+    expect(presignPutMock).toHaveBeenCalledWith({
+      objectKey: result.objectKey,
+      mimeType: "image/png",
+      contentLength: 2048,
+    });
+  });
+
+  it("creates a short-lived download URL for a user-scoped avatar", async () => {
+    vi.stubEnv("API_PUBLIC_URL", "https://api.example.com");
+    const userId = "0193a2b1-0000-7000-8000-000000000001";
+    const fileName = "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b.png";
+    const objectKey = `avatars/${userId}/${fileName}`;
+    const url = await service.getAvatarDownloadUrl(
+      userId,
+      fileName,
+      avatarUrlForObjectKey(userId, objectKey),
+    );
+
+    expect(url).toBe("https://s3.example/avatar");
+    expect(headObjectMock).toHaveBeenCalledWith(objectKey);
+    expect(presignGetMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        objectKey,
+        disposition: "inline",
+        mimeType: "image/png",
+      }),
+    );
+  });
+
+  it("rejects avatar paths outside the generated filename format", async () => {
+    await expect(service.getAvatarDownloadUrl("user-1", "../../secret.png")).rejects.toMatchObject({
+      code: "USER_NOT_FOUND",
+    });
+    expect(headObjectMock).not.toHaveBeenCalled();
   });
 
   it("maps every allowed image MIME to its extension", async () => {
