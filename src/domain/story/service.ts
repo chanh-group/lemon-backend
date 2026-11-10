@@ -22,7 +22,12 @@ import {
   toStoryPreview,
 } from "./dto/mapper.js";
 import { STORY_SILENT_LIKE_EMOJI, type StoryEmoji, type StoryReactionKind } from "./constants.js";
-import type { CreateStoryDto, ReplyStoryDto, UpdateStorySettingsDto } from "./dto/request.js";
+import type {
+  CreateStoryDto,
+  ReplyStoryDto,
+  UpdateStoryDto,
+  UpdateStorySettingsDto,
+} from "./dto/request.js";
 import type {
   MyStoryReactionResponse,
   StoryItemResponse,
@@ -200,6 +205,47 @@ export class StoryService {
       reactionsCountMap.get(storyId) ?? 0,
       myReaction?.kind ?? null,
     );
+  }
+
+  async getMediaUrl(userId: string, storyId: string): Promise<{ url: string }> {
+    const story = await this.storyRepo.findById(storyId);
+    if (!story || story.deletedAt || !story.objectKey) throw new BusinessError("STORY_NOT_FOUND");
+    if (story.archivedAt || story.expiresAt <= new Date()) {
+      if (story.userId !== userId || !story.archivedAt) throw new BusinessError("STORY_NOT_FOUND");
+    } else {
+      await this.assertCanViewStory(story, userId, "STORY_VIEW_FORBIDDEN");
+    }
+    const { downloadUrl } = await this.storage.presignGet({
+      objectKey: story.objectKey,
+      disposition: "inline",
+      ...(story.mimeType && { mimeType: story.mimeType }),
+    });
+    return { url: downloadUrl };
+  }
+
+  async updateStory(
+    userId: string,
+    storyId: string,
+    dto: UpdateStoryDto,
+  ): Promise<StoryItemResponse> {
+    const story = await this.storyRepo.findActiveById(storyId);
+    if (!story) throw new BusinessError("STORY_NOT_FOUND");
+    if (story.userId !== userId) throw new BusinessError("STORY_DELETE_FORBIDDEN");
+    const caption = dto.caption === undefined ? story.caption : dto.caption.trim() || null;
+    const background =
+      dto.background === undefined ? story.background : dto.background.trim() || null;
+    if (story.kind === "TEXT" && !caption && !background)
+      throw new BusinessError("TEXT_STORY_REQUIRES_CONTENT");
+    const updated = await this.storyRepo.updateActive(storyId, userId, {
+      ...(dto.caption !== undefined && { caption }),
+      ...(dto.background !== undefined && { background }),
+      ...(dto.allowReplies !== undefined && { allowReplies: dto.allowReplies }),
+      ...(dto.allowReactions !== undefined && { allowReactions: dto.allowReactions }),
+    });
+    if (!updated) throw new BusinessError("STORY_NOT_FOUND");
+    const friends = await this.storyRepo.getFriendUserIds(userId);
+    await this.cache.deleteManyBestEffort([userId, ...friends].map(storyFeedKey));
+    return toStoryItemResponse(updated);
   }
 
   async viewStory(userId: string, storyId: string): Promise<void> {
@@ -520,8 +566,11 @@ export class StoryService {
     }
 
     if (story.audienceMode === "CUSTOM") {
-      const isAudience = await this.storyRepo.isStoryAudience(story.id, viewerId);
-      if (!isAudience) {
+      const [isFriend, isAudience] = await Promise.all([
+        this.storyRepo.isAcceptedFriend(story.userId, viewerId),
+        this.storyRepo.isStoryAudience(story.id, viewerId),
+      ]);
+      if (!isFriend || !isAudience) {
         throw new BusinessError(forbiddenCode);
       }
       return;

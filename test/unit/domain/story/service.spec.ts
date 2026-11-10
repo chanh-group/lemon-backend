@@ -13,6 +13,7 @@ describe("StoryService", () => {
   let service: StoryService;
 
   let createStoryMock: Mock;
+  let updateActiveMock: Mock;
   let findByIdMock: Mock;
   let findActiveByIdMock: Mock;
   let findActiveByUserIdsMock: Mock;
@@ -46,6 +47,7 @@ describe("StoryService", () => {
   let deleteBestEffortMock: Mock;
   let deleteManyBestEffortMock: Mock;
 
+  let presignGetMock: Mock;
   let headObjectMock: Mock;
   let getBucketMock: Mock;
   let storageMock: StorageService;
@@ -87,6 +89,7 @@ describe("StoryService", () => {
         id: "story-id-new",
       }),
     );
+    updateActiveMock = vi.fn().mockResolvedValue(mockStory);
     findByIdMock = vi.fn().mockResolvedValue(mockStory);
     findActiveByIdMock = vi.fn().mockResolvedValue(mockStory);
     findActiveByUserIdsMock = vi.fn().mockResolvedValue([mockStory]);
@@ -177,9 +180,10 @@ describe("StoryService", () => {
 
     headObjectMock = vi.fn().mockResolvedValue({ contentLength: 1000, contentType: "image/jpeg" });
     getBucketMock = vi.fn().mockReturnValue("lemon-stories");
+    presignGetMock = vi.fn();
     storageMock = {
       presignPut: vi.fn(),
-      presignGet: vi.fn(),
+      presignGet: presignGetMock,
       putObject: vi.fn(),
       headObject: headObjectMock,
       deleteObjects: vi.fn(),
@@ -188,6 +192,7 @@ describe("StoryService", () => {
 
     const mockRepo: StoryRepository = {
       create: createStoryMock,
+      updateActive: updateActiveMock,
       findById: findByIdMock,
       findActiveById: findActiveByIdMock,
       findActiveByUserIds: findActiveByUserIdsMock,
@@ -249,6 +254,75 @@ describe("StoryService", () => {
       messageServiceMock,
       realtimeServiceMock,
     );
+  });
+
+  describe("updateStory", () => {
+    it("updates an owner's active story and invalidates friend feeds", async () => {
+      await service.updateStory("user-owner-1", mockStory.id, {
+        caption: " Changed ",
+        allowReplies: false,
+      });
+      expect(updateActiveMock).toHaveBeenCalledWith(mockStory.id, "user-owner-1", {
+        caption: "Changed",
+        allowReplies: false,
+      });
+      expect(deleteManyBestEffortMock).toHaveBeenCalledOnce();
+    });
+    it("rejects edits from another user", async () => {
+      await expect(
+        service.updateStory("friend-1", mockStory.id, { caption: "Changed" }),
+      ).rejects.toThrow();
+      expect(updateActiveMock).not.toHaveBeenCalled();
+    });
+    it("rejects edits after expiry", async () => {
+      findActiveByIdMock.mockResolvedValue(null);
+      await expect(
+        service.updateStory("user-owner-1", mockStory.id, { caption: "Changed" }),
+      ).rejects.toThrow();
+      expect(updateActiveMock).not.toHaveBeenCalled();
+    });
+    it("rejects an empty text story", async () => {
+      findActiveByIdMock.mockResolvedValue({ ...mockStory, kind: "TEXT", background: null });
+      await expect(
+        service.updateStory("user-owner-1", mockStory.id, { caption: "  " }),
+      ).rejects.toThrow();
+      expect(updateActiveMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("story media access", () => {
+    it("does not sign a custom-audience story after friendship ends", async () => {
+      findByIdMock.mockResolvedValue({
+        ...mockStory,
+        audienceMode: "CUSTOM",
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+      isStoryAudienceMock.mockResolvedValue(true);
+      isAcceptedFriendMock.mockResolvedValue(false);
+      await expect(service.getMediaUrl("former-friend", mockStory.id)).rejects.toThrow();
+      expect(presignGetMock).not.toHaveBeenCalled();
+    });
+    it("signs media for an authorized friend", async () => {
+      findByIdMock.mockResolvedValue({ ...mockStory, expiresAt: new Date(Date.now() + 60_000) });
+      presignGetMock.mockResolvedValue({ downloadUrl: "https://storage.example/signed" });
+      await expect(service.getMediaUrl("friend-1", mockStory.id)).resolves.toEqual({
+        url: "https://storage.example/signed",
+      });
+      expect(presignGetMock).toHaveBeenCalledOnce();
+    });
+
+    it("does not sign media for an unauthorized viewer", async () => {
+      findByIdMock.mockResolvedValue({ ...mockStory, expiresAt: new Date(Date.now() + 60_000) });
+      isAcceptedFriendMock.mockResolvedValue(false);
+      await expect(service.getMediaUrl("stranger", mockStory.id)).rejects.toThrow();
+      expect(presignGetMock).not.toHaveBeenCalled();
+    });
+
+    it("restricts archived media to its owner", async () => {
+      findByIdMock.mockResolvedValue({ ...mockStory, archivedAt: new Date() });
+      await expect(service.getMediaUrl("friend-1", mockStory.id)).rejects.toThrow();
+      expect(presignGetMock).not.toHaveBeenCalled();
+    });
   });
 
   describe("createStory", () => {
