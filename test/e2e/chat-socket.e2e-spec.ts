@@ -423,15 +423,13 @@ describe("Realtime chat gateway over socket.io (E2E)", () => {
 
       try {
         const [userLow, userHigh] = [userA, userC].sort();
-        await db
-          .insert(friendships)
-          .values({
-            requesterId: userA,
-            addresseeId: userC,
-            userLow,
-            userHigh,
-            status: "ACCEPTED",
-          });
+        await db.insert(friendships).values({
+          requesterId: userA,
+          addresseeId: userC,
+          userLow,
+          userHigh,
+          status: "ACCEPTED",
+        });
         const createRes = await request(app.getHttpServer())
           .post("/api/conversations/direct")
           .set("Authorization", `Bearer ${tokenA}`)
