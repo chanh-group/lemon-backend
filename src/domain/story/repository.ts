@@ -76,6 +76,10 @@ export interface StoryRepository {
   ): Promise<CursorPage<StoryReactionResponse>>;
   findUserReactions(userId: string, storyIds: string[]): Promise<Map<string, UserReactionDetail>>;
   countReactions(storyIds: string[]): Promise<Map<string, number>>;
+  summarizeReactions(
+    storyId: string,
+    kind?: StoryReactionKind,
+  ): Promise<Array<{ emoji: string; count: number }>>;
 
   // Settings
   getUserStorySettings(userId: string): Promise<UserStorySettingsValues>;

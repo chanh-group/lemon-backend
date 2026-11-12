@@ -209,6 +209,7 @@ describe("StoryService", () => {
       addReactionWithView: addReactionWithViewMock,
       deleteReaction: deleteReactionMock,
       findReactionsByStoryId: findReactionsByStoryIdMock,
+      summarizeReactions: vi.fn().mockResolvedValue([]),
       findUserReactions: findUserReactionsMock,
       countReactions: countReactionsMock,
       getUserStorySettings: getUserStorySettingsMock,

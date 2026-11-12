@@ -161,6 +161,52 @@ describe("Story flows with PostgreSQL and Redis", () => {
       .auth(friendToken, { type: "bearer" })
       .send({ emoji: "👍" })
       .expect(200);
+    const reactions = await request(app.getHttpServer())
+      .get(`/api/stories/${textId}/reactions`)
+      .auth(ownerToken, { type: "bearer" })
+      .expect(200);
+    expect(reactions.body.data).toMatchObject({
+      totalCount: 1,
+      summary: [{ emoji: "👍", count: 1 }],
+    });
+    expect(reactions.body.data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          user: expect.objectContaining({ id: friend }),
+          emoji: "👍",
+          kind: "REACTION",
+        }),
+      ]),
+    );
+    await request(app.getHttpServer())
+      .get(`/api/stories/${textId}/reactions`)
+      .auth(friendToken, { type: "bearer" })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`/api/stories/${textId}/like`)
+      .auth(friendToken, { type: "bearer" })
+      .expect(200);
+    const liked = await request(app.getHttpServer())
+      .get(`/api/stories/${textId}/reactions`)
+      .auth(ownerToken, { type: "bearer" })
+      .expect(200);
+    expect(liked.body.data).toMatchObject({ totalCount: 1, summary: [{ emoji: "❤️", count: 1 }] });
+    expect(liked.body.data.items).toHaveLength(1);
+    expect(liked.body.data.items[0]).toMatchObject({
+      user: { id: friend },
+      emoji: "❤️",
+      kind: "LIKE",
+    });
+    await request(app.getHttpServer())
+      .delete(`/api/stories/${textId}/like`)
+      .auth(friendToken, { type: "bearer" })
+      .expect(200);
+    const removedReaction = await request(app.getHttpServer())
+      .get(`/api/stories/${textId}/reactions`)
+      .auth(ownerToken, { type: "bearer" })
+      .expect(200);
+    expect(removedReaction.body.data).toMatchObject({ totalCount: 0, summary: [] });
+    expect(removedReaction.body.data.items).toHaveLength(0);
     const reply = await request(app.getHttpServer())
       .post(`/api/stories/${textId}/reply`)
       .auth(friendToken, { type: "bearer" })

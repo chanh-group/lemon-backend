@@ -446,7 +446,12 @@ export class StoryService {
     cursor: string | undefined,
     limit: number,
     kind?: StoryReactionKind,
-  ): Promise<CursorPage<StoryReactionResponse>> {
+  ): Promise<
+    CursorPage<StoryReactionResponse> & {
+      totalCount: number;
+      summary: Array<{ emoji: string; count: number }>;
+    }
+  > {
     const story = await this.storyRepo.findActiveById(storyId);
     if (!story) {
       throw new BusinessError("STORY_NOT_FOUND");
@@ -456,7 +461,11 @@ export class StoryService {
       throw new BusinessError("STORY_REACTIONS_FORBIDDEN");
     }
 
-    return this.storyRepo.findReactionsByStoryId(storyId, cursor, limit, kind);
+    const [page, summary] = await Promise.all([
+      this.storyRepo.findReactionsByStoryId(storyId, cursor, limit, kind),
+      this.storyRepo.summarizeReactions(storyId, kind),
+    ]);
+    return { ...page, summary, totalCount: summary.reduce((sum, item) => sum + item.count, 0) };
   }
 
   async replyStory(userId: string, storyId: string, dto: ReplyStoryDto): Promise<MessageResponse> {

@@ -181,6 +181,7 @@ export class ExampleService {
 
 ## Story: cập nhật và truy cập media
 
+- `GET /api/stories/:id/reactions` (Bearer token): chỉ chủ story còn hiệu lực xem được danh sách phân trang `items`, `nextCursor`, `hasMore`. Phản hồi bổ sung `totalCount` và `summary` (mảng `{ emoji, count }`), thống kê trên toàn bộ kết quả, không chỉ trang hiện tại. Nếu có bộ lọc `kind=LIKE` hoặc `kind=REACTION`, thống kê cũng áp dụng bộ lọc đó.
 - `PATCH /api/stories/:id` (Bearer token): chủ sở hữu có thể cập nhật story còn hiệu lực bằng các trường tùy chọn `caption` (tối đa 500 ký tự), `background` (tối đa 200 ký tự), `allowReplies`, `allowReactions`. Phải gửi ít nhất một trường. API trả về story đã cập nhật; không thay đổi thời điểm hết hạn hoặc tệp media. Story văn bản phải còn nội dung hoặc nền. Story đã xóa/hết hạn không sửa được.
 - `GET /api/stories/:id/media` (Bearer token): trả `{ success: true, data: { url } }`, là URL ký tạm thời để xem media. Người xem phải có quyền xem story đang hoạt động; media story đã lưu trữ chỉ chủ sở hữu xem được. Không lưu URL này như URL cố định; gọi lại khi URL hết hạn. Story văn bản hoặc story không tồn tại trả lỗi.
 - Media mới: gọi `POST /api/files/presign`, PUT file lên URL được cấp, sau đó `POST /api/stories` với `objectKey`. Có thể dùng `POST /api/files/upload` làm phương án thay thế nếu PUT trực tiếp thất bại. Ảnh tối đa 10 MiB, video tối đa 50 MiB.
