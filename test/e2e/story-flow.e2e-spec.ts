@@ -1,0 +1,229 @@
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import type { INestApplication } from "@nestjs/common";
+import { Test } from "@nestjs/testing";
+import { getDrizzleToken } from "@nestjs/drizzle";
+import { inArray } from "drizzle-orm";
+import request from "supertest";
+import { v7 as uuidv7 } from "uuid";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { AppModule } from "../../src/app.js";
+import type { DrizzleDb } from "../../src/configs/database.js";
+import { JWT_CONFIG } from "../../src/domain/auth/constants.js";
+import type { JwtConfig } from "../../src/domain/auth/jwt.js";
+import { conversationParticipants, conversations } from "../../src/domain/conversation/schema.js";
+import { friendships } from "../../src/domain/friend/schema.js";
+import { users } from "../../src/domain/user/schema.js";
+import { ErrorFilter } from "../../src/middleware/error-filter.js";
+import { standardSchemaPipe } from "../../src/utils/validation.js";
+import { STORAGE_SERVICE, type StorageService } from "../../src/utils/storage/store.js";
+
+describe("Story flows with PostgreSQL and Redis", () => {
+  let app: INestApplication;
+  let db: DrizzleDb;
+  let server: Server;
+  let storageUrl: string;
+  const objects = new Map<string, { body: Buffer; contentType: string }>();
+  const owner = uuidv7(),
+    friend = uuidv7(),
+    stranger = uuidv7();
+  let ownerToken: string, friendToken: string, strangerToken: string;
+  let textId: string, mediaId: string;
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      const key = decodeURIComponent(new URL(req.url ?? "/", "http://localhost").pathname.slice(1));
+      if (req.method === "PUT") {
+        const chunks: Buffer[] = [];
+        req.on("data", (chunk: Buffer) => chunks.push(chunk));
+        req.on("end", () => {
+          objects.set(key, {
+            body: Buffer.concat(chunks),
+            contentType: String(req.headers["content-type"]),
+          });
+          res.writeHead(200).end();
+        });
+      } else if (req.method === "GET" && objects.has(key)) {
+        const object = objects.get(key)!;
+        res.writeHead(200, { "Content-Type": object.contentType }).end(object.body);
+      } else res.writeHead(404).end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    storageUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const storage: StorageService = {
+      getBucket: () => "test-bucket",
+      presignPut: async ({ objectKey }) => ({
+        uploadUrl: `${storageUrl}/${encodeURIComponent(objectKey)}`,
+      }),
+      presignGet: async ({ objectKey }) => ({
+        downloadUrl: `${storageUrl}/${encodeURIComponent(objectKey)}`,
+      }),
+      headObject: async (key) => {
+        const o = objects.get(key);
+        return o ? { contentLength: o.body.length, contentType: o.contentType } : null;
+      },
+      putObject: async ({ objectKey, body, mimeType }) => {
+        objects.set(objectKey, { body: Buffer.from(body), contentType: mimeType });
+      },
+      deleteObjects: async (keys) => {
+        for (const key of keys) objects.delete(key);
+        return { deleted: keys, failed: [] };
+      },
+    };
+    const module = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(STORAGE_SERVICE)
+      .useValue(storage)
+      .compile();
+    app = module.createNestApplication();
+    app.setGlobalPrefix("api");
+    app.useGlobalPipes(standardSchemaPipe());
+    app.useGlobalFilters(new ErrorFilter());
+    await app.init();
+    db = module.get<DrizzleDb>(getDrizzleToken());
+    const jwt = module.get<JwtConfig>(JWT_CONFIG);
+    [ownerToken, friendToken, strangerToken] = await Promise.all(
+      [owner, friend, stranger].map((id) => jwt.signAccessToken(id)),
+    );
+    const unique = Date.now().toString();
+    await db.insert(users).values(
+      [owner, friend, stranger].map((id, i) => ({
+        id,
+        email: `story${unique}${i}@example.test`,
+        username: `story${unique}${i}`,
+        fullName: `Story Test ${i}`,
+      })),
+    );
+    const [userLow, userHigh] = [owner, friend].sort();
+    await db
+      .insert(friendships)
+      .values({ requesterId: owner, addresseeId: friend, userLow, userHigh, status: "ACCEPTED" });
+  }, 30000);
+
+  afterAll(async () => {
+    try {
+      if (db) {
+        const testUserIds = [owner, friend, stranger];
+        const ownedConversations = db
+          .select({ id: conversationParticipants.conversationId })
+          .from(conversationParticipants)
+          .where(inArray(conversationParticipants.userId, testUserIds));
+        await db.delete(conversations).where(inArray(conversations.id, ownedConversations));
+        await db.delete(users).where(inArray(users.id, testUserIds));
+      }
+    } finally {
+      if (app) await app.close();
+      if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("creates, views, edits, reacts, replies and deletes a text story", async () => {
+    const created = await request(app.getHttpServer())
+      .post("/api/stories")
+      .auth(ownerToken, { type: "bearer" })
+      .send({ kind: "TEXT", caption: "Initial" })
+      .expect(201);
+    textId = created.body.data.id;
+    const feed = await request(app.getHttpServer())
+      .get("/api/stories/feed")
+      .auth(friendToken, { type: "bearer" })
+      .expect(200);
+    expect(
+      feed.body.data
+        .flatMap((group: { stories: { id: string }[] }) => group.stories)
+        .some((s: { id: string }) => s.id === textId),
+    ).toBe(true);
+    await request(app.getHttpServer())
+      .post(`/api/stories/${textId}/view`)
+      .auth(friendToken, { type: "bearer" })
+      .expect(200);
+    const viewers = await request(app.getHttpServer())
+      .get(`/api/stories/${textId}/views`)
+      .auth(ownerToken, { type: "bearer" })
+      .expect(200);
+    expect(viewers.body.data.totalViewsCount).toBe(1);
+    await request(app.getHttpServer())
+      .patch(`/api/stories/${textId}`)
+      .auth(friendToken, { type: "bearer" })
+      .send({ caption: "not mine" })
+      .expect(403);
+    await request(app.getHttpServer())
+      .patch(`/api/stories/${textId}`)
+      .auth(ownerToken, { type: "bearer" })
+      .send({ caption: "Edited" })
+      .expect(200);
+    const detail = await request(app.getHttpServer())
+      .get(`/api/stories/${textId}`)
+      .auth(friendToken, { type: "bearer" })
+      .expect(200);
+    expect(detail.body.data.caption).toBe("Edited");
+    await request(app.getHttpServer())
+      .post(`/api/stories/${textId}/react`)
+      .auth(friendToken, { type: "bearer" })
+      .send({ emoji: "👍" })
+      .expect(200);
+    const reply = await request(app.getHttpServer())
+      .post(`/api/stories/${textId}/reply`)
+      .auth(friendToken, { type: "bearer" })
+      .send({ body: "Hello from story" })
+      .expect(201);
+    expect(reply.body.data).toMatchObject({
+      storyId: textId,
+      body: "Hello from story",
+      senderId: friend,
+    });
+    const messages = await request(app.getHttpServer())
+      .get(`/api/conversations/${reply.body.data.conversationId}/messages`)
+      .auth(ownerToken, { type: "bearer" })
+      .expect(200);
+    expect(
+      messages.body.data.items.some((item: { id: string }) => item.id === reply.body.data.id),
+    ).toBe(true);
+    await request(app.getHttpServer())
+      .patch(`/api/stories/${textId}`)
+      .auth(ownerToken, { type: "bearer" })
+      .send({ allowReplies: false })
+      .expect(200);
+    await request(app.getHttpServer())
+      .post(`/api/stories/${textId}/reply`)
+      .auth(friendToken, { type: "bearer" })
+      .send({ body: "Disabled" })
+      .expect(403);
+    await request(app.getHttpServer())
+      .delete(`/api/stories/${textId}`)
+      .auth(ownerToken, { type: "bearer" })
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/api/stories/${textId}`)
+      .auth(friendToken, { type: "bearer" })
+      .expect(404);
+  }, 30000);
+
+  it("uploads and reads media only for an authorized user", async () => {
+    const signed = await request(app.getHttpServer())
+      .post("/api/files/presign")
+      .auth(ownerToken, { type: "bearer" })
+      .send({ kind: "STORY_IMAGE", sizeBytes: 4, mimeType: "image/jpeg", fileName: "test.jpg" })
+      .expect(200);
+    const uploaded = await fetch(signed.body.data.uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": "image/jpeg" },
+      body: "test",
+    });
+    expect(uploaded.ok).toBe(true);
+    const created = await request(app.getHttpServer())
+      .post("/api/stories")
+      .auth(ownerToken, { type: "bearer" })
+      .send({ kind: "IMAGE", objectKey: signed.body.data.objectKey })
+      .expect(201);
+    mediaId = created.body.data.id;
+    const media = await request(app.getHttpServer())
+      .get(`/api/stories/${mediaId}/media`)
+      .auth(friendToken, { type: "bearer" })
+      .expect(200);
+    expect(await (await fetch(media.body.data.url)).text()).toBe("test");
+    await request(app.getHttpServer())
+      .get(`/api/stories/${mediaId}/media`)
+      .auth(strangerToken, { type: "bearer" })
+      .expect(403);
+  }, 30000);
+});

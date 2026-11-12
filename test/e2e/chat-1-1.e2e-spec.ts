@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../../src/app.js";
 import { DrizzleDb } from "../../src/configs/database.js";
 import { users } from "../../src/domain/user/schema.js";
+import { friendships } from "../../src/domain/friend/schema.js";
 import { ErrorFilter } from "../../src/middleware/error-filter.js";
 import { standardSchemaPipe } from "../../src/utils/validation.js";
 import cookieParser from "cookie-parser";
@@ -47,7 +48,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     tokenB = await jwtConfig.signAccessToken(userB);
 
     const ts = Date.now();
-    // Insert 2 mock users into Neon DB for foreign key compliance
+    // Create isolated users and an accepted friendship for direct chat.
     await db
       .insert(users)
       .values([
@@ -65,6 +66,10 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
         },
       ])
       .onConflictDoNothing();
+    const [userLow, userHigh] = [userA, userB].sort();
+    await db
+      .insert(friendships)
+      .values({ requesterId: userA, addresseeId: userB, userLow, userHigh, status: "ACCEPTED" });
   });
 
   afterAll(async () => {
@@ -184,8 +189,9 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
 
     expect(res.body.success).toBe(true);
     expect(res.body.message).toBe("OK");
-    expect(Array.isArray(res.body.data)).toBe(true);
-    const found = res.body.data.find((c: { id: string }) => c.id === conversationId);
+    expect(Array.isArray(res.body.data.items)).toBe(true);
+    expect(typeof res.body.data.hasMore).toBe("boolean");
+    const found = res.body.data.items.find((c: { id: string }) => c.id === conversationId);
     expect(found).toBeDefined();
   });
 
@@ -440,7 +446,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     expect(res1.body.data.id).toBe(res2.body.data.id);
   });
 
-  it("DELETE /api/messages/:id - should update conversation lastMessagePreview to 'Tin nhắn đã bị thu hồi'", async () => {
+  it("DELETE /api/messages/:id - should expose the language-neutral revoked-message preview marker", async () => {
     const sendRes = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .set("Authorization", `Bearer ${tokenA}`)
@@ -461,6 +467,6 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       .set("Authorization", `Bearer ${tokenA}`)
       .expect(200);
 
-    expect(convRes.body.data.lastMessagePreview).toBe("Tin nhắn đã bị thu hồi");
+    expect(convRes.body.data.lastMessagePreview).toBe("[message-revoked]");
   });
 });

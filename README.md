@@ -178,3 +178,11 @@ export class ExampleService {
 - Mỗi việc một nhánh (`feat/...`, `fix/...`, `refactor/...`), commit theo conventional commits (`feat(cache): ...`).
 - Mở PR vào `main` trên GitHub UI, chờ review rồi merge. Không push thẳng `main`.
 - Trước khi báo xong việc: `bun run typecheck && bun run lint && bun run test` phải xanh hết.
+
+## Story: cập nhật và truy cập media
+
+- `PATCH /api/stories/:id` (Bearer token): chủ sở hữu có thể cập nhật story còn hiệu lực bằng các trường tùy chọn `caption` (tối đa 500 ký tự), `background` (tối đa 200 ký tự), `allowReplies`, `allowReactions`. Phải gửi ít nhất một trường. API trả về story đã cập nhật; không thay đổi thời điểm hết hạn hoặc tệp media. Story văn bản phải còn nội dung hoặc nền. Story đã xóa/hết hạn không sửa được.
+- `GET /api/stories/:id/media` (Bearer token): trả `{ success: true, data: { url } }`, là URL ký tạm thời để xem media. Người xem phải có quyền xem story đang hoạt động; media story đã lưu trữ chỉ chủ sở hữu xem được. Không lưu URL này như URL cố định; gọi lại khi URL hết hạn. Story văn bản hoặc story không tồn tại trả lỗi.
+- Media mới: gọi `POST /api/files/presign`, PUT file lên URL được cấp, sau đó `POST /api/stories` với `objectKey`. Có thể dùng `POST /api/files/upload` làm phương án thay thế nếu PUT trực tiếp thất bại. Ảnh tối đa 10 MiB, video tối đa 50 MiB.
+
+Kiểm thử luồng story: `bun run test:e2e -- test/e2e/story-flow.e2e-spec.ts` cần PostgreSQL đã migrate, Redis và JWT secret của môi trường **test**. Test tạo người dùng và quan hệ bạn bè tạm, gọi HTTP với JWT thật, rồi dọn người dùng sau khi chạy. Storage trong test được thay bằng server HTTP in-memory, do đó test này không xác nhận chữ ký S3 hoặc cấu hình CORS của R2/MinIO thật.

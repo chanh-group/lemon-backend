@@ -25,6 +25,16 @@ export const createStorySchema = z.object({
 
 export type CreateStoryDto = z.infer<typeof createStorySchema>;
 
+export const updateStorySchema = z
+  .object({
+    caption: z.string().max(STORY_MAX_CAPTION_LENGTH).optional(),
+    background: z.string().max(STORY_MAX_BACKGROUND_LENGTH).optional(),
+    allowReplies: z.boolean().optional(),
+    allowReactions: z.boolean().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0);
+export type UpdateStoryDto = z.infer<typeof updateStorySchema>;
+
 export const reactStorySchema = z.object({
   emoji: z.enum(ALLOWED_STORY_EMOJIS),
 });

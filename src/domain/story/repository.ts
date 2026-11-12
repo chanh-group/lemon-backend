@@ -38,6 +38,11 @@ export interface StoryRepository {
     audienceUserIds?: string[],
   ): Promise<Story>;
   findById(id: string): Promise<Story | null>;
+  updateActive(
+    id: string,
+    userId: string,
+    data: Partial<Pick<Story, "caption" | "background" | "allowReplies" | "allowReactions">>,
+  ): Promise<Story | null>;
   findActiveById(id: string): Promise<Story | null>;
   findActiveByUserIds(userIds: string[], viewerId?: string): Promise<Story[]>;
   findUsersByIds(userIds: string[]): Promise<Map<string, UserSummary>>;

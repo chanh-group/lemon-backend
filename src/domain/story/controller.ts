@@ -38,10 +38,12 @@ import {
   replyStorySchema,
   getReactionsQuerySchema,
   updateStorySettingsSchema,
+  updateStorySchema,
   type CreateStoryDto,
   type ReactStoryDto,
   type ReplyStoryDto,
   type UpdateStorySettingsDto,
+  type UpdateStoryDto,
 } from "./dto/request.js";
 import { StoryService } from "./service.js";
 
@@ -136,6 +138,22 @@ export class StoryController {
     const { id: userId }: AuthUser = getAuthUser(req);
     const data = await this.storyService.getStoryById(userId, storyId);
     return ok(data);
+  }
+
+  @Get(":id/media")
+  async getMedia(@Req() req: { user?: unknown }, @Param("id", ParseUUIDPipe) storyId: string) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    return ok(await this.storyService.getMediaUrl(userId, storyId));
+  }
+
+  @Patch(":id")
+  async updateStory(
+    @Req() req: { user?: unknown },
+    @Param("id", ParseUUIDPipe) storyId: string,
+    @Body({ schema: updateStorySchema }) dto: UpdateStoryDto,
+  ) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    return ok(await this.storyService.updateStory(userId, storyId, dto));
   }
 
   @Post(":id/view")

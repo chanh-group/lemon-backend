@@ -22,6 +22,7 @@ import type {
 import type { CursorPage } from "../../../../src/domain/shared.js";
 import type { MessageResponse } from "../../../../src/domain/message/dto/response.js";
 import { MemoryRateLimiter, RATE_LIMITER } from "../../../../src/middleware/ratelimit.js";
+import { ErrorFilter } from "../../../../src/middleware/error-filter.js";
 import { standardSchemaPipe } from "../../../../src/utils/validation.js";
 
 describe("StoryController", () => {
@@ -586,16 +587,22 @@ describe("StoryController", () => {
     let httpCreateStory: ReturnType<typeof vi.fn>;
     let httpGetFeed: ReturnType<typeof vi.fn>;
     let httpViewStory: ReturnType<typeof vi.fn>;
+    let httpUpdateStory: ReturnType<typeof vi.fn>;
+    let httpGetMedia: ReturnType<typeof vi.fn>;
 
     beforeAll(async () => {
       httpCreateStory = vi.fn();
       httpGetFeed = vi.fn();
       httpViewStory = vi.fn();
+      httpUpdateStory = vi.fn();
+      httpGetMedia = vi.fn();
 
       const mockService = {
         createStory: httpCreateStory,
         getFeed: httpGetFeed,
         getStoryById: vi.fn(),
+        updateStory: httpUpdateStory,
+        getMediaUrl: httpGetMedia,
         viewStory: httpViewStory,
         getViewers: vi.fn(),
         deleteStory: vi.fn(),
@@ -627,6 +634,7 @@ describe("StoryController", () => {
         next();
       });
       app.useGlobalPipes(standardSchemaPipe());
+      app.useGlobalFilters(new ErrorFilter());
       await app.init();
     });
 
@@ -636,6 +644,33 @@ describe("StoryController", () => {
 
     beforeEach(() => {
       vi.clearAllMocks();
+    });
+
+    it("validates and forwards a story edit over HTTP", async () => {
+      httpUpdateStory.mockResolvedValueOnce(mockStoryItem);
+      const result = await request(app.getHttpServer())
+        .patch(`/stories/${mockStoryItem.id}`)
+        .send({ caption: "new", allowReplies: false })
+        .expect(200);
+      expect(result.body.data.id).toBe(mockStoryItem.id);
+      expect(httpUpdateStory).toHaveBeenCalledWith("user-1", mockStoryItem.id, {
+        caption: "new",
+        allowReplies: false,
+      });
+      await request(app.getHttpServer())
+        .patch(`/stories/${mockStoryItem.id}`)
+        .send({ caption: "x".repeat(501) })
+        .expect(422);
+      expect(httpUpdateStory).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns the media URL via the authenticated story route", async () => {
+      httpGetMedia.mockResolvedValueOnce({ url: "https://storage.example/signed" });
+      const result = await request(app.getHttpServer())
+        .get(`/stories/${mockStoryItem.id}/media`)
+        .expect(200);
+      expect(result.body.data.url).toBe("https://storage.example/signed");
+      expect(httpGetMedia).toHaveBeenCalledWith("user-1", mockStoryItem.id);
     });
 
     it("returns the vi STORY_CREATED message when no accept-language header is sent", async () => {

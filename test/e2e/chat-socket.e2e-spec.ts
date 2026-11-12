@@ -14,6 +14,7 @@ import { JWT_CONFIG } from "../../src/domain/auth/constants.js";
 import type { JwtConfig } from "../../src/domain/auth/jwt.js";
 import { conversations } from "../../src/domain/conversation/schema.js";
 import { users } from "../../src/domain/user/schema.js";
+import { friendships } from "../../src/domain/friend/schema.js";
 import { ErrorFilter } from "../../src/middleware/error-filter.js";
 import { standardSchemaPipe } from "../../src/utils/validation.js";
 
@@ -196,6 +197,10 @@ describe("Realtime chat gateway over socket.io (E2E)", () => {
         },
       ])
       .onConflictDoNothing();
+    const [userLow, userHigh] = [userA, userB].sort();
+    await db
+      .insert(friendships)
+      .values({ requesterId: userA, addresseeId: userB, userLow, userHigh, status: "ACCEPTED" });
 
     [tokenA, tokenB, tokenC] = await Promise.all([
       jwtConfig.signAccessToken(userA),
@@ -417,6 +422,14 @@ describe("Realtime chat gateway over socket.io (E2E)", () => {
       const collector = collectEvents<MessageNewPayload>(clientC, "message:new");
 
       try {
+        const [userLow, userHigh] = [userA, userC].sort();
+        await db.insert(friendships).values({
+          requesterId: userA,
+          addresseeId: userC,
+          userLow,
+          userHigh,
+          status: "ACCEPTED",
+        });
         const createRes = await request(app.getHttpServer())
           .post("/api/conversations/direct")
           .set("Authorization", `Bearer ${tokenA}`)

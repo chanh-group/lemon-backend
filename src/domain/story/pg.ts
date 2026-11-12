@@ -84,6 +84,27 @@ export class StoryPgRepository implements StoryRepository {
     return story ?? null;
   }
 
+  async updateActive(
+    id: string,
+    userId: string,
+    data: Partial<Pick<Story, "caption" | "background" | "allowReplies" | "allowReactions">>,
+  ): Promise<Story | null> {
+    const [story] = await this.db
+      .update(stories)
+      .set(data)
+      .where(
+        and(
+          eq(stories.id, id),
+          eq(stories.userId, userId),
+          gt(stories.expiresAt, sql`now()`),
+          isNull(stories.deletedAt),
+          isNull(stories.archivedAt),
+        ),
+      )
+      .returning();
+    return story ?? null;
+  }
+
   async findActiveById(id: string): Promise<Story | null> {
     const [story] = await this.db
       .select()
