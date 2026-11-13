@@ -104,6 +104,7 @@ export class FriendService {
       throw new BusinessError("NOT_FOUND");
     }
     await this.invalidateSocialFeeds(userId, friendId);
+    this.realtimeService.emitFriendRemoved(userId, friendId);
   }
 
   async blockUser(blockerId: string, targetId: string): Promise<void> {

@@ -107,6 +107,21 @@ describe("RealtimeService", () => {
     });
   });
 
+  describe("emitFriendRemoved", () => {
+    it("emits friend:removed to both users' rooms", () => {
+      const emit = vi.fn();
+      const to = vi.fn().mockReturnValue({ emit });
+      const service = createService(to);
+
+      service.emitFriendRemoved("u1", "u2");
+
+      expect(to).toHaveBeenCalledWith(userRoom("u1"));
+      expect(to).toHaveBeenCalledWith(userRoom("u2"));
+      expect(emit).toHaveBeenCalledWith("friend:removed", { friendId: "u2" });
+      expect(emit).toHaveBeenCalledWith("friend:removed", { friendId: "u1" });
+    });
+  });
+
   describe("joinConversation", () => {
     it("makes every socket of each participant join the conversation room", () => {
       const socketsJoin = vi.fn();
