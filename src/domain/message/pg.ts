@@ -302,6 +302,14 @@ export class MessagePgRepository implements MessageRepository {
     };
   }
 
+  async findReplyTargets(conversationId: string, messageIds: string[]): Promise<Message[]> {
+    if (messageIds.length === 0) return [];
+    return this.db
+      .select()
+      .from(messages)
+      .where(and(eq(messages.conversationId, conversationId), inArray(messages.id, messageIds)));
+  }
+
   async findById(messageId: string, includeDetails = true): Promise<MessageWithAttachments | null> {
     const [msg] = await this.db.select().from(messages).where(eq(messages.id, messageId)).limit(1);
     if (!msg) return null;

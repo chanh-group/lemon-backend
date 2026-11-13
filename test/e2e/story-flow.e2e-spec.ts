@@ -271,6 +271,25 @@ describe("Story flows with PostgreSQL and Redis", () => {
       body: "Hello from story",
       senderId: friend,
     });
+    const conversationId: string = reply.body.data.conversationId;
+    const response = await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/messages`)
+      .auth(ownerToken, { type: "bearer" })
+      .send({ kind: "TEXT", body: "Thanks!", replyToId: reply.body.data.id })
+      .expect(201);
+    expect(response.body.data.replyTarget).toMatchObject({
+      id: reply.body.data.id,
+      body: "Hello from story",
+      storyPreview: { id: textId },
+    });
+    const page = await request(app.getHttpServer())
+      .get(`/api/conversations/${conversationId}/messages?limit=1`)
+      .auth(friendToken, { type: "bearer" })
+      .expect(200);
+    expect(page.body.data.items[0].replyTarget).toMatchObject({
+      id: reply.body.data.id,
+      body: "Hello from story",
+    });
     const messages = await request(app.getHttpServer())
       .get(`/api/conversations/${reply.body.data.conversationId}/messages`)
       .auth(ownerToken, { type: "bearer" })
@@ -278,6 +297,20 @@ describe("Story flows with PostgreSQL and Redis", () => {
     expect(
       messages.body.data.items.some((item: { id: string }) => item.id === reply.body.data.id),
     ).toBe(true);
+    await request(app.getHttpServer())
+      .delete(`/api/messages/${reply.body.data.id}`)
+      .auth(friendToken, { type: "bearer" })
+      .expect(200);
+    const afterRevoke = await request(app.getHttpServer())
+      .get(`/api/conversations/${conversationId}/messages?limit=1`)
+      .auth(ownerToken, { type: "bearer" })
+      .expect(200);
+    expect(afterRevoke.body.data.items[0].replyTarget).toMatchObject({
+      id: reply.body.data.id,
+      body: null,
+      storyPreview: null,
+      deletedAt: expect.any(String),
+    });
     await request(app.getHttpServer())
       .patch(`/api/stories/${textId}`)
       .auth(ownerToken, { type: "bearer" })
