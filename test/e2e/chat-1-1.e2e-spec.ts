@@ -71,15 +71,13 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
         },
       ])
       .onConflictDoNothing();
-    await db
-      .insert(authSessions)
-      .values(
-        [userA, userB].map((id) => ({
-          id,
-          userId: id,
-          expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRATION * 1000),
-        })),
-      );
+    await db.insert(authSessions).values(
+      [userA, userB].map((id) => ({
+        id,
+        userId: id,
+        expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRATION * 1000),
+      })),
+    );
     const [userLow, userHigh] = [userA, userB].sort();
     await db
       .insert(friendships)
@@ -392,13 +390,11 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       email: `${name}@example.test`,
       fullName: "Outsider",
     });
-    await db
-      .insert(authSessions)
-      .values({
-        id: outsider,
-        userId: outsider,
-        expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRATION * 1000),
-      });
+    await db.insert(authSessions).values({
+      id: outsider,
+      userId: outsider,
+      expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRATION * 1000),
+    });
     try {
       const tokenOutsider = await jwtConfig.signAccessToken(outsider, 0, outsider);
       const res = await request(app.getHttpServer())

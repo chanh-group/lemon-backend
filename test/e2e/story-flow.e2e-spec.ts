@@ -98,15 +98,13 @@ describe("Story flows with PostgreSQL and Redis", () => {
         fullName: `Story Test ${i}`,
       })),
     );
-    await db
-      .insert(authSessions)
-      .values(
-        [owner, friend, secondFriend, stranger].map((id) => ({
-          id,
-          userId: id,
-          expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRATION * 1000),
-        })),
-      );
+    await db.insert(authSessions).values(
+      [owner, friend, secondFriend, stranger].map((id) => ({
+        id,
+        userId: id,
+        expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRATION * 1000),
+      })),
+    );
     const [userLow, userHigh] = [owner, friend].sort();
     await db.insert(friendships).values([
       { requesterId: owner, addresseeId: friend, userLow, userHigh, status: "ACCEPTED" },

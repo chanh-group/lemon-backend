@@ -199,15 +199,13 @@ describe("Realtime chat gateway over socket.io (E2E)", () => {
         },
       ])
       .onConflictDoNothing();
-    await db
-      .insert(authSessions)
-      .values(
-        [userA, userB, userC].map((id) => ({
-          id,
-          userId: id,
-          expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRATION * 1000),
-        })),
-      );
+    await db.insert(authSessions).values(
+      [userA, userB, userC].map((id) => ({
+        id,
+        userId: id,
+        expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRATION * 1000),
+      })),
+    );
     const [userLow, userHigh] = [userA, userB].sort();
     await db
       .insert(friendships)
