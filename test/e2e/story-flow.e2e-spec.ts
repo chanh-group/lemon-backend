@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { getDrizzleToken } from "@nestjs/drizzle";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import request from "supertest";
 import { v7 as uuidv7 } from "uuid";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -20,6 +20,8 @@ import { ErrorFilter } from "../../src/middleware/error-filter.js";
 import { standardSchemaPipe } from "../../src/utils/validation.js";
 import { STORAGE_SERVICE, type StorageService } from "../../src/utils/storage/store.js";
 import { STORY_REPOSITORY, type StoryRepository } from "../../src/domain/story/repository.js";
+import { stories } from "../../src/domain/story/schema.js";
+import { PurgeJob } from "../../src/jobs/purge/job.js";
 import { NOTE_REPOSITORY, type NoteRepository } from "../../src/domain/note/repository.js";
 
 describe("Story flows with PostgreSQL and Redis", () => {
@@ -402,6 +404,38 @@ describe("Story flows with PostgreSQL and Redis", () => {
       feed.body.data.map((item: { note: { content: string } }) => item.note.content),
     ).not.toContain("stale note race");
   });
+
+  it("removes a deleted archived story and purges its database record", async () => {
+    const created = await request(app.getHttpServer())
+      .post("/api/stories")
+      .auth(ownerToken, { type: "bearer" })
+      .send({ kind: "TEXT", caption: "Archive test" })
+      .expect(201);
+    const id: string = created.body.data.id;
+    await db
+      .update(stories)
+      .set({
+        archivedAt: new Date(),
+        createdAt: new Date(Date.now() - 172800000),
+        expiresAt: new Date(Date.now() - 86400000),
+      })
+      .where(eq(stories.id, id));
+    await request(app.getHttpServer())
+      .delete(`/api/stories/${id}`)
+      .auth(friendToken, { type: "bearer" })
+      .expect(403);
+    await request(app.getHttpServer())
+      .delete(`/api/stories/${id}`)
+      .auth(ownerToken, { type: "bearer" })
+      .expect(200);
+    const archive = await request(app.getHttpServer())
+      .get("/api/stories/archive")
+      .auth(ownerToken, { type: "bearer" })
+      .expect(200);
+    expect(archive.body.data.items.some((item: { id: string }) => item.id === id)).toBe(false);
+    await app.get(PurgeJob).run();
+    expect(await db.select().from(stories).where(eq(stories.id, id))).toHaveLength(0);
+  }, 30000);
 
   it("uploads and reads media only for an authorized user", async () => {
     const signed = await request(app.getHttpServer())

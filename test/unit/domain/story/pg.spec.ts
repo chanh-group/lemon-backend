@@ -125,7 +125,7 @@ describe("StoryPgRepository purge queries", () => {
 
       const whereSql = render(whereMock.mock.calls[0][0]);
       expect(whereSql).toContain('"stories"."expires_at" < now()');
-      expect(whereSql).toContain('"stories"."deleted_at" is not null');
+      expect(whereSql).toContain('"stories"."deleted_at" is not null or');
       expect(whereSql).toContain('"stories"."archived_at" is null');
 
       const orderBySql = render(orderByMock.mock.calls[0][0]);
