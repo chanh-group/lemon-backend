@@ -21,7 +21,9 @@ describe("RealtimeService", () => {
 
       expect(to.mock.calls.map(([room]) => room)).toEqual(["user:u1", "conv:c1"]);
       expect(emit).toHaveBeenNthCalledWith(1, "message:correlated", {
-        conversationId: "c1", id: "m1", clientMsgId: "key",
+        conversationId: "c1",
+        id: "m1",
+        clientMsgId: "key",
       });
       expect(emit).toHaveBeenNthCalledWith(2, "message:new", { id: "m1", senderId: "u1" });
     });

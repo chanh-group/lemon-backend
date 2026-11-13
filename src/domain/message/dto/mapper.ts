@@ -107,7 +107,9 @@ export function toMessageResponse(
     id: message.id,
     conversationId: message.conversationId,
     senderId: message.senderId,
-    ...(viewerId === message.senderId && message.clientMsgId ? { clientMsgId: message.clientMsgId } : {}),
+    ...(viewerId === message.senderId && message.clientMsgId
+      ? { clientMsgId: message.clientMsgId }
+      : {}),
     kind: message.kind,
     body: message.deletedAt ? null : message.body,
     replyToId: message.replyToId,
@@ -136,7 +138,9 @@ export async function toMessageTimelineAsync(
   storage?: StorageService,
   viewerId?: string,
 ): Promise<MessageTimelineResponse> {
-  const items = await Promise.all(result.items.map((m) => toMessageResponseAsync(m, storage, viewerId)));
+  const items = await Promise.all(
+    result.items.map((m) => toMessageResponseAsync(m, storage, viewerId)),
+  );
   return {
     items,
     ...(result.nextCursor !== undefined && { nextCursor: result.nextCursor }),

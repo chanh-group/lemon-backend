@@ -36,7 +36,9 @@ export class RealtimeService {
           clientMsgId,
         });
       } catch (err) {
-        logger.warn(`Failed to emit message correlation for conv ${conversationId}: ${String(err)}`);
+        logger.warn(
+          `Failed to emit message correlation for conv ${conversationId}: ${String(err)}`,
+        );
       }
     }
     try {

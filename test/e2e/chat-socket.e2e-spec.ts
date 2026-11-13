@@ -349,8 +349,14 @@ describe("Realtime chat gateway over socket.io (E2E)", () => {
       try {
         await joinConversation(clientA, conversationId);
         await joinConversation(clientB, conversationId);
-        const sender = collectEvents<{ id: string; clientMsgId: string }>(clientA, "message:correlated");
-        const recipient = collectEvents<{ id: string; clientMsgId: string }>(clientB, "message:correlated");
+        const sender = collectEvents<{ id: string; clientMsgId: string }>(
+          clientA,
+          "message:correlated",
+        );
+        const recipient = collectEvents<{ id: string; clientMsgId: string }>(
+          clientB,
+          "message:correlated",
+        );
         const messages = collectEvents<MessageNewPayload>(clientB, "message:new");
         const clientMsgId = uuidv7();
         const res = await request(app.getHttpServer())
