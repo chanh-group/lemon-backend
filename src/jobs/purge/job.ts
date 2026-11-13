@@ -16,6 +16,10 @@ import { CACHE_STORE } from "../../utils/cache/store.js";
 import type { CacheStore } from "../../utils/cache/store.js";
 import { STORAGE_SERVICE } from "../../utils/storage/store.js";
 import type { StorageService } from "../../utils/storage/store.js";
+import {
+  AUTH_SESSION_REPOSITORY,
+  type AuthSessionRepository,
+} from "../../domain/auth/repository.js";
 
 type StoryPurgeCounts = { stories: number; objects: number };
 
@@ -32,6 +36,8 @@ export class PurgeJob {
     private readonly storage: StorageService,
     @Inject(CACHE_STORE)
     private readonly cache: CacheStore,
+    @Inject(AUTH_SESSION_REPOSITORY)
+    private readonly authSessions: AuthSessionRepository,
   ) {}
 
   @Cron(PURGE_CRON_EXPRESSION)
@@ -51,12 +57,16 @@ export class PurgeJob {
       return;
     }
     try {
-      const { stories, objects } = await this.purgeStories();
-      const notes = await this.purgeNotes();
+      const [{ stories, objects }, notes, sessions] = await Promise.all([
+        this.purgeStories(),
+        this.purgeNotes(),
+        this.purgeSessions(),
+      ]);
       this.logger.log("Purge completed", {
         stories,
         objects,
         notes,
+        sessions,
         durationMs: Date.now() - startedAt,
       });
     } finally {
@@ -116,6 +126,15 @@ export class PurgeJob {
       return await this.noteRepo.deleteByIds(ids);
     } catch (err) {
       this.logger.error("Purge note phase failed", { err });
+      return 0;
+    }
+  }
+
+  private async purgeSessions(): Promise<number> {
+    try {
+      return await this.authSessions.purgeExpired(PURGE_BATCH_LIMIT);
+    } catch (err) {
+      this.logger.error("Purge sessions failed", { err });
       return 0;
     }
   }

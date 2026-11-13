@@ -33,7 +33,8 @@ describe("MailService", () => {
 
     await service.onModuleDestroy();
 
-    expect(log.mock.calls.flat().join(" ")).not.toContain("123456");
+    expect(JSON.stringify(log.mock.calls)).not.toContain("123456");
+    expect(JSON.stringify(log.mock.calls)).not.toContain("test@example.com");
   });
 
   it("initializes nodemailer transporter when SMTP credentials exist", async () => {
@@ -81,9 +82,11 @@ describe("MailService", () => {
     process.env.SMTP_PASSWORD = "secretpassword";
     process.env.SMTP_FROM = "LemonChat <lemon@gmail.com>";
 
+    const log = vi.spyOn(Logger.prototype, "log");
+    const warn = vi.spyOn(Logger.prototype, "warn");
     const mockSendMail = vi
       .fn()
-      .mockRejectedValueOnce(new Error("Connection reset"))
+      .mockRejectedValueOnce(new Error("Delivery failed for retry@example.com"))
       .mockResolvedValueOnce({ messageId: "456" });
 
     const mockTransport = {
@@ -106,5 +109,8 @@ describe("MailService", () => {
     await service.onModuleDestroy();
 
     expect(mockSendMail).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify([...log.mock.calls, ...warn.mock.calls])).not.toContain(
+      "retry@example.com",
+    );
   });
 });

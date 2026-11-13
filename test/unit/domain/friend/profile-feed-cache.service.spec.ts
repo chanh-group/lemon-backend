@@ -11,7 +11,7 @@ describe("ProfileFeedCacheInvalidator", () => {
     const deleteManyBestEffort = vi.fn().mockResolvedValue(undefined);
     const invalidator = new ProfileFeedCacheInvalidator(
       { getAcceptedFriendIds } as never,
-      { deleteManyBestEffort } as never,
+      { invalidateFeedsBestEffort: deleteManyBestEffort } as never,
     );
 
     await invalidator.invalidateProfileFeeds(userId);
@@ -29,7 +29,7 @@ describe("ProfileFeedCacheInvalidator", () => {
     const deleteManyBestEffort = vi.fn();
     const invalidator = new ProfileFeedCacheInvalidator(
       { getAcceptedFriendIds: vi.fn().mockRejectedValue(new Error("database down")) } as never,
-      { deleteManyBestEffort } as never,
+      { invalidateFeedsBestEffort: deleteManyBestEffort } as never,
     );
 
     await expect(invalidator.invalidateProfileFeeds(userId)).resolves.toBeUndefined();

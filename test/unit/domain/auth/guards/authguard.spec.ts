@@ -5,6 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthGuard } from "../../../../../src/domain/auth/guards/authguard.js";
 import { JwtConfig } from "../../../../../src/domain/auth/jwt.js";
 import { BusinessError } from "../../../../../src/utils/errors/business.js";
+import { SystemError } from "../../../../../src/utils/errors/system.js";
+import type { UserRepository } from "../../../../../src/domain/user/repository.js";
+import type { AuthSessionRepository } from "../../../../../src/domain/auth/repository.js";
 
 async function expectUnauthorized(promise: Promise<unknown>): Promise<void> {
   const error: unknown = await promise.then(
@@ -20,11 +23,21 @@ describe("AuthGuard", () => {
   const mockSecret = "super_secret_jwt_key_at_least_32_bytes_long_12345";
   let guard: AuthGuard;
   let reflector: { getAllAndOverride: ReturnType<typeof vi.fn> };
+  let findById: ReturnType<typeof vi.fn>;
+  let isActive: ReturnType<typeof vi.fn>;
+  const sid = "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b";
 
   beforeEach(() => {
     process.env = { ...originalEnv, JWT_SECRET: mockSecret };
     reflector = { getAllAndOverride: vi.fn().mockReturnValue(false) };
-    guard = new AuthGuard(reflector as unknown as Reflector, JwtConfig.from_env());
+    findById = vi.fn().mockResolvedValue({ authVersion: 0, isActive: true });
+    isActive = vi.fn().mockResolvedValue(true);
+    guard = new AuthGuard(
+      reflector as unknown as Reflector,
+      JwtConfig.from_env(),
+      { findById } as unknown as UserRepository,
+      { isActive } as unknown as AuthSessionRepository,
+    );
   });
 
   afterEach(() => {
@@ -101,7 +114,7 @@ describe("AuthGuard", () => {
 
   it("allows request and sets request.user when token is valid access token", async () => {
     const secretKey = new TextEncoder().encode(mockSecret);
-    const token = await new jose.SignJWT({ type: "access" })
+    const token = await new jose.SignJWT({ type: "access", authVersion: 0, sid })
       .setProtectedHeader({ alg: "HS256" })
       .setSubject("user-456")
       .setIssuer("lemon-chat")
@@ -115,5 +128,29 @@ describe("AuthGuard", () => {
 
     expect(result).toBe(true);
     expect(request.user).toEqual({ id: "user-456" });
+  });
+
+  it("rejects an access token after the database auth version changes", async () => {
+    const token = await JwtConfig.from_env().signAccessToken("user-456", 0, sid);
+    findById.mockResolvedValue({ authVersion: 1, isActive: true });
+    await expectUnauthorized(
+      guard.canActivate(createMockContext({ authorization: `Bearer ${token}` }).context),
+    );
+  });
+
+  it("rejects an access token after its session is revoked", async () => {
+    const token = await JwtConfig.from_env().signAccessToken("user-456", 0, sid);
+    isActive.mockResolvedValue(false);
+    await expectUnauthorized(
+      guard.canActivate(createMockContext({ authorization: `Bearer ${token}` }).context),
+    );
+  });
+
+  it("reports a database failure instead of invalid credentials", async () => {
+    const token = await JwtConfig.from_env().signAccessToken("user-456", 0, sid);
+    findById.mockRejectedValue(new Error("database down"));
+    await expect(
+      guard.canActivate(createMockContext({ authorization: `Bearer ${token}` }).context),
+    ).rejects.toBeInstanceOf(SystemError);
   });
 });

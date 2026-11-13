@@ -30,6 +30,15 @@ export const RATE_LIMIT_STORY_REACTIONS_READ_IP_MAX = 180;
 export interface RateLimiter {
   checkIpLimit(action: string, ip: string, max: number, windowSecs: number): Promise<boolean>;
   checkEmailLimit(action: string, email: string, max: number, windowSecs: number): Promise<boolean>;
+  checkIpEmailLimit(
+    action: string,
+    ip: string,
+    email: string,
+    ipMax: number,
+    emailMax: number,
+    ipWindowSecs: number,
+    emailWindowSecs: number,
+  ): Promise<boolean>;
   checkMixedLimit(
     action: string,
     userId: string,
@@ -75,6 +84,16 @@ if second == 1 then
     redis.call('EXPIRE', KEYS[2], ARGV[1])
 end
 return {first, second}
+`;
+
+const INCR_IP_EMAIL_SCRIPT = `
+local ip = redis.call('INCR', KEYS[1])
+if ip == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+if ip > tonumber(ARGV[3]) then return 0 end
+local email = redis.call('INCR', KEYS[2])
+if email == 1 then redis.call('EXPIRE', KEYS[2], ARGV[2]) end
+if email > tonumber(ARGV[4]) then return 0 end
+return 1
 `;
 
 export class RedisRateLimiter implements RateLimiter {
@@ -155,6 +174,33 @@ export class RedisRateLimiter implements RateLimiter {
     return this.checkRateLimit(`ratelimit:${action}:email:${email.toLowerCase()}`, max, windowSecs);
   }
 
+  async checkIpEmailLimit(
+    action: string,
+    ip: string,
+    email: string,
+    ipMax: number,
+    emailMax: number,
+    ipWindowSecs: number,
+    emailWindowSecs: number,
+  ): Promise<boolean> {
+    const redis = this.redis as { eval: (...args: unknown[]) => Promise<unknown> };
+    return this.measure(async () => {
+      const result = await redis.eval(
+        INCR_IP_EMAIL_SCRIPT,
+        2,
+        `ratelimit:${action}:ip:${ip}`,
+        `ratelimit:${action}:email:${email.toLowerCase()}`,
+        Math.max(1, ipWindowSecs),
+        Math.max(1, emailWindowSecs),
+        ipMax,
+        emailMax,
+      );
+      if (result !== 0 && result !== 1)
+        throw new SystemError("unavailable", "rate limiter returned an invalid result");
+      return result === 1;
+    });
+  }
+
   async checkMixedLimit(
     action: string,
     userId: string,
@@ -209,6 +255,22 @@ export class MemoryRateLimiter implements RateLimiter {
     windowSecs: number,
   ): Promise<boolean> {
     return this.increment(`ratelimit:${action}:email:${email.toLowerCase()}`, windowSecs) <= max;
+  }
+
+  async checkIpEmailLimit(
+    action: string,
+    ip: string,
+    email: string,
+    ipMax: number,
+    emailMax: number,
+    ipWindowSecs: number,
+    emailWindowSecs: number,
+  ): Promise<boolean> {
+    if (this.increment(`ratelimit:${action}:ip:${ip}`, ipWindowSecs) > ipMax) return false;
+    return (
+      this.increment(`ratelimit:${action}:email:${email.toLowerCase()}`, emailWindowSecs) <=
+      emailMax
+    );
   }
 
   async checkMixedLimit(

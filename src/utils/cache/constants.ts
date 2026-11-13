@@ -118,6 +118,7 @@ export const PURGE_BATCH_LIMIT = 500;
 
 // Unread counters: rebuilt from the DB on cache miss, cached for 7 days.
 export const UNREAD_TTL_SECONDS = 604_800;
+export const FEED_FILL_LEASE_SECS = 30;
 
 // Realtime presence: per-user state key TTL, disconnect grace window, and the
 // remaining-TTL threshold above which another node is still heartbeating.

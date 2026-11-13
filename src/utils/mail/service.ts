@@ -67,7 +67,6 @@ export class MailService implements OnModuleDestroy {
     if (this.queue.size >= MAIL_QUEUE_MAX_SIZE) {
       this.logger.warn("Mail queue is full, dropping email", {
         action: "mail.queue_full",
-        to: options.to,
       });
       return;
     }
@@ -88,7 +87,6 @@ export class MailService implements OnModuleDestroy {
     if (this.queue.size >= MAIL_QUEUE_MAX_SIZE) {
       this.logger.warn("Mail queue is full, dropping raw email", {
         action: "mail.queue_full",
-        to: job.to,
       });
       return;
     }
@@ -119,8 +117,6 @@ export class MailService implements OnModuleDestroy {
     if (!this.transporter) {
       this.logger.log("Email delivered (log-only mode)", {
         action: "mail.send_dev",
-        to: job.to,
-        subject: job.subject.replace(/:\s*\d{6}\s*$/, ""),
       });
       return;
     }
@@ -138,17 +134,14 @@ export class MailService implements OnModuleDestroy {
 
         this.logger.log("Mail sent successfully", {
           action: "mail.sent",
-          to: job.to,
           attempt: attempt + 1,
         });
         return;
-      } catch (err: unknown) {
+      } catch {
         attempt++;
         this.logger.warn("Mail delivery failed", {
           action: "mail.delivery_failed",
-          to: job.to,
           attempt,
-          err: String(err),
         });
 
         if (attempt <= MAIL_RETRY_COUNT) {
@@ -160,7 +153,6 @@ export class MailService implements OnModuleDestroy {
 
     this.logger.warn("Mail permanently failed after all retries", {
       action: "mail.send_failed",
-      to: job.to,
     });
   }
 }

@@ -13,6 +13,7 @@ describe("UserController", () => {
     bio: "Test bio",
     phone: null,
     passwordHash: "hash",
+    authVersion: 0,
     googleId: null,
     emailVerifiedAt: new Date("2026-01-01T00:00:00Z"),
     lastSeenAt: new Date("2026-01-01T12:00:00Z"),

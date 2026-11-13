@@ -32,6 +32,7 @@ import {
 import { JWT_CONFIG } from "./constants.js";
 import type { JwtConfig } from "./jwt.js";
 import type { TokenPair } from "./types.js";
+import { AUTH_SESSION_REPOSITORY, type AuthSessionRepository } from "./repository.js";
 
 @Injectable()
 export class AuthService {
@@ -45,6 +46,8 @@ export class AuthService {
     private readonly mailService: MailService,
     @Inject(JWT_CONFIG)
     private readonly jwt: JwtConfig,
+    @Inject(AUTH_SESSION_REPOSITORY)
+    private readonly sessions: AuthSessionRepository,
   ) {}
 
   async requestOtp(input: RequestOtpDto): Promise<void> {
@@ -130,6 +133,17 @@ export class AuthService {
     const passwordHash = await this.hashPassword(input.password);
 
     try {
+      await otp.check(this.cacheStore, otpKey, input.otp, true);
+    } catch (err: unknown) {
+      if (err instanceof BusinessError) throw err;
+      this.logger.error("Redis error consuming signup OTP", {
+        action: "auth.signup_consume_error",
+        err: String(err),
+      });
+      throw new SystemError("unavailable", "cache CHECK_OTP failed", { cause: err });
+    }
+
+    try {
       const createdUser = await this.userRepo.create({
         email: input.email,
         username: input.username,
@@ -143,19 +157,6 @@ export class AuthService {
         action: "auth.signed_up",
         userId: createdUser.id,
       });
-
-      try {
-        await otp.consume(this.cacheStore, otpKey);
-      } catch (consumeErr: unknown) {
-        if (consumeErr instanceof BusinessError) {
-          throw consumeErr;
-        }
-        this.logger.error("Redis error consuming signup OTP", {
-          action: "auth.signup_consume_error",
-          err: String(consumeErr),
-        });
-        throw new SystemError("unavailable", "cache DELETE failed", { cause: consumeErr });
-      }
 
       return toUserResponse(createdUser);
     } catch (err: unknown) {
@@ -193,8 +194,20 @@ export class AuthService {
     }
 
     const jti = uuidv7();
-    const accessToken = await this.jwt.signAccessToken(user.id);
-    const refreshToken = await this.jwt.signRefreshToken(user.id, jti);
+    const sid = uuidv7();
+    const [accessToken, refreshToken] = await Promise.all([
+      this.jwt.signAccessToken(user.id, user.authVersion, sid),
+      this.jwt.signRefreshToken(user.id, jti, user.authVersion, sid),
+    ]);
+    try {
+      await this.sessions.create(
+        user.id,
+        sid,
+        new Date(Date.now() + REFRESH_TOKEN_EXPIRATION * 1000),
+      );
+    } catch (err) {
+      throw new SystemError("database", "Session creation failed", { cause: err });
+    }
 
     try {
       await this.cacheStore.createRefreshSession({
@@ -206,6 +219,11 @@ export class AuthService {
         maxSessions: MAX_SESSIONS_PER_USER,
       });
     } catch (err: unknown) {
+      try {
+        await this.sessions.revoke(user.id, sid);
+      } catch (cleanupErr) {
+        this.logger.error("Failed to clean up unissued session", { err: cleanupErr });
+      }
       this.logger.error("Failed to store refresh session in Redis", {
         action: "auth.login_session_error",
         err: String(err),
@@ -231,12 +249,28 @@ export class AuthService {
 
     const payload = await this.jwt.verifyRefreshToken(rawRefreshToken);
 
+    let user: Awaited<ReturnType<UserRepository["findById"]>>;
+    let active: boolean;
+    try {
+      [user, active] = await Promise.all([
+        this.userRepo.findById(payload.sub),
+        this.sessions.isActive(payload.sub, payload.sid),
+      ]);
+    } catch (err) {
+      throw new SystemError("database", "Session verification failed", { cause: err });
+    }
+    if (!user || !user.isActive || !active || user.authVersion !== payload.authVersion) {
+      throw new BusinessError("INVALID_SESSION");
+    }
+
     const userId = payload.sub;
     const oldJti = payload.jti;
     const newJti = uuidv7();
 
-    const newAccessToken = await this.jwt.signAccessToken(userId);
-    const newRefreshToken = await this.jwt.signRefreshToken(userId, newJti);
+    const [newAccessToken, newRefreshToken] = await Promise.all([
+      this.jwt.signAccessToken(userId, payload.authVersion, payload.sid),
+      this.jwt.signRefreshToken(userId, newJti, payload.authVersion, payload.sid),
+    ]);
 
     try {
       const outcome = await this.cacheStore.rotateRefreshToken({
@@ -258,18 +292,8 @@ export class AuthService {
         await this.revokeFamily(userId);
         throw new BusinessError("INVALID_SESSION");
       }
-
-      this.logger.log("Refresh token rotated successfully", {
-        action: "auth.refreshed",
-        userId,
-      });
-
-      return {
-        accessToken: newAccessToken,
-        refreshToken: newRefreshToken,
-      };
     } catch (err: unknown) {
-      if (err instanceof BusinessError) {
+      if (err instanceof BusinessError || err instanceof SystemError) {
         throw err;
       }
       this.logger.error("Redis error during refresh token rotation", {
@@ -278,6 +302,22 @@ export class AuthService {
       });
       throw new SystemError("unavailable", "cache ROTATE failed", { cause: err });
     }
+
+    let extended: boolean;
+    try {
+      extended = await this.sessions.extend(
+        userId,
+        payload.sid,
+        new Date(Date.now() + REFRESH_TOKEN_EXPIRATION * 1000),
+      );
+    } catch (err) {
+      throw new SystemError("database", "Session extension failed", { cause: err });
+    }
+    if (!extended) {
+      throw new BusinessError("INVALID_SESSION");
+    }
+    this.logger.log("Refresh token rotated successfully", { action: "auth.refreshed", userId });
+    return { accessToken: newAccessToken, refreshToken: newRefreshToken };
   }
 
   async logout(rawRefreshToken?: string): Promise<void> {
@@ -285,9 +325,19 @@ export class AuthService {
       return;
     }
 
+    let payload: Awaited<ReturnType<JwtConfig["verifyRefreshToken"]>>;
     try {
-      const payload = await this.jwt.verifyRefreshToken(rawRefreshToken);
-
+      payload = await this.jwt.verifyRefreshToken(rawRefreshToken);
+    } catch (err) {
+      if (err instanceof BusinessError) return;
+      throw err;
+    }
+    try {
+      await this.sessions.revoke(payload.sub, payload.sid);
+    } catch (err) {
+      throw new SystemError("database", "Session revocation failed", { cause: err });
+    }
+    try {
       await this.cacheStore.revokeRefreshSession({
         key: `${REFRESH_TOKEN_KEY_PREFIX}${payload.jti}`,
         sessionKey: `${SESSION_KEY_PREFIX}${payload.sub}`,
@@ -309,6 +359,7 @@ export class AuthService {
         });
         throw new SystemError("unavailable", "cache REVOKE failed", { cause: err });
       }
+      throw err;
     }
   }
 
@@ -367,8 +418,18 @@ export class AuthService {
     }
 
     const newHash = await this.hashPassword(input.newPassword);
+    try {
+      await otp.check(this.cacheStore, key, input.otp, true);
+    } catch (err: unknown) {
+      if (err instanceof BusinessError) throw err;
+      this.logger.error("Redis error consuming forgot password OTP", {
+        action: "auth.forgot_reset_consume_error",
+        err: String(err),
+      });
+      throw new SystemError("unavailable", "cache CHECK_OTP failed", { cause: err });
+    }
     await this.userRepo.updatePasswordHash(user.id, newHash);
-    await this.revokeFamily(user.id, [key]);
+    await this.revokeFamily(user.id);
 
     this.logger.log("Password reset successfully", {
       action: "auth.password_reset",
@@ -403,30 +464,16 @@ export class AuthService {
 
   async revokeFamily(userId: string, extraKeys: string[] = []): Promise<void> {
     try {
+      await this.sessions.revokeAll(userId);
+    } catch (err) {
+      throw new SystemError("database", "Session family revocation failed", { cause: err });
+    }
+    try {
       const sessionKey = `${SESSION_KEY_PREFIX}${userId}`;
-      const rawSessions = await this.cacheStore.getRaw(sessionKey);
-      const keysToDelete: string[] = [
-        sessionKey,
+      await this.cacheStore.revokeRefreshFamily(sessionKey, [
         `${USER_CACHE_KEY_PREFIX}${userId}`,
         ...extraKeys,
-      ];
-
-      if (rawSessions) {
-        try {
-          const parsed = JSON.parse(rawSessions) as unknown;
-          if (Array.isArray(parsed)) {
-            for (const jti of parsed) {
-              if (typeof jti === "string") {
-                keysToDelete.push(`${REFRESH_TOKEN_KEY_PREFIX}${jti}`);
-              }
-            }
-          }
-        } catch {
-          // ignore corrupted sessions JSON
-        }
-      }
-
-      await this.cacheStore.deleteMany(keysToDelete);
+      ]);
     } catch (err: unknown) {
       this.logger.error("Failed to revoke session family in Redis", {
         action: "auth.revoke_family_error",

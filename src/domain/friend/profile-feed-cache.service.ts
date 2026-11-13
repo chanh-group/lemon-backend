@@ -16,7 +16,7 @@ export class ProfileFeedCacheInvalidator implements UserProfileCacheInvalidator 
   async invalidateProfileFeeds(userId: string): Promise<void> {
     try {
       const friendIds = await this.friendRepo.getAcceptedFriendIds(userId);
-      await this.cache.deleteManyBestEffort(
+      await this.cache.invalidateFeedsBestEffort(
         [userId, ...friendIds].flatMap((id) => [storyFeedKey(id), noteFeedKey(id)]),
       );
     } catch (err) {

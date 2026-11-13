@@ -230,6 +230,7 @@ describe("User DTOs & Validation Schemas", () => {
         id: "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b",
         email: "lemon@example.com",
         passwordHash: "argon2id$hashed",
+        authVersion: 0,
         googleId: "google-123",
         username: "lemon_user",
         fullName: "Nguyen Van Lemon",
@@ -262,6 +263,7 @@ describe("User DTOs & Validation Schemas", () => {
 
       // Verify no sensitive fields exist on the mapped object
       expect("passwordHash" in response).toBe(false);
+      expect("authVersion" in response).toBe(false);
       expect("googleId" in response).toBe(false);
       expect("deletedAt" in response).toBe(false);
     });

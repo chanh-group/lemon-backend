@@ -7,6 +7,7 @@ import { RedisHealthService } from "../../configs/redis-health.js";
 import { RedisMetricsService, type RedisMetricOperation } from "../../configs/redis-metrics.js";
 import { REFRESH_TOKEN_KEY_PREFIX } from "./constants.js";
 import { CacheError } from "./error.js";
+import { feedFillKey } from "./keys.js";
 import { CacheStoreExt, REDIS_CLIENT } from "./store.js";
 import {
   OtpCheckOutcome,
@@ -19,6 +20,7 @@ import {
 export const ROTATE_REFRESH_COMMAND = "rotateRefresh";
 export const CREATE_SESSION_COMMAND = "createSession";
 export const REVOKE_SESSION_COMMAND = "revokeSession";
+export const REVOKE_FAMILY_COMMAND = "revokeFamily";
 export const CHECK_OTP_COMMAND = "checkOtp";
 export const RELEASE_LOCK_COMMAND = "releaseLock";
 
@@ -96,6 +98,19 @@ export const REVOKE_SESSION_LUA = `
   return 1
 `;
 
+export const REVOKE_FAMILY_LUA = `
+  local raw = redis.call('GET', KEYS[1])
+  if raw then
+    local ok, sessions = pcall(cjson.decode, raw)
+    if ok and type(sessions) == 'table' then
+      for _, jti in ipairs(sessions) do
+        if type(jti) == 'string' then redis.call('DEL', ARGV[1] .. jti) end
+      end
+    end
+  end
+  return redis.call('DEL', unpack(KEYS))
+`;
+
 /**
  * OTP check: wrong attempts bump the counter but `KEEPTTL` (no TTL sliding).
  * Returns `1` match, `0` mismatch with attempts left, `-1` missing/corrupt,
@@ -112,6 +127,7 @@ export const CHECK_OTP_LUA = `
       return -1
   end
   if entry.code == ARGV[1] then
+      if ARGV[3] == '1' then redis.call('DEL', KEYS[1]) end
       return 1
   end
   local attempts = tonumber(entry.attempts) or 0
@@ -134,6 +150,12 @@ export const RELEASE_LOCK_LUA = `
   end
 `;
 
+export const PUBLISH_FEED_LUA = `
+  if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end
+  redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+  return 1
+`;
+
 /**
  * Register the five cache Lua scripts on a client. Exported so the module and
  * tests share the exact registration (names + scripts).
@@ -142,6 +164,7 @@ export function registerCacheCommands(client: Pick<Redis, "defineCommand">): voi
   client.defineCommand(ROTATE_REFRESH_COMMAND, { lua: ROTATE_REFRESH_LUA });
   client.defineCommand(CREATE_SESSION_COMMAND, { lua: CREATE_SESSION_LUA });
   client.defineCommand(REVOKE_SESSION_COMMAND, { lua: REVOKE_SESSION_LUA });
+  client.defineCommand(REVOKE_FAMILY_COMMAND, { lua: REVOKE_FAMILY_LUA });
   client.defineCommand(CHECK_OTP_COMMAND, { lua: CHECK_OTP_LUA });
   client.defineCommand(RELEASE_LOCK_COMMAND, { lua: RELEASE_LOCK_LUA });
 }
@@ -168,7 +191,14 @@ export interface RedisWithCacheCommands extends Redis {
     refreshPrefix: string,
   ): Promise<number>;
   revokeSession(numKeys: 2, key: string, sessionKey: string, jti: string): Promise<number>;
-  checkOtp(numKeys: 1, key: string, candidate: string, maxAttempts: number): Promise<number>;
+  revokeFamily(numKeys: number, ...args: string[]): Promise<number>;
+  checkOtp(
+    numKeys: 1,
+    key: string,
+    candidate: string,
+    maxAttempts: number,
+    consume: string,
+  ): Promise<number>;
   releaseLock(numKeys: 1, key: string, token: string): Promise<number>;
 }
 
@@ -236,6 +266,38 @@ export class RedisCacheService extends CacheStoreExt {
     }
   }
 
+  async invalidateFeeds(keys: string[]): Promise<void> {
+    if (keys.length === 0) return;
+    try {
+      await this.execute("cache_delete_many", async () => {
+        const results = await this.redis
+          .pipeline(keys.map((key) => ["del", key, feedFillKey(key)]))
+          .exec();
+        if (!results || results.length !== keys.length || results.some(([err]) => err)) {
+          throw new Error("Redis feed invalidation failed");
+        }
+      });
+    } catch (err) {
+      throw new CacheError("feed invalidation", err);
+    }
+  }
+
+  async publishFeed(
+    key: string,
+    leaseKey: string,
+    token: string,
+    value: string,
+    expirationSecs: number,
+  ): Promise<void> {
+    try {
+      await this.execute("cache_set", () =>
+        this.redis.eval(PUBLISH_FEED_LUA, 2, key, leaseKey, token, value, expirationSecs),
+      );
+    } catch (err) {
+      throw new CacheError("feed publication", err);
+    }
+  }
+
   async rotateRefreshToken(rotation: RefreshRotation): Promise<RotationOutcome> {
     try {
       const rotated = await this.execute("cache_rotate_refresh", () =>
@@ -288,14 +350,30 @@ export class RedisCacheService extends CacheStoreExt {
     }
   }
 
+  async revokeRefreshFamily(sessionKey: string, extraKeys: string[]): Promise<void> {
+    try {
+      await this.execute("cache_delete_many", () =>
+        this.redis.revokeFamily(
+          1 + extraKeys.length,
+          sessionKey,
+          ...extraKeys,
+          REFRESH_TOKEN_KEY_PREFIX,
+        ),
+      );
+    } catch (err) {
+      throw new CacheError("family revocation", err);
+    }
+  }
+
   async checkOtpCode(
     key: string,
     candidate: string,
     maxAttempts: number,
+    consume = false,
   ): Promise<OtpCheckOutcome> {
     try {
       const verdict = await this.execute("cache_check_otp", () =>
-        this.redis.checkOtp(1, key, candidate, maxAttempts),
+        this.redis.checkOtp(1, key, candidate, maxAttempts, consume ? "1" : "0"),
       );
       switch (verdict) {
         case 1:

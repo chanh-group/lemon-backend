@@ -168,27 +168,20 @@ export class MessagePgRepository implements MessageRepository {
 
         // 3. Atomically update parent conversation inbox fields
         const preview = toConversationPreview(newMsg.kind, newMsg.body);
+        const isLatest = sql`(${conversations.lastMessageAt} IS NULL
+          OR ${conversations.lastMessageAt} < ${newMsg.createdAt}
+          OR (${conversations.lastMessageAt} = ${newMsg.createdAt}
+            AND ${conversations.lastMessageId} < ${newMsg.id}::uuid))`;
         await tx
           .update(conversations)
           .set({
-            lastMessageId: newMsg.id,
-            lastMessageAt: newMsg.createdAt,
-            lastMessagePreview: preview,
-            updatedAt: sql`now()`,
+            unreadRevision: sql`${conversations.unreadRevision} + 1`,
+            lastMessageId: sql`CASE WHEN ${isLatest} THEN ${newMsg.id}::uuid ELSE ${conversations.lastMessageId} END`,
+            lastMessageAt: sql`CASE WHEN ${isLatest} THEN ${newMsg.createdAt}::timestamptz ELSE ${conversations.lastMessageAt} END`,
+            lastMessagePreview: sql`CASE WHEN ${isLatest} THEN ${preview} ELSE ${conversations.lastMessagePreview} END`,
+            updatedAt: sql`CASE WHEN ${isLatest} THEN now() ELSE ${conversations.updatedAt} END`,
           })
-          .where(
-            and(
-              eq(conversations.id, messageData.conversationId),
-              or(
-                isNull(conversations.lastMessageAt),
-                lt(conversations.lastMessageAt, newMsg.createdAt),
-                and(
-                  eq(conversations.lastMessageAt, newMsg.createdAt),
-                  lt(conversations.lastMessageId, newMsg.id),
-                ),
-              ),
-            ),
-          );
+          .where(eq(conversations.id, messageData.conversationId));
 
         return {
           message: insertedAttachments ? { ...newMsg, attachments: insertedAttachments } : newMsg,
@@ -395,19 +388,15 @@ export class MessagePgRepository implements MessageRepository {
 
       if (!deleted) return null;
 
-      // Update conversation preview if this is the last message
+      // A revoked message changes unread counts even when it is not the last message.
       await tx
         .update(conversations)
         .set({
-          lastMessagePreview: MESSAGE_REVOKED_PREVIEW_TOKEN,
-          updatedAt: sql`now()`,
+          unreadRevision: sql`${conversations.unreadRevision} + 1`,
+          lastMessagePreview: sql`CASE WHEN ${conversations.lastMessageId} = ${messageId}::uuid THEN ${MESSAGE_REVOKED_PREVIEW_TOKEN} ELSE ${conversations.lastMessagePreview} END`,
+          updatedAt: sql`CASE WHEN ${conversations.lastMessageId} = ${messageId}::uuid THEN now() ELSE ${conversations.updatedAt} END`,
         })
-        .where(
-          and(
-            eq(conversations.id, deleted.conversationId),
-            eq(conversations.lastMessageId, messageId),
-          ),
-        );
+        .where(eq(conversations.id, deleted.conversationId));
 
       return deleted;
     });

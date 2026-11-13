@@ -14,7 +14,7 @@ describe("FriendService", () => {
     blockPair: ReturnType<typeof vi.fn>;
   };
   let userRepo: { findById: ReturnType<typeof vi.fn> };
-  let cache: { deleteManyBestEffort: ReturnType<typeof vi.fn> };
+  let cache: { invalidateFeedsBestEffort: ReturnType<typeof vi.fn> };
   let service: FriendService;
 
   beforeEach(() => {
@@ -37,7 +37,7 @@ describe("FriendService", () => {
         username: id === userId ? "requester" : "recipient",
       })),
     };
-    cache = { deleteManyBestEffort: vi.fn().mockResolvedValue(undefined) };
+    cache = { invalidateFeedsBestEffort: vi.fn().mockResolvedValue(undefined) };
     service = new FriendService(
       friendRepo as never,
       userRepo as never,
@@ -153,7 +153,7 @@ describe("FriendService", () => {
 
     await expect(service.acceptRequest("request-id", otherId)).resolves.toBe(conversation);
     expect(joinConversation).toHaveBeenCalledWith([userId, otherId], conversation.id);
-    expect(cache.deleteManyBestEffort).toHaveBeenCalled();
+    expect(cache.invalidateFeedsBestEffort).toHaveBeenCalled();
   });
 
   it("does not create a conversation when there is no pending request to accept", async () => {
@@ -162,7 +162,7 @@ describe("FriendService", () => {
     await expect(service.acceptRequest("missing-request", otherId)).rejects.toMatchObject({
       code: "FRIEND_REQUEST_NOT_FOUND",
     });
-    expect(cache.deleteManyBestEffort).not.toHaveBeenCalled();
+    expect(cache.invalidateFeedsBestEffort).not.toHaveBeenCalled();
   });
 
   it("records a block even when no friendship row exists yet", async () => {
@@ -199,7 +199,7 @@ describe("FriendService", () => {
       await service.removeFriend(userId, otherId);
 
       expect(friendRepo.deleteAcceptedPair).toHaveBeenCalledWith(userId, otherId);
-      expect(cache.deleteManyBestEffort).toHaveBeenCalled();
+      expect(cache.invalidateFeedsBestEffort).toHaveBeenCalled();
       expect(emitFriendRemoved).toHaveBeenCalledWith(userId, otherId);
     });
   });

@@ -1,5 +1,14 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, index, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  bigint,
+  boolean,
+  check,
+  index,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 import { citext, created, updated, uuidV7 } from "../../utils/database.js";
 import {
   FULL_NAME_MAX_LENGTH,
@@ -14,6 +23,9 @@ export const users = pgTable(
     id: uuidV7("id").primaryKey(),
     email: citext("email").notNull(),
     passwordHash: text("password_hash"),
+    authVersion: bigint("auth_version", { mode: "number" })
+      .notNull()
+      .default(sql`0`),
     googleId: text("google_id"),
     username: text("username").notNull(),
     fullName: text("full_name").notNull(),

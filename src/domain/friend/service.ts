@@ -121,7 +121,7 @@ export class FriendService {
   }
 
   private async deleteSocialFeedCaches(userIds: string[]): Promise<void> {
-    await this.cache.deleteManyBestEffort(
+    await this.cache.invalidateFeedsBestEffort(
       userIds.flatMap((id) => [storyFeedKey(id), noteFeedKey(id)]),
     );
   }

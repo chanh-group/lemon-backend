@@ -174,6 +174,7 @@ export class ConversationPgRepository implements ConversationRepository {
         lastMessageAt: conversations.lastMessageAt,
         createdAt: conversations.createdAt,
         lastReadMessageId: conversationParticipants.lastReadMessageId,
+        unreadRevision: sql<string>`${conversations.unreadRevision}::text`,
       })
       .from(conversationParticipants)
       .innerJoin(conversations, eq(conversationParticipants.conversationId, conversations.id))
@@ -232,6 +233,7 @@ export class ConversationPgRepository implements ConversationRepository {
         lastMessageAt: conversations.lastMessageAt,
         createdAt: conversations.createdAt,
         lastReadMessageId: conversationParticipants.lastReadMessageId,
+        unreadRevision: sql<string>`${conversations.unreadRevision}::text`,
         partnerId: users.id,
         partnerUsername: users.username,
         partnerFullName: users.fullName,
@@ -279,6 +281,7 @@ export class ConversationPgRepository implements ConversationRepository {
             }
           : undefined,
       lastReadMessageId: row.lastReadMessageId,
+      unreadRevision: row.unreadRevision,
     };
   }
 

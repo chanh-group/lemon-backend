@@ -63,15 +63,11 @@ export class NoteService {
         }));
     }
 
-    const allUserIds = [userId, ...friendIds];
-    const rows = await this.noteRepo.findActiveFeedByUserIds(allUserIds);
-    const feed: UserNoteFeedResponse[] = rows.map(({ note, user }) => ({
-      user,
-      note: toNoteResponse(note),
-    }));
-
-    await this.cacheStore.setBestEffort(key, feed, NOTE_FEED_TTL_SECS);
-    return feed;
+    return this.cacheStore.loadFeedBestEffort(key, NOTE_FEED_TTL_SECS, async () => {
+      const currentFriendIds = await this.noteRepo.getFriendUserIds(userId);
+      const rows = await this.noteRepo.findActiveFeedByUserIds([userId, ...currentFriendIds]);
+      return rows.map(({ note, user }) => ({ user, note: toNoteResponse(note) }));
+    });
   }
 
   async deleteMyNote(userId: string): Promise<void> {
@@ -86,7 +82,7 @@ export class NoteService {
 
   private async invalidateUserAndFriendFeeds(userId: string): Promise<void> {
     const friendIds = await this.noteRepo.getFriendUserIds(userId);
-    await this.cacheStore.deleteManyBestEffort([
+    await this.cacheStore.invalidateFeedsBestEffort([
       noteFeedKey(userId),
       ...friendIds.map(noteFeedKey),
     ]);

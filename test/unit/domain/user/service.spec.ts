@@ -42,6 +42,7 @@ describe("UserService", () => {
     id: "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b",
     email: "lemon@example.com",
     passwordHash: "argon2id$hashed",
+    authVersion: 0,
     googleId: null,
     username: "lemon_user",
     fullName: "Nguyen Van Lemon",

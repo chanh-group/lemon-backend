@@ -57,6 +57,7 @@ function setup(opts?: {
     noteRepo as unknown as NoteRepository,
     storage as unknown as StorageService,
     cache,
+    { purgeExpired: vi.fn().mockResolvedValue(0) } as never,
   );
   return { job, cache, storyRepo, noteRepo, storage };
 }

@@ -13,6 +13,7 @@ export interface ConversationWithPartner {
   lastMessageSenderId?: string | null;
   lastMessageAt: Date | null;
   unreadCount?: number;
+  unreadRevision?: string;
   lastReadMessageId?: string | null;
   createdAt: Date;
 }

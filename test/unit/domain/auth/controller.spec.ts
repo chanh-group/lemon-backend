@@ -387,6 +387,7 @@ describe("AuthController", () => {
     const httpRateLimiter = {
       checkIpLimit: vi.fn().mockResolvedValue(true),
       checkEmailLimit: vi.fn().mockResolvedValue(true),
+      checkIpEmailLimit: vi.fn().mockResolvedValue(true),
       checkMixedLimit: vi.fn().mockResolvedValue(true),
     };
 

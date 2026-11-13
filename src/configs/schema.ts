@@ -3,6 +3,7 @@ export * from "../utils/database.js";
 
 // Domain Schemas (Tables, Keys, Checks, Indexes)
 export * from "../domain/user/schema.js";
+export * from "../domain/auth/schema.js";
 export * from "../domain/friend/schema.js";
 export * from "../domain/conversation/schema.js";
 export * from "../domain/message/schema.js";

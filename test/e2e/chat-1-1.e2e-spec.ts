@@ -15,6 +15,11 @@ import { conversations } from "../../src/domain/conversation/schema.js";
 import { getDrizzleToken } from "@nestjs/drizzle";
 import { JWT_CONFIG } from "../../src/domain/auth/constants.js";
 import type { JwtConfig } from "../../src/domain/auth/jwt.js";
+import { authSessions } from "../../src/domain/auth/schema.js";
+import { REFRESH_TOKEN_EXPIRATION } from "../../src/utils/cache/constants.js";
+import type { Redis } from "ioredis";
+import { REDIS_CLIENT } from "../../src/utils/cache/store.js";
+import { unreadCountKey } from "../../src/utils/cache/keys.js";
 
 describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
   let app: INestApplication;
@@ -44,8 +49,8 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     db = moduleFixture.get<DrizzleDb>(getDrizzleToken());
     jwtConfig = moduleFixture.get<JwtConfig>(JWT_CONFIG);
 
-    tokenA = await jwtConfig.signAccessToken(userA);
-    tokenB = await jwtConfig.signAccessToken(userB);
+    tokenA = await jwtConfig.signAccessToken(userA, 0, userA);
+    tokenB = await jwtConfig.signAccessToken(userB, 0, userB);
 
     const ts = Date.now();
     // Create isolated users and an accepted friendship for direct chat.
@@ -66,6 +71,15 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
         },
       ])
       .onConflictDoNothing();
+    await db
+      .insert(authSessions)
+      .values(
+        [userA, userB].map((id) => ({
+          id,
+          userId: id,
+          expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRATION * 1000),
+        })),
+      );
     const [userLow, userHigh] = [userA, userB].sort();
     await db
       .insert(friendships)
@@ -115,7 +129,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
   });
 
   it("POST /api/conversations/direct - should reject Refresh Token used as Bearer token with 401 UNAUTHORIZED", async () => {
-    const refreshToken = await jwtConfig.signRefreshToken(userA, uuidv7());
+    const refreshToken = await jwtConfig.signRefreshToken(userA, uuidv7(), 0, userA);
     const res = await request(app.getHttpServer())
       .post("/api/conversations/direct")
       .set("Authorization", `Bearer ${refreshToken}`)
@@ -230,6 +244,52 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     expect(retryRes.body.data.id).toBe(messageId);
   });
 
+  it("rebuilds unread when a stale Redis write arrives after new messages or a revoke", async () => {
+    const redis = app.get<Redis>(REDIS_CLIENT);
+    const key = unreadCountKey(userB, conversationId);
+    const getUnread = async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/api/conversations/${conversationId}`)
+        .set("Authorization", `Bearer ${tokenB}`)
+        .expect(200);
+      return response.body.data.unreadCount as number;
+    };
+    const send = async (body: string) => {
+      const response = await request(app.getHttpServer())
+        .post(`/api/conversations/${conversationId}/messages`)
+        .set("Authorization", `Bearer ${tokenA}`)
+        .send({ body, kind: "TEXT" })
+        .expect(201);
+      return response.body.data.id as string;
+    };
+
+    const baseline = await getUnread();
+    const first = await send("revision race first");
+    expect(await getUnread()).toBe(baseline + 1);
+    const stale = await redis.get(key);
+    expect(stale).not.toBeNull();
+    const second = await send("revision race second");
+    await redis.set(key, stale!, "EX", 60);
+    expect(await getUnread()).toBe(baseline + 2);
+
+    const staleBeforeRevoke = await redis.get(key);
+    await request(app.getHttpServer())
+      .delete(`/api/messages/${first}`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .expect(200);
+    await redis.set(key, staleBeforeRevoke!, "EX", 60);
+    expect(await getUnread()).toBe(baseline + 1);
+
+    const staleBeforeRead = await redis.get(key);
+    await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/read`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .send({ lastReadMessageId: second })
+      .expect(200);
+    await redis.set(key, staleBeforeRead!, "EX", 60);
+    expect(await getUnread()).toBe(0);
+  });
+
   it("POST /api/conversations/:id/messages - should safely store and return HTML/XSS body without corruption", async () => {
     const xssPayload = "<script>alert('xss')</script>";
     const res = await request(app.getHttpServer())
@@ -325,15 +385,32 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
 
   it("GET /api/conversations/:id/messages - should reject unauthorized non-member with 403 NOT_PARTICIPANT", async () => {
     const outsider = uuidv7();
-    const tokenOutsider = await jwtConfig.signAccessToken(outsider);
+    const name = `outsider${Date.now()}`;
+    await db.insert(users).values({
+      id: outsider,
+      username: name,
+      email: `${name}@example.test`,
+      fullName: "Outsider",
+    });
+    await db
+      .insert(authSessions)
+      .values({
+        id: outsider,
+        userId: outsider,
+        expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRATION * 1000),
+      });
+    try {
+      const tokenOutsider = await jwtConfig.signAccessToken(outsider, 0, outsider);
+      const res = await request(app.getHttpServer())
+        .get(`/api/conversations/${conversationId}/messages`)
+        .set("Authorization", `Bearer ${tokenOutsider}`)
+        .expect(403);
 
-    const res = await request(app.getHttpServer())
-      .get(`/api/conversations/${conversationId}/messages`)
-      .set("Authorization", `Bearer ${tokenOutsider}`)
-      .expect(403);
-
-    expect(res.body.success).toBe(false);
-    expect(res.body.code).toBe("NOT_PARTICIPANT");
+      expect(res.body.success).toBe(false);
+      expect(res.body.code).toBe("NOT_PARTICIPANT");
+    } finally {
+      await db.delete(users).where(eq(users.id, outsider));
+    }
   });
 
   it("POST /api/conversations/:id/messages - should reject empty text message with 422 VALIDATION_ERROR", async () => {

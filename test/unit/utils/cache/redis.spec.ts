@@ -9,6 +9,8 @@ import {
   RedisCacheService,
   REVOKE_SESSION_COMMAND,
   REVOKE_SESSION_LUA,
+  REVOKE_FAMILY_COMMAND,
+  REVOKE_FAMILY_LUA,
   RELEASE_LOCK_COMMAND,
   RELEASE_LOCK_LUA,
   ROTATE_REFRESH_COMMAND,
@@ -77,15 +79,28 @@ describe("RedisCacheService", () => {
     expect(exec).toHaveBeenCalledTimes(1);
   });
 
-  it("registers all five Lua commands", () => {
+  it("registers all Lua commands", () => {
     const defineCommand = vi.fn();
     registerCacheCommands({ defineCommand });
-    expect(defineCommand).toHaveBeenCalledTimes(5);
+    expect(defineCommand).toHaveBeenCalledTimes(6);
     expect(defineCommand).toHaveBeenCalledWith(ROTATE_REFRESH_COMMAND, { lua: ROTATE_REFRESH_LUA });
     expect(defineCommand).toHaveBeenCalledWith(CREATE_SESSION_COMMAND, { lua: CREATE_SESSION_LUA });
     expect(defineCommand).toHaveBeenCalledWith(REVOKE_SESSION_COMMAND, { lua: REVOKE_SESSION_LUA });
+    expect(defineCommand).toHaveBeenCalledWith(REVOKE_FAMILY_COMMAND, { lua: REVOKE_FAMILY_LUA });
     expect(defineCommand).toHaveBeenCalledWith(CHECK_OTP_COMMAND, { lua: CHECK_OTP_LUA });
     expect(defineCommand).toHaveBeenCalledWith(RELEASE_LOCK_COMMAND, { lua: RELEASE_LOCK_LUA });
+  });
+
+  it("revokes a family with one Redis command", async () => {
+    const { service, redis } = serviceWith({ revokeFamily: vi.fn().mockResolvedValue(1) });
+    await service.revokeRefreshFamily("sessions", ["user", "otp"]);
+    expect(redis["revokeFamily"]).toHaveBeenCalledWith(
+      3,
+      "sessions",
+      "user",
+      "otp",
+      "refreshToken:",
+    );
   });
 
   it("maps otp codes", async () => {
@@ -101,6 +116,12 @@ describe("RedisCacheService", () => {
     expect(await service.checkOtpCode("k", "c", 5)).toBe(OtpCheckOutcome.Mismatch);
     expect(await service.checkOtpCode("k", "c", 5)).toBe(OtpCheckOutcome.Locked);
     expect(await service.checkOtpCode("k", "c", 5)).toBe(OtpCheckOutcome.Missing);
+  });
+
+  it("requests atomic OTP consumption when asked", async () => {
+    const { service, redis } = serviceWith({ checkOtp: vi.fn().mockResolvedValue(1) });
+    await service.checkOtpCode("otp", "123456", 5, true);
+    expect(redis["checkOtp"]).toHaveBeenCalledWith(1, "otp", "123456", 5, "1");
   });
 
   it("maps SET NX OK to true and null to false", async () => {

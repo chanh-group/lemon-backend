@@ -8,6 +8,7 @@ import { CacheError } from "../../../../src/utils/cache/error.js";
 import { MemoryCacheService } from "../../../../src/utils/cache/memory.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
 import { SystemError } from "../../../../src/utils/errors/system.js";
+import type { AuthSessionRepository } from "../../../../src/domain/auth/repository.js";
 
 type MockUserRepo = {
   findById: ReturnType<typeof vi.fn>;
@@ -56,11 +57,13 @@ describe("AuthService", () => {
   let cacheStore: MemoryCacheService;
   let mockUserRepo: MockUserRepo;
   let mockMailService: MockMailService;
+  let sessions: AuthSessionRepository;
 
   const mockUser: User = {
     id: "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b",
     email: "lemon@example.com",
     passwordHash: "",
+    authVersion: 0,
     googleId: null,
     username: "lemon_user",
     fullName: "Nguyen Van Lemon",
@@ -84,9 +87,24 @@ describe("AuthService", () => {
     };
 
     cacheStore = new MemoryCacheService();
+    const active = new Map<string, string>();
+    sessions = {
+      create: vi.fn(async (userId, sessionId) => {
+        active.set(sessionId, userId);
+      }),
+      isActive: vi.fn(async (userId, sessionId) => active.get(sessionId) === userId),
+      extend: vi.fn(async (userId, sessionId) => active.get(sessionId) === userId),
+      revoke: vi.fn(async (userId, sessionId) => {
+        if (active.get(sessionId) === userId) active.delete(sessionId);
+      }),
+      revokeAll: vi.fn(async (userId) => {
+        for (const [id, owner] of active) if (owner === userId) active.delete(id);
+      }),
+      purgeExpired: vi.fn().mockResolvedValue(0),
+    };
 
     mockUserRepo = {
-      findById: vi.fn(),
+      findById: vi.fn().mockResolvedValue(mockUser),
       findByEmail: vi.fn(),
       findByUsername: vi.fn(),
       findByIdentifier: vi.fn(),
@@ -112,6 +130,7 @@ describe("AuthService", () => {
       cacheStore,
       mockMailService as never,
       JwtConfig.from_env(),
+      sessions,
     );
   });
 
@@ -243,6 +262,75 @@ describe("AuthService", () => {
       const cached = await cacheStore.getRaw(`${OTP_KEY_PREFIX}signup@example.com`);
       expect(cached).toBeNull();
     });
+
+    it("allows only one concurrent signup with the same OTP", async () => {
+      await cacheStore.setRaw(
+        `${OTP_KEY_PREFIX}signup@example.com`,
+        JSON.stringify({ code: "123456", attempts: 0 }),
+        120,
+      );
+      mockUserRepo.findByEmail.mockResolvedValue(null);
+      mockUserRepo.findByUsername.mockResolvedValue(null);
+      mockUserRepo.create.mockResolvedValue(mockUser);
+      vi.spyOn(authService, "hashPassword").mockResolvedValue("hash");
+      const input = {
+        email: "signup@example.com",
+        fullName: "User",
+        username: "user",
+        password: "Password#123",
+        otp: "123456",
+      };
+
+      const results = await Promise.allSettled([
+        authService.signup(input),
+        authService.signup(input),
+      ]);
+
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      const failed = results.find((result) => result.status === "rejected");
+      expect(failed).toMatchObject({ reason: { code: "INVALID_OTP" } });
+      expect(mockUserRepo.create).toHaveBeenCalledOnce();
+    });
+
+    it("keeps the OTP when the username is already taken", async () => {
+      const key = `${OTP_KEY_PREFIX}signup@example.com`;
+      await cacheStore.setRaw(key, JSON.stringify({ code: "123456", attempts: 0 }), 120);
+      mockUserRepo.findByEmail.mockResolvedValue(null);
+      mockUserRepo.findByUsername.mockResolvedValue(mockUser);
+      await expectBusinessError(
+        authService.signup({
+          email: "signup@example.com",
+          fullName: "User",
+          username: "user",
+          password: "Password#123",
+          otp: "123456",
+        }),
+        "USERNAME_TAKEN",
+      );
+      expect(await cacheStore.getRaw(key)).not.toBeNull();
+    });
+
+    it("does not delete a newly issued OTP after the account is created", async () => {
+      const key = `${OTP_KEY_PREFIX}signup@example.com`;
+      await cacheStore.setRaw(key, JSON.stringify({ code: "123456", attempts: 0 }), 120);
+      mockUserRepo.findByEmail.mockResolvedValue(null);
+      mockUserRepo.findByUsername.mockResolvedValue(null);
+      vi.spyOn(authService, "hashPassword").mockResolvedValue("hash");
+      mockUserRepo.create.mockImplementation(async () => {
+        await cacheStore.setRaw(key, JSON.stringify({ code: "654321", attempts: 0 }), 120);
+        return mockUser;
+      });
+
+      await authService.signup({
+        email: "signup@example.com",
+        fullName: "User",
+        username: "user",
+        password: "Password#123",
+        otp: "123456",
+      });
+
+      expect(await cacheStore.getRaw(key)).toContain("654321");
+    });
   });
 
   describe("login", () => {
@@ -314,6 +402,31 @@ describe("AuthService", () => {
   });
 
   describe("refreshToken", () => {
+    it("does not issue a refresh after logout wins the session race", async () => {
+      mockUserRepo.findByIdentifier.mockResolvedValueOnce(mockUser);
+      const login = await authService.login({ identifier: "lemon_user", password: "MatKhau#123" });
+      const extend = sessions.extend.bind(sessions);
+      let entered!: () => void;
+      let release!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const resume = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      vi.spyOn(sessions, "extend").mockImplementationOnce(async (...args) => {
+        entered();
+        await resume;
+        return extend(...args);
+      });
+
+      const pending = authService.refreshToken(login.tokens.refreshToken);
+      await started;
+      await authService.logout(login.tokens.refreshToken);
+      release();
+      await expectBusinessError(pending, "INVALID_SESSION");
+    });
+
     it("throws BusinessError INVALID_SESSION on invalid token", async () => {
       await expectBusinessError(
         authService.refreshToken("invalid.refresh.token"),
@@ -416,6 +529,59 @@ describe("AuthService", () => {
       });
 
       expect(mockUserRepo.updatePasswordHash).toHaveBeenCalledWith(mockUser.id, expect.any(String));
+    });
+
+    it("updates the password only once when reset requests use the same OTP", async () => {
+      const key = `forgot_otp:${mockUser.email}`;
+      await cacheStore.setRaw(key, JSON.stringify({ code: "654321", attempts: 0 }), 120);
+      mockUserRepo.findByEmail.mockResolvedValue(mockUser);
+      vi.spyOn(authService, "hashPassword").mockResolvedValue("hash");
+      const input = { email: mockUser.email, otp: "654321", newPassword: "NewMatKhau#456" };
+
+      const results = await Promise.allSettled([
+        authService.forgotPasswordReset(input),
+        authService.forgotPasswordReset(input),
+      ]);
+
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      expect(results.find((result) => result.status === "rejected")).toMatchObject({
+        reason: { code: "INVALID_OTP" },
+      });
+      expect(mockUserRepo.updatePasswordHash).toHaveBeenCalledOnce();
+    });
+
+    it("does not delete a new reset OTP issued while updating the password", async () => {
+      const key = `forgot_otp:${mockUser.email}`;
+      await cacheStore.setRaw(key, JSON.stringify({ code: "654321", attempts: 0 }), 120);
+      mockUserRepo.findByEmail.mockResolvedValue(mockUser);
+      vi.spyOn(authService, "hashPassword").mockResolvedValue("hash");
+      mockUserRepo.updatePasswordHash.mockImplementation(async () => {
+        await cacheStore.setRaw(key, JSON.stringify({ code: "123456", attempts: 0 }), 120);
+      });
+
+      await authService.forgotPasswordReset({
+        email: mockUser.email,
+        otp: "654321",
+        newPassword: "NewMatKhau#456",
+      });
+
+      expect(await cacheStore.getRaw(key)).toContain("123456");
+    });
+
+    it("keeps the reset OTP if finding the user fails", async () => {
+      const key = `forgot_otp:${mockUser.email}`;
+      await cacheStore.setRaw(key, JSON.stringify({ code: "654321", attempts: 0 }), 120);
+      const dbError = new Error("database unavailable");
+      mockUserRepo.findByEmail.mockRejectedValue(dbError);
+
+      await expect(
+        authService.forgotPasswordReset({
+          email: mockUser.email,
+          otp: "654321",
+          newPassword: "NewMatKhau#456",
+        }),
+      ).rejects.toBe(dbError);
+      expect(await cacheStore.getRaw(key)).not.toBeNull();
     });
   });
 
