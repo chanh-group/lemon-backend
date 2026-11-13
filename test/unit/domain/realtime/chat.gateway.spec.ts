@@ -21,6 +21,9 @@ describe("ChatGateway", () => {
   let activeConversationIdsMock: Mock;
   let isParticipantMock: Mock;
   let updateLastSeenMock: Mock;
+  let findAuthUserMock: Mock;
+  let sessionActiveMock: Mock;
+  let revocationTrackMock: Mock;
 
   const mockUserId = "0193a2b1-0000-7000-8000-000000000001";
   const mockConvId = "0193a2b1-0000-7000-8000-000000000010";
@@ -55,6 +58,9 @@ describe("ChatGateway", () => {
     activeConversationIdsMock = vi.fn().mockResolvedValue([mockConvId, mockConvId2]);
     isParticipantMock = vi.fn().mockResolvedValue(true);
     updateLastSeenMock = vi.fn().mockResolvedValue(undefined);
+    findAuthUserMock = vi.fn().mockResolvedValue({ authVersion: 0, isActive: true });
+    sessionActiveMock = vi.fn().mockResolvedValue(true);
+    revocationTrackMock = vi.fn().mockReturnValue(vi.fn());
 
     updateWhereMock = vi.fn().mockResolvedValue(undefined);
     updateSetMock = vi.fn().mockReturnValue({ where: updateWhereMock });
@@ -87,9 +93,12 @@ describe("ChatGateway", () => {
       } as unknown as import("../../../../src/domain/conversation/pg.js").ConversationPgRepository,
       {
         updateLastSeen: updateLastSeenMock,
+        findById: findAuthUserMock,
       } as unknown as import("../../../../src/domain/user/service.js").UserService,
       mockJwt,
       mockRedis,
+      { isActive: sessionActiveMock } as never,
+      { track: revocationTrackMock } as never,
     );
   });
 
@@ -145,6 +154,91 @@ describe("ChatGateway", () => {
   }
 
   describe("handleConnection", () => {
+    it("rejects sockets when the revocation listener is unavailable", async () => {
+      verifyAccessTokenMock.mockResolvedValue({
+        sub: mockUserId,
+        authVersion: 0,
+        sid: mockConvId,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      });
+      revocationTrackMock.mockReturnValue(null);
+      const { client, disconnectMock, emitMock } = createMockSocket({
+        auth: { token: "valid-jwt" },
+      });
+      await gateway.handleConnection(client);
+      expect(emitMock).toHaveBeenCalledWith("error", { code: "UNAVAILABLE" });
+      expect(disconnectMock).toHaveBeenCalledWith(true);
+      expect(findAuthUserMock).not.toHaveBeenCalled();
+    });
+    it("rejects a socket when the password has changed since its token was issued", async () => {
+      verifyAccessTokenMock.mockResolvedValue({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      });
+      findAuthUserMock.mockResolvedValue({ authVersion: 1, isActive: true });
+      const { client, disconnectMock, emitMock } = createMockSocket({
+        auth: { token: "old-token" },
+      });
+      await gateway.handleConnection(client);
+      expect(emitMock).toHaveBeenCalledWith("error", { code: "UNAUTHORIZED" });
+      expect(disconnectMock).toHaveBeenCalledWith(true);
+    });
+
+    it("waits for authentication before processing an early room join", async () => {
+      let finishAuthentication!: (value: { sub: string; authVersion: number; exp: number }) => void;
+      verifyAccessTokenMock.mockReturnValue(
+        new Promise((resolve) => {
+          finishAuthentication = resolve;
+        }),
+      );
+      const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
+
+      const connection = gateway.handleConnection(client);
+      const join = gateway.handleJoinConversation(client, { conversationId: mockConvId });
+      expect(isParticipantMock).not.toHaveBeenCalled();
+      finishAuthentication({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      });
+
+      await connection;
+      await expect(join).resolves.toEqual({ success: true, conversationId: mockConvId });
+      await gateway.handleDisconnect(client);
+      gateway.onApplicationShutdown();
+    });
+
+    it("disconnects the socket when its access token expires", async () => {
+      vi.useFakeTimers();
+      verifyAccessTokenMock.mockResolvedValue({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 10,
+      });
+      const { client, disconnectMock } = createMockSocket({ auth: { token: "valid-jwt" } });
+      await gateway.handleConnection(client);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(disconnectMock).toHaveBeenCalledWith(true);
+      await gateway.handleDisconnect(client);
+      gateway.onApplicationShutdown();
+    });
+
+    it("clears the expiration timer when the socket disconnects", async () => {
+      vi.useFakeTimers();
+      verifyAccessTokenMock.mockResolvedValue({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 10,
+      });
+      const { client, disconnectMock } = createMockSocket({ auth: { token: "valid-jwt" } });
+      await gateway.handleConnection(client);
+      await gateway.handleDisconnect(client);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(disconnectMock).not.toHaveBeenCalled();
+      gateway.onApplicationShutdown();
+    });
+
     it("rejects connections while Redis is not ready", async () => {
       mockRedis.status = "reconnecting";
       const { client, disconnectMock } = createMockSocket({ auth: { token: "valid-jwt" } });
@@ -157,7 +251,11 @@ describe("ChatGateway", () => {
     });
 
     it("accepts connection with valid JWT in handshake.auth.token", async () => {
-      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
       const { client, joinMock, disconnectMock } = createMockSocket({
         auth: { token: "valid-jwt" },
       });
@@ -171,18 +269,25 @@ describe("ChatGateway", () => {
     });
 
     it("joins all active conversation rooms on connect", async () => {
-      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
       const { client, joinMock } = createMockSocket({ auth: { token: "valid-jwt" } });
 
       await gateway.handleConnection(client);
 
       expect(joinMock).toHaveBeenCalledWith(`user:${mockUserId}`);
-      expect(joinMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
-      expect(joinMock).toHaveBeenCalledWith(`conv:${mockConvId2}`);
+      expect(joinMock).toHaveBeenCalledWith([`conv:${mockConvId}`, `conv:${mockConvId2}`]);
     });
 
     it("accepts connection with valid JWT in Authorization header", async () => {
-      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
       const { client } = createMockSocket({
         headers: { authorization: "Bearer header-jwt" },
       });
@@ -194,7 +299,11 @@ describe("ChatGateway", () => {
     });
 
     it("accepts connection with valid JWT in Cookie", async () => {
-      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
       const { client } = createMockSocket({
         headers: { cookie: "other=123; lemon_access_token=cookie-jwt; theme=dark" },
       });
@@ -235,7 +344,11 @@ describe("ChatGateway", () => {
 
   describe("presence", () => {
     it("stores online presence with the live connection count", async () => {
-      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
       const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
 
       await gateway.handleConnection(client);
@@ -258,7 +371,11 @@ describe("ChatGateway", () => {
     });
 
     it("presence:ping refreshes online presence with the tracked connection count", async () => {
-      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
       const { client: first } = createMockSocket({ auth: { token: "valid-jwt" } });
       const { client: second } = createMockSocket({ auth: { token: "valid-jwt" } });
 
@@ -277,7 +394,11 @@ describe("ChatGateway", () => {
 
     it("rechecks offline presence after another node's heartbeat expires", async () => {
       vi.useFakeTimers();
-      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
       const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
 
       await gateway.handleConnection(client);
@@ -301,7 +422,11 @@ describe("ChatGateway", () => {
 
     it("marks offline when no other node heartbeats (ttl <= 30)", async () => {
       vi.useFakeTimers();
-      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
       const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
 
       await gateway.handleConnection(client);
@@ -317,7 +442,11 @@ describe("ChatGateway", () => {
 
     it("reconnect within the grace period cancels the offline timer and refreshes presence", async () => {
       vi.useFakeTimers();
-      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
       const { client: first } = createMockSocket({ auth: { token: "valid-jwt" } });
       const { client: second } = createMockSocket({ auth: { token: "valid-jwt" } });
 
@@ -336,7 +465,11 @@ describe("ChatGateway", () => {
 
     it("still marks offline after grace when the lastSeen DB write fails", async () => {
       vi.useFakeTimers();
-      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
       const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
 
       await gateway.handleConnection(client);
@@ -358,11 +491,18 @@ describe("ChatGateway", () => {
         } as unknown as import("../../../../src/domain/conversation/pg.js").ConversationPgRepository,
         {
           updateLastSeen: vi.fn().mockResolvedValue(undefined),
+          findById: findAuthUserMock,
         } as unknown as import("../../../../src/domain/user/service.js").UserService,
         mockJwt,
         null,
+        { isActive: sessionActiveMock } as never,
+        { track: vi.fn().mockReturnValue(vi.fn()) } as never,
       );
-      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
       const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
 
       await memoryGateway.handleConnection(client);
@@ -376,7 +516,11 @@ describe("ChatGateway", () => {
   describe("onApplicationShutdown", () => {
     it("cancels grace timers so no offline presence or DB write happens after shutdown", async () => {
       vi.useFakeTimers();
-      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
       const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
 
       await gateway.handleConnection(client);
@@ -402,7 +546,11 @@ describe("ChatGateway", () => {
     });
 
     it("clears tracked connections for users who are still online", async () => {
-      verifyAccessTokenMock.mockResolvedValue({ sub: mockUserId });
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
       const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
 
       await gateway.handleConnection(client);

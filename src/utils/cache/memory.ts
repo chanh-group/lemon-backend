@@ -6,6 +6,7 @@
 import { Injectable } from "@nestjs/common";
 import { REFRESH_TOKEN_KEY_PREFIX } from "./constants.js";
 import { CacheStoreExt } from "./store.js";
+import { feedFillKey } from "./keys.js";
 import {
   OtpCheckOutcome,
   RotationOutcome,
@@ -63,17 +64,41 @@ export class MemoryCacheService extends CacheStoreExt {
     for (const key of keys) this.store.delete(key);
   }
 
+  async invalidateFeeds(keys: string[]): Promise<void> {
+    for (const key of keys) {
+      this.store.delete(key);
+      this.store.delete(feedFillKey(key));
+    }
+  }
+
+  async publishFeed(
+    key: string,
+    leaseKey: string,
+    token: string,
+    value: string,
+    expirationSecs: number,
+  ): Promise<void> {
+    if (this.readLive(leaseKey) !== token) return;
+    this.store.set(key, { value, expiresAt: Date.now() + expirationSecs * 1000 });
+  }
+
   async rotateRefreshToken(rotation: RefreshRotation): Promise<RotationOutcome> {
     const stored = this.readLive(rotation.oldKey);
     if (stored === null || stored !== rotation.subject) {
       return RotationOutcome.Stale;
     }
     this.store.delete(rotation.oldKey);
-    await this.setRaw(rotation.newKey, rotation.subject, rotation.ttlSecs);
+    this.store.set(rotation.newKey, {
+      value: rotation.subject,
+      expiresAt: Date.now() + rotation.ttlSecs * 1000,
+    });
     const sessions = MemoryCacheService.parseSessions(this.readLive(rotation.sessionKey));
     const updated = sessions.filter((jti) => jti !== rotation.oldJti);
     updated.push(rotation.newJti);
-    await this.setRaw(rotation.sessionKey, JSON.stringify(updated), rotation.ttlSecs);
+    this.store.set(rotation.sessionKey, {
+      value: JSON.stringify(updated),
+      expiresAt: Date.now() + rotation.ttlSecs * 1000,
+    });
     return RotationOutcome.Rotated;
   }
 
@@ -86,8 +111,9 @@ export class MemoryCacheService extends CacheStoreExt {
         this.store.delete(`${REFRESH_TOKEN_KEY_PREFIX}${jti}`);
       }
     }
-    await this.setRaw(session.key, session.subject, session.ttlSecs);
-    await this.setRaw(session.sessionKey, JSON.stringify(sessions), session.ttlSecs);
+    const expiresAt = Date.now() + session.ttlSecs * 1000;
+    this.store.set(session.key, { value: session.subject, expiresAt });
+    this.store.set(session.sessionKey, { value: JSON.stringify(sessions), expiresAt });
   }
 
   async revokeRefreshSession(revoke: RevokeRefreshSession): Promise<void> {
@@ -112,10 +138,20 @@ export class MemoryCacheService extends CacheStoreExt {
     }
   }
 
+  async revokeRefreshFamily(sessionKey: string, extraKeys: string[]): Promise<void> {
+    const sessions = MemoryCacheService.parseSessions(this.readLive(sessionKey));
+    for (const jti of sessions) {
+      if (typeof jti === "string") this.store.delete(`${REFRESH_TOKEN_KEY_PREFIX}${jti}`);
+    }
+    this.store.delete(sessionKey);
+    for (const key of extraKeys) this.store.delete(key);
+  }
+
   async checkOtpCode(
     key: string,
     candidate: string,
     maxAttempts: number,
+    consume = false,
   ): Promise<OtpCheckOutcome> {
     // Keep `expiresAt` on mismatch (no TTL sliding) — `KEEPTTL` equivalent.
     const entry = this.store.get(key);
@@ -136,7 +172,10 @@ export class MemoryCacheService extends CacheStoreExt {
       this.store.delete(key);
       return OtpCheckOutcome.Missing;
     }
-    if (otp.code === candidate) return OtpCheckOutcome.Match;
+    if (otp.code === candidate) {
+      if (consume) this.store.delete(key);
+      return OtpCheckOutcome.Match;
+    }
     const attempts = (otp.attempts ?? 0) + 1;
     if (attempts >= maxAttempts) {
       this.store.delete(key);

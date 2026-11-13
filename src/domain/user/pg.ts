@@ -7,6 +7,7 @@ import type { NewUser, User } from "./schema.js";
 import { users } from "./schema.js";
 import { toCursorPage } from "../shared.js";
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "../pagination.constants.js";
+import { AUTH_REVOCATION_CHANNEL } from "../auth/constants.js";
 
 function encodeSearchCursor(rank: number, id: string): string {
   return Buffer.from(`${rank}:${id}`).toString("base64url");
@@ -126,10 +127,17 @@ export class UserPgRepository implements UserRepository {
   }
 
   async updatePasswordHash(id: string, hash: string): Promise<void> {
-    await this.db
-      .update(users)
-      .set({ passwordHash: hash, updatedAt: sql`now()` })
-      .where(and(eq(users.id, id), isNull(users.deletedAt)));
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(users)
+        .set({
+          passwordHash: hash,
+          authVersion: sql`${users.authVersion} + 1`,
+          updatedAt: sql`now()`,
+        })
+        .where(and(eq(users.id, id), isNull(users.deletedAt)));
+      await tx.execute(sql`select pg_notify(${AUTH_REVOCATION_CHANNEL}, ${`u:${id}`})`);
+    });
   }
 
   async updateProfile(
@@ -152,9 +160,12 @@ export class UserPgRepository implements UserRepository {
   }
 
   async softDelete(id: string): Promise<void> {
-    await this.db
-      .update(users)
-      .set({ deletedAt: sql`now()`, updatedAt: sql`now()` })
-      .where(eq(users.id, id));
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(users)
+        .set({ deletedAt: sql`now()`, updatedAt: sql`now()` })
+        .where(eq(users.id, id));
+      await tx.execute(sql`select pg_notify(${AUTH_REVOCATION_CHANNEL}, ${`u:${id}`})`);
+    });
   }
 }

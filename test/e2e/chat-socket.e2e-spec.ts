@@ -12,6 +12,8 @@ import { AppModule } from "../../src/app.js";
 import { DrizzleDb } from "../../src/configs/database.js";
 import { JWT_CONFIG } from "../../src/domain/auth/constants.js";
 import type { JwtConfig } from "../../src/domain/auth/jwt.js";
+import { authSessions } from "../../src/domain/auth/schema.js";
+import { REFRESH_TOKEN_EXPIRATION } from "../../src/utils/cache/constants.js";
 import { conversations } from "../../src/domain/conversation/schema.js";
 import { users } from "../../src/domain/user/schema.js";
 import { friendships } from "../../src/domain/friend/schema.js";
@@ -197,15 +199,22 @@ describe("Realtime chat gateway over socket.io (E2E)", () => {
         },
       ])
       .onConflictDoNothing();
+    await db.insert(authSessions).values(
+      [userA, userB, userC].map((id) => ({
+        id,
+        userId: id,
+        expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRATION * 1000),
+      })),
+    );
     const [userLow, userHigh] = [userA, userB].sort();
     await db
       .insert(friendships)
       .values({ requesterId: userA, addresseeId: userB, userLow, userHigh, status: "ACCEPTED" });
 
     [tokenA, tokenB, tokenC] = await Promise.all([
-      jwtConfig.signAccessToken(userA),
-      jwtConfig.signAccessToken(userB),
-      jwtConfig.signAccessToken(userC),
+      jwtConfig.signAccessToken(userA, 0, userA),
+      jwtConfig.signAccessToken(userB, 0, userB),
+      jwtConfig.signAccessToken(userC, 0, userC),
     ]);
 
     const convRes = await request(app.getHttpServer())

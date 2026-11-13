@@ -3,6 +3,8 @@ import type { JWTPayload } from "jose";
 export interface AccessTokenPayload extends JWTPayload {
   sub: string;
   type: "access";
+  authVersion: number;
+  sid: string;
   iss: string;
   aud: string;
 }
@@ -11,6 +13,8 @@ export interface RefreshTokenPayload extends JWTPayload {
   sub: string;
   type: "refresh";
   jti: string;
+  authVersion: number;
+  sid: string;
   iss: string;
   aud: string;
 }

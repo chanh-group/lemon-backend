@@ -5,6 +5,9 @@
 // in-memory backend keeps the same signature so both stay interchangeable
 // behind the `CACHE_STORE` token.
 import { Logger } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
+import { FEED_FILL_LEASE_SECS } from "./constants.js";
+import { feedFillKey } from "./keys.js";
 import type {
   NewRefreshSession,
   OtpCheckOutcome,
@@ -44,12 +47,18 @@ export interface CacheStore {
    * fake "signed out".
    */
   revokeRefreshSession(revoke: RevokeRefreshSession): Promise<void>;
+  revokeRefreshFamily(sessionKey: string, extraKeys: string[]): Promise<void>;
   /**
    * Atomic OTP check: a wrong attempt bumps the counter WITHOUT extending the
    * TTL. Rejects with `CacheError` on infra failure — never mistake it for a
    * wrong code (that would lock users out during infra flaps).
    */
-  checkOtpCode(key: string, candidate: string, maxAttempts: number): Promise<OtpCheckOutcome>;
+  checkOtpCode(
+    key: string,
+    candidate: string,
+    maxAttempts: number,
+    consume?: boolean,
+  ): Promise<OtpCheckOutcome>;
   /** Atomic lock acquire (`SET NX EX`). Rejects with `CacheError` on infra failure. */
   tryAcquireLock(key: string, token: string, expirationSecs: number): Promise<boolean>;
   /** Owner-safe release (compare-and-del). Stale token = silent no-op. Rejects with `CacheError` on infra failure. */
@@ -66,13 +75,67 @@ export abstract class CacheStoreExt implements CacheStore {
   abstract rotateRefreshToken(rotation: RefreshRotation): Promise<RotationOutcome>;
   abstract createRefreshSession(session: NewRefreshSession): Promise<void>;
   abstract revokeRefreshSession(revoke: RevokeRefreshSession): Promise<void>;
+  abstract revokeRefreshFamily(sessionKey: string, extraKeys: string[]): Promise<void>;
   abstract checkOtpCode(
     key: string,
     candidate: string,
     maxAttempts: number,
+    consume?: boolean,
   ): Promise<OtpCheckOutcome>;
   abstract tryAcquireLock(key: string, token: string, expirationSecs: number): Promise<boolean>;
   abstract releaseLock(key: string, token: string): Promise<void>;
+  abstract publishFeed(
+    key: string,
+    leaseKey: string,
+    token: string,
+    value: string,
+    expirationSecs: number,
+  ): Promise<void>;
+  abstract invalidateFeeds(keys: string[]): Promise<void>;
+
+  async loadFeedBestEffort<T>(
+    key: string,
+    expirationSecs: number,
+    load: () => Promise<T>,
+  ): Promise<T> {
+    const leaseKey = feedFillKey(key);
+    const token = randomUUID();
+    let acquired = false;
+    try {
+      acquired = await this.tryAcquireLock(leaseKey, token, FEED_FILL_LEASE_SECS);
+    } catch (err) {
+      this.logger.warn(`Feed cache lease unavailable: ${String(err)}`);
+    }
+    try {
+      const value = await load();
+      if (acquired) {
+        try {
+          const serialized = JSON.stringify(value);
+          if (serialized !== undefined)
+            await this.publishFeed(key, leaseKey, token, serialized, expirationSecs);
+        } catch (err) {
+          this.logger.warn(`Feed cache write skipped: ${String(err)}`);
+        }
+      }
+      return value;
+    } finally {
+      if (acquired) {
+        try {
+          await this.releaseLock(leaseKey, token);
+        } catch (err) {
+          this.logger.warn(`Feed cache lease release failed: ${String(err)}`);
+        }
+      }
+    }
+  }
+
+  async invalidateFeedsBestEffort(keys: string[]): Promise<void> {
+    try {
+      await this.invalidateFeeds(keys);
+    } catch (err) {
+      this.logger.warn(`Feed cache invalidation skipped: ${String(err)}`);
+    }
+  }
 
   /** Read + JSON-deserialize. Corrupt entries are deleted and treated as miss. */
   async get<T>(key: string): Promise<T | null> {

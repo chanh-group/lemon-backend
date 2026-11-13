@@ -6,17 +6,21 @@ import { getDrizzleToken } from "@nestjs/drizzle";
 import { inArray } from "drizzle-orm";
 import request from "supertest";
 import { v7 as uuidv7 } from "uuid";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AppModule } from "../../src/app.js";
 import type { DrizzleDb } from "../../src/configs/database.js";
 import { JWT_CONFIG } from "../../src/domain/auth/constants.js";
 import type { JwtConfig } from "../../src/domain/auth/jwt.js";
+import { authSessions } from "../../src/domain/auth/schema.js";
+import { REFRESH_TOKEN_EXPIRATION } from "../../src/utils/cache/constants.js";
 import { conversationParticipants, conversations } from "../../src/domain/conversation/schema.js";
 import { friendships } from "../../src/domain/friend/schema.js";
 import { users } from "../../src/domain/user/schema.js";
 import { ErrorFilter } from "../../src/middleware/error-filter.js";
 import { standardSchemaPipe } from "../../src/utils/validation.js";
 import { STORAGE_SERVICE, type StorageService } from "../../src/utils/storage/store.js";
+import { STORY_REPOSITORY, type StoryRepository } from "../../src/domain/story/repository.js";
+import { NOTE_REPOSITORY, type NoteRepository } from "../../src/domain/note/repository.js";
 
 describe("Story flows with PostgreSQL and Redis", () => {
   let app: INestApplication;
@@ -83,7 +87,7 @@ describe("Story flows with PostgreSQL and Redis", () => {
     db = module.get<DrizzleDb>(getDrizzleToken());
     const jwt = module.get<JwtConfig>(JWT_CONFIG);
     [ownerToken, friendToken, secondFriendToken, strangerToken] = await Promise.all(
-      [owner, friend, secondFriend, stranger].map((id) => jwt.signAccessToken(id)),
+      [owner, friend, secondFriend, stranger].map((id) => jwt.signAccessToken(id, 0, id)),
     );
     const unique = Date.now().toString();
     await db.insert(users).values(
@@ -92,6 +96,13 @@ describe("Story flows with PostgreSQL and Redis", () => {
         email: `story${unique}${i}@example.test`,
         username: `story${unique}${i}`,
         fullName: `Story Test ${i}`,
+      })),
+    );
+    await db.insert(authSessions).values(
+      [owner, friend, secondFriend, stranger].map((id) => ({
+        id,
+        userId: id,
+        expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRATION * 1000),
       })),
     );
     const [userLow, userHigh] = [owner, friend].sort();
@@ -177,6 +188,7 @@ describe("Story flows with PostgreSQL and Redis", () => {
       totalCount: 1,
       summary: [{ emoji: "👍", count: 1 }],
     });
+
     expect(reactions.body.data.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -189,7 +201,7 @@ describe("Story flows with PostgreSQL and Redis", () => {
     await request(app.getHttpServer())
       .post(`/api/stories/${textId}/react`)
       .auth(secondFriendToken, { type: "bearer" })
-      .send({ emoji: "😍" })
+      .send({ emoji: "🥰" })
       .expect(200);
     const firstPage = await request(app.getHttpServer())
       .get(`/api/stories/${textId}/reactions?limit=1`)
@@ -200,7 +212,7 @@ describe("Story flows with PostgreSQL and Redis", () => {
       hasMore: true,
       summary: expect.arrayContaining([
         { emoji: "👍", count: 1 },
-        { emoji: "😍", count: 1 },
+        { emoji: "🥰", count: 1 },
       ]),
     });
     const secondPage = await request(app.getHttpServer())
@@ -283,6 +295,113 @@ describe("Story flows with PostgreSQL and Redis", () => {
       .auth(friendToken, { type: "bearer" })
       .expect(404);
   }, 30000);
+
+  it("does not cache a feed read that finishes after its story was deleted", async () => {
+    const created = await request(app.getHttpServer())
+      .post("/api/stories")
+      .auth(ownerToken, { type: "bearer" })
+      .send({ kind: "TEXT", caption: "stale fill race" })
+      .expect(201);
+    const storyId = created.body.data.id as string;
+    const repo = app.get<StoryRepository>(STORY_REPOSITORY);
+    const findActive = repo.findActiveByUserIds.bind(repo);
+    let release!: () => void;
+    let notify!: () => void;
+    const paused = new Promise<void>((resolve) => {
+      notify = resolve;
+    });
+    const resume = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy = vi.spyOn(repo, "findActiveByUserIds").mockImplementationOnce(async (...args) => {
+      const result = await findActive(...args);
+      notify();
+      await resume;
+      return result;
+    });
+
+    const pending = request(app.getHttpServer())
+      .get("/api/stories/feed")
+      .auth(friendToken, { type: "bearer" })
+      .then((response) => response);
+    try {
+      await paused;
+      await request(app.getHttpServer())
+        .delete(`/api/stories/${storyId}`)
+        .auth(ownerToken, { type: "bearer" })
+        .expect(200);
+    } finally {
+      release();
+    }
+    const oldFeed = await pending;
+    expect(oldFeed.status).toBe(200);
+    expect(
+      oldFeed.body.data.flatMap((group: { stories: { id: string }[] }) =>
+        group.stories.map((story) => story.id),
+      ),
+    ).toContain(storyId);
+    spy.mockRestore();
+    const feed = await request(app.getHttpServer())
+      .get("/api/stories/feed")
+      .auth(friendToken, { type: "bearer" })
+      .expect(200);
+    const ids = feed.body.data.flatMap((group: { stories: { id: string }[] }) =>
+      group.stories.map((story) => story.id),
+    );
+    expect(ids).not.toContain(storyId);
+  });
+
+  it("does not cache a note feed read that finishes after the note was deleted", async () => {
+    await request(app.getHttpServer())
+      .put("/api/notes")
+      .auth(ownerToken, { type: "bearer" })
+      .send({ content: "stale note race" })
+      .expect(200);
+    const repo = app.get<NoteRepository>(NOTE_REPOSITORY);
+    const findActive = repo.findActiveFeedByUserIds.bind(repo);
+    let release!: () => void;
+    let notify!: () => void;
+    const paused = new Promise<void>((resolve) => {
+      notify = resolve;
+    });
+    const resume = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy = vi
+      .spyOn(repo, "findActiveFeedByUserIds")
+      .mockImplementationOnce(async (...args) => {
+        const result = await findActive(...args);
+        notify();
+        await resume;
+        return result;
+      });
+    const pending = request(app.getHttpServer())
+      .get("/api/notes/feed")
+      .auth(friendToken, { type: "bearer" })
+      .then((response) => response);
+    try {
+      await paused;
+      await request(app.getHttpServer())
+        .delete("/api/notes/me")
+        .auth(ownerToken, { type: "bearer" })
+        .expect(200);
+    } finally {
+      release();
+    }
+    const oldFeed = await pending;
+    expect(oldFeed.status).toBe(200);
+    expect(
+      oldFeed.body.data.map((item: { note: { content: string } }) => item.note.content),
+    ).toContain("stale note race");
+    spy.mockRestore();
+    const feed = await request(app.getHttpServer())
+      .get("/api/notes/feed")
+      .auth(friendToken, { type: "bearer" })
+      .expect(200);
+    expect(
+      feed.body.data.map((item: { note: { content: string } }) => item.note.content),
+    ).not.toContain("stale note race");
+  });
 
   it("uploads and reads media only for an authorized user", async () => {
     const signed = await request(app.getHttpServer())

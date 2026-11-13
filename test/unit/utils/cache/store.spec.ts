@@ -6,6 +6,13 @@ class Fake extends CacheStoreExt {
   store = new Map<string, string>();
   fail = false;
 
+  async publishFeed(): Promise<never> {
+    throw new CacheError("PUBLISH");
+  }
+  async invalidateFeeds(): Promise<never> {
+    throw new CacheError("INVALIDATE");
+  }
+
   async getRaw(k: string): Promise<string | null> {
     if (this.fail) throw new CacheError("GET");
     return this.store.get(k) ?? null;
@@ -34,6 +41,10 @@ class Fake extends CacheStoreExt {
   }
 
   async revokeRefreshSession(): Promise<never> {
+    throw new CacheError("REVOKE");
+  }
+
+  async revokeRefreshFamily(): Promise<never> {
     throw new CacheError("REVOKE");
   }
 

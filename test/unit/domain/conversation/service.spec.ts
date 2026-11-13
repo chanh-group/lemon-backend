@@ -59,6 +59,8 @@ describe("ConversationService", () => {
       isOnline: false,
     },
     unreadCount: 0,
+    unreadRevision: "1",
+    lastReadMessageId: null,
   };
 
   beforeEach(() => {
@@ -104,7 +106,10 @@ describe("ConversationService", () => {
 
     redisPipelineExecMock = vi
       .fn()
-      .mockResolvedValue([[null, "3"], presenceOnline] satisfies [Error | null, unknown][]);
+      .mockResolvedValue([
+        [null, JSON.stringify({ revision: "1", lastRead: null, count: 3 })],
+        presenceOnline,
+      ] satisfies [Error | null, unknown][]);
     redisPipelineSetMock = vi.fn().mockReturnThis();
     redisPipelineMock = vi.fn().mockReturnValue({
       get: vi.fn().mockReturnThis(),
@@ -269,7 +274,7 @@ describe("ConversationService", () => {
       expect(result.items[0].unreadCount).toBe(3);
       expect(redisPipelineSetMock).toHaveBeenCalledWith(
         unreadCountKey(userA, convId),
-        "3",
+        JSON.stringify({ revision: "1", lastRead: null, count: 3 }),
         "EX",
         604800,
       );
@@ -329,6 +334,37 @@ describe("ConversationService", () => {
   });
 
   describe("getById", () => {
+    it("rebuilds a stale unread cache after the database revision changes", async () => {
+      existsByIdMock.mockResolvedValue(true);
+      findByIdMock.mockResolvedValue({ ...mockConvWithPartner, unreadRevision: "2" });
+      redisPipelineExecMock.mockResolvedValue([
+        [null, JSON.stringify({ revision: "1", lastRead: null, count: 3 })],
+        presenceOnline,
+      ]);
+      countUnreadMock.mockResolvedValue(4);
+
+      const result = await service.getById(convId, userA);
+
+      expect(result.unreadCount).toBe(4);
+      expect(redisSetMock).toHaveBeenCalledWith(
+        unreadCountKey(userA, convId),
+        JSON.stringify({ revision: "2", lastRead: null, count: 4 }),
+        "EX",
+        604800,
+      );
+    });
+
+    it("rebuilds an unread cache created before the read pointer advanced", async () => {
+      existsByIdMock.mockResolvedValue(true);
+      findByIdMock.mockResolvedValue({ ...mockConvWithPartner, lastReadMessageId: "new-read" });
+      countUnreadMock.mockResolvedValue(0);
+
+      const result = await service.getById(convId, userA);
+
+      expect(result.unreadCount).toBe(0);
+      expect(countUnreadMock).toHaveBeenCalledOnce();
+    });
+
     it("throws CONVERSATION_NOT_FOUND if conversation does not exist", async () => {
       existsByIdMock.mockResolvedValue(false);
 
@@ -369,7 +405,12 @@ describe("ConversationService", () => {
 
       expect(countUnreadMock).toHaveBeenCalledWith(convId, userA);
       expect(result.unreadCount).toBe(4);
-      expect(redisSetMock).toHaveBeenCalledWith(unreadCountKey(userA, convId), "4", "EX", 604800);
+      expect(redisSetMock).toHaveBeenCalledWith(
+        unreadCountKey(userA, convId),
+        JSON.stringify({ revision: "1", lastRead: null, count: 4 }),
+        "EX",
+        604800,
+      );
     });
 
     it("fails when Redis returns a pipeline command error instead of treating it as a cache miss", async () => {
@@ -396,7 +437,7 @@ describe("ConversationService", () => {
   });
 
   describe("markAsRead", () => {
-    it("updates last read, resets Redis counter, and emits realtime notification", async () => {
+    it("updates last read and emits realtime notification without mutating the cache", async () => {
       existsByIdMock.mockResolvedValue(true);
       findByIdMock.mockResolvedValue({ ...mockConvWithPartner });
 
@@ -404,7 +445,9 @@ describe("ConversationService", () => {
 
       expect(isMessageInConversationMock).toHaveBeenCalledWith(convId, "msg-123");
       expect(updateLastReadMock).toHaveBeenCalledWith(convId, userA, "msg-123");
-      expect(redisDelMock).toHaveBeenCalled();
+      expect(redisDelMock).not.toHaveBeenCalled();
+      expect(redisPipelineMock).not.toHaveBeenCalled();
+      expect(countUnreadMock).not.toHaveBeenCalled();
       expect(emitReadUpdatedMock).toHaveBeenCalledWith(
         convId,
         expect.objectContaining({ userId: userA, lastReadMessageId: "msg-123" }),

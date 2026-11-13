@@ -1,13 +1,10 @@
-import { Global, Logger, Module } from "@nestjs/common";
+import { Global, Module } from "@nestjs/common";
 import { DrizzleModule } from "@nestjs/drizzle";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { get_env } from "../helpers/index.js";
 import * as schema from "./schema.js";
 
 export type DrizzleDb = NodePgDatabase<typeof schema>;
-
-const sqlLogger = new Logger("SQL");
-const isDev = get_env("NODE_ENV", "development") === "development";
 
 @Global()
 @Module({
@@ -22,13 +19,7 @@ const isDev = get_env("NODE_ENV", "development") === "development";
           ),
         },
         schema,
-        logger: isDev
-          ? {
-              logQuery(query: string, params: unknown[]) {
-                sqlLogger.debug({ query, params }, "SQL Execute");
-              },
-            }
-          : false,
+        logger: false,
         autoCloseConnection: true,
       }),
     }),

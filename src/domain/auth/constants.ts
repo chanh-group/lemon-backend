@@ -5,6 +5,9 @@ export const DEFAULT_JWT_AUDIENCE = "lemon-chat-client";
 export const JWT_ALGORITHM = "HS256" as const;
 export const JWT_LEEWAY_SECS = 30;
 export const MIN_JWT_SECRET_LEN = 32; // bytes — boot fails below this (HS256 brute-force threshold)
+export const AUTH_REVOCATION_CHANNEL = "lemon_auth_revoked";
+export const AUTH_LISTENER_RETRY_MS = 2_000;
+export const AUTH_LISTENER_CONNECT_TIMEOUT_MS = 5_000;
 
 export const JWT_CONFIG: unique symbol = Symbol("JWT_CONFIG");
 

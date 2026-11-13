@@ -1,0 +1,1 @@
+ALTER TABLE "conversations" ADD COLUMN "unread_revision" bigint DEFAULT 0 NOT NULL;

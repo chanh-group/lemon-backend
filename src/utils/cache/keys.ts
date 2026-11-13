@@ -56,6 +56,10 @@ export function noteFeedKey(userId: string): string {
   return `${NOTE_FEED_KEY_PREFIX}${userId}`;
 }
 
+export function feedFillKey(key: string): string {
+  return `${key}:fill`;
+}
+
 export function purgeLockKey(): string {
   return PURGE_LOCK_KEY;
 }

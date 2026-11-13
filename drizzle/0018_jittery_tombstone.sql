@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "auth_version" bigint DEFAULT 0 NOT NULL;

@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
+  bigint,
   check,
   index,
   pgEnum,
@@ -31,6 +32,9 @@ export const conversations = pgTable(
     }),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true, mode: "date" }),
     lastMessagePreview: text("last_message_preview"),
+    unreadRevision: bigint("unread_revision", { mode: "bigint" })
+      .notNull()
+      .default(sql`0`),
     deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
     createdAt: created("created_at"),
     updatedAt: updated("updated_at"),

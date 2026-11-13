@@ -19,8 +19,13 @@ export async function store(cache: CacheStore, key: string, code: string): Promi
   await cache.setRaw(key, JSON.stringify({ code, attempts: 0 }), OTP_EXPIRATION);
 }
 
-export async function check(cache: CacheStore, key: string, otp: string): Promise<void> {
-  const outcome = await cache.checkOtpCode(key, otp, MAX_OTP_ATTEMPTS);
+export async function check(
+  cache: CacheStore,
+  key: string,
+  otp: string,
+  consume = false,
+): Promise<void> {
+  const outcome = await cache.checkOtpCode(key, otp, MAX_OTP_ATTEMPTS, consume);
   if (outcome !== OtpCheckOutcome.Match) {
     throw new BusinessError("INVALID_OTP");
   }

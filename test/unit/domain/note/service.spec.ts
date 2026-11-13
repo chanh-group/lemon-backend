@@ -103,7 +103,12 @@ describe("NoteService", () => {
     const mockCache = {
       getBestEffort: getBestEffortMock,
       setBestEffort: setBestEffortMock,
-      deleteManyBestEffort: deleteManyBestEffortMock,
+      invalidateFeedsBestEffort: deleteManyBestEffortMock,
+      loadFeedBestEffort: async (key: string, ttl: number, load: () => Promise<unknown>) => {
+        const value = await load();
+        await setBestEffortMock(key, value, ttl);
+        return value;
+      },
     } as unknown as CacheStoreExt;
 
     service = new NoteService(mockRepo, mockCache);

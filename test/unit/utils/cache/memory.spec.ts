@@ -1,10 +1,74 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryCacheService } from "../../../../src/utils/cache/memory.js";
 import { OtpCheckOutcome, RotationOutcome } from "../../../../src/utils/cache/types.js";
+import { CacheError } from "../../../../src/utils/cache/error.js";
+import { feedFillKey } from "../../../../src/utils/cache/keys.js";
 
 describe("MemoryCacheService", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
+
+  it("does not publish a stale feed after invalidation and a newer fill", async () => {
+    const cache = new MemoryCacheService();
+    let resume!: (value: string[]) => void;
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const old = cache.loadFeedBestEffort("feed", 60, () => {
+      started();
+      return new Promise<string[]>((resolve) => {
+        resume = resolve;
+      });
+    });
+    await entered;
+    await cache.invalidateFeeds(["feed"]);
+    expect(await cache.loadFeedBestEffort("feed", 60, async () => ["new"])).toEqual(["new"]);
+    resume(["old"]);
+    expect(await old).toEqual(["old"]);
+    expect(await cache.get("feed")).toEqual(["new"]);
+  });
+
+  it("does not let an expired lease overwrite or release its replacement", async () => {
+    const cache = new MemoryCacheService();
+    let resume!: (value: string[]) => void;
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const old = cache.loadFeedBestEffort("feed", 60, () => {
+      started();
+      return new Promise<string[]>((resolve) => {
+        resume = resolve;
+      });
+    });
+    await entered;
+    vi.advanceTimersByTime(31_000);
+    await cache.loadFeedBestEffort("feed", 60, async () => ["new"]);
+    resume(["old"]);
+    await old;
+    expect(await cache.get("feed")).toEqual(["new"]);
+  });
+
+  it("releases the feed lease when the database load fails", async () => {
+    const cache = new MemoryCacheService();
+    const error = new Error("database down");
+    await expect(
+      cache.loadFeedBestEffort("feed", 60, async () => {
+        throw error;
+      }),
+    ).rejects.toBe(error);
+    expect(await cache.tryAcquireLock(feedFillKey("feed"), "next", 30)).toBe(true);
+  });
+
+  it("still loads the feed when acquiring the cache lease fails", async () => {
+    const cache = new MemoryCacheService();
+    vi.spyOn(cache, "tryAcquireLock").mockRejectedValueOnce(new CacheError("lock"));
+    await expect(cache.loadFeedBestEffort("feed", 60, async () => ["database"])).resolves.toEqual([
+      "database",
+    ]);
+    expect(await cache.get("feed")).toBeNull();
+  });
 
   it("expires entries", async () => {
     const c = new MemoryCacheService();
@@ -118,12 +182,41 @@ describe("MemoryCacheService", () => {
     expect(await c.getRaw("sessions:u")).toBeNull();
   });
 
+  it("revokes the rotated token when rotation happens before family revocation", async () => {
+    const c = new MemoryCacheService();
+    await c.setRaw("refreshToken:old", "u", 100);
+    await c.setRaw("sessions:u", JSON.stringify(["old"]), 100);
+    const rotation = c.rotateRefreshToken({
+      oldKey: "refreshToken:old",
+      newKey: "refreshToken:new",
+      sessionKey: "sessions:u",
+      subject: "u",
+      oldJti: "old",
+      newJti: "new",
+      ttlSecs: 100,
+    });
+    await Promise.all([rotation, c.revokeRefreshFamily("sessions:u", ["user:u"])]);
+    expect(await c.getRaw("refreshToken:old")).toBeNull();
+    expect(await c.getRaw("refreshToken:new")).toBeNull();
+    expect(await c.getRaw("sessions:u")).toBeNull();
+  });
+
   it("otp mismatch keeps TTL, locked after max", async () => {
     const c = new MemoryCacheService();
     await c.setRaw("otp:a@x.com", JSON.stringify({ code: "123456", attempts: 0 }), 120);
     expect(await c.checkOtpCode("otp:a@x.com", "000000", 2)).toBe(OtpCheckOutcome.Mismatch);
     expect(await c.checkOtpCode("otp:a@x.com", "000000", 2)).toBe(OtpCheckOutcome.Locked);
     expect(await c.checkOtpCode("otp:a@x.com", "123456", 2)).toBe(OtpCheckOutcome.Missing);
+  });
+
+  it("allows only one concurrent consuming OTP check", async () => {
+    const c = new MemoryCacheService();
+    await c.setRaw("otp:reset", JSON.stringify({ code: "123456", attempts: 0 }), 120);
+    const results = await Promise.all([
+      c.checkOtpCode("otp:reset", "123456", 5, true),
+      c.checkOtpCode("otp:reset", "123456", 5, true),
+    ]);
+    expect(results).toEqual([OtpCheckOutcome.Match, OtpCheckOutcome.Missing]);
   });
 
   it("corrupt otp entry is Missing and deleted", async () => {

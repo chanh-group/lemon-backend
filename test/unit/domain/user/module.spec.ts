@@ -13,12 +13,13 @@ import { RATE_LIMITER } from "../../../../src/middleware/ratelimit.js";
 import { JWT_CONFIG } from "../../../../src/domain/auth/constants.js";
 import { AuthService } from "../../../../src/domain/auth/service.js";
 import type { User } from "../../../../src/domain/user/schema.js";
+import { AUTH_SESSION_REPOSITORY } from "../../../../src/domain/auth/repository.js";
 
 const cacheDelete = vi.fn().mockResolvedValue(undefined);
 
 @Global()
 @Module({
-  providers: [{ provide: CACHE_STORE, useValue: { deleteManyBestEffort: cacheDelete } }],
+  providers: [{ provide: CACHE_STORE, useValue: { invalidateFeedsBestEffort: cacheDelete } }],
   exports: [CACHE_STORE],
 })
 class TestCacheModule {}
@@ -30,6 +31,7 @@ describe("User and Friend module wiring", () => {
       id: userId,
       email: "lemon@example.com",
       passwordHash: "hash",
+      authVersion: 0,
       googleId: null,
       username: "lemon_user",
       fullName: "Lemon User",
@@ -54,6 +56,8 @@ describe("User and Friend module wiring", () => {
       .overrideProvider(RATE_LIMITER)
       .useValue({ checkMixedLimit: vi.fn().mockResolvedValue(true) })
       .overrideProvider(AuthService)
+      .useValue({})
+      .overrideProvider(AUTH_SESSION_REPOSITORY)
       .useValue({})
       .overrideProvider(JWT_CONFIG)
       .useValue({})

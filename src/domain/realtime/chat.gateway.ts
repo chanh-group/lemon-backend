@@ -23,6 +23,9 @@ import { UserService } from "../user/service.js";
 import { convRoom, userRoom } from "./rooms.js";
 import { JWT_CONFIG } from "../auth/constants.js";
 import type { JwtConfig } from "../auth/jwt.js";
+import type { AccessTokenPayload } from "../auth/types.js";
+import { AUTH_SESSION_REPOSITORY, type AuthSessionRepository } from "../auth/repository.js";
+import { AuthRevocationListener } from "../auth/pg.js";
 import { get_env } from "../../helpers/index.js";
 
 const logger = new Logger("ChatGateway");
@@ -51,12 +54,17 @@ export class ChatGateway
   private readonly userConnections = new Map<string, number>();
   // Track disconnect/offline recheck timers: userId -> timer
   private readonly graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly expiryTimers = new Map<Socket, ReturnType<typeof setTimeout>>();
+  private readonly pendingConnections = new WeakMap<Socket, Promise<void>>();
+  private readonly trackedSockets = new Map<Socket, () => void>();
 
   constructor(
     private readonly conversationRepo: ConversationPgRepository,
     private readonly userService: UserService,
     @Inject(JWT_CONFIG) private readonly jwt: JwtConfig,
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
+    @Inject(AUTH_SESSION_REPOSITORY) private readonly sessions: AuthSessionRepository,
+    private readonly revocations: AuthRevocationListener,
   ) {
     if (this.redis && typeof this.redis.on === "function") {
       const disconnectSockets = () => this.server?.disconnectSockets(true);
@@ -67,27 +75,84 @@ export class ChatGateway
   }
 
   async handleConnection(client: Socket): Promise<void> {
+    const pending = this.initializeConnection(client);
+    this.pendingConnections.set(client, pending);
+    await pending;
+  }
+
+  private async initializeConnection(client: Socket): Promise<void> {
     if (this.redis && this.redis.status !== "ready") {
       client.disconnect(true);
       return;
     }
 
-    const userId = await this.extractUserId(client);
-    if (!userId) {
+    const payload = await this.extractUserId(client);
+    if (!payload || typeof payload.exp !== "number" || payload.exp * 1000 <= Date.now()) {
       logger.warn(`Unauthorized socket connection rejected: ${client.id}`);
       client.emit("error", { code: "UNAUTHORIZED" });
       client.disconnect(true);
       return;
     }
+    const untrack = this.revocations.track(payload.sub, payload.sid, () => client.disconnect(true));
+    if (!untrack) {
+      client.emit("error", { code: "UNAVAILABLE" });
+      client.disconnect(true);
+      return;
+    }
+    this.trackedSockets.set(client, untrack);
+    let user: Awaited<ReturnType<UserService["findById"]>>;
+    let active: boolean;
+    try {
+      [user, active] = await Promise.all([
+        this.userService.findById(payload.sub),
+        this.sessions.isActive(payload.sub, payload.sid),
+      ]);
+    } catch (err) {
+      this.untrack(client);
+      logger.error("Socket authentication state query failed", { err });
+      client.emit("error", { code: "UNAVAILABLE" });
+      client.disconnect(true);
+      return;
+    }
+    if (!user || !user.isActive || !active || user.authVersion !== payload.authVersion) {
+      this.untrack(client);
+      client.emit("error", { code: "UNAUTHORIZED" });
+      client.disconnect(true);
+      return;
+    }
+    if (client.disconnected) {
+      this.untrack(client);
+      return;
+    }
+
+    const userId = payload.sub;
+    const timer = setTimeout(() => client.disconnect(true), payload.exp * 1000 - Date.now());
+    timer.unref();
+    this.expiryTimers.set(client, timer);
+    try {
+      await client.join(userRoom(userId));
+
+      // Auto-join every conversation the user is an active participant of
+      const conversationIds = await this.conversationRepo.getActiveConversationIds(userId);
+      if (client.disconnected) {
+        this.untrack(client);
+        return;
+      }
+      if (conversationIds.length > 0) await client.join(conversationIds.map(convRoom));
+      if (client.disconnected) {
+        this.untrack(client);
+        return;
+      }
+    } catch (err) {
+      this.untrack(client);
+      clearTimeout(timer);
+      this.expiryTimers.delete(client);
+      client.disconnect(true);
+      logger.warn("Socket initialization failed", { err });
+      return;
+    }
 
     client.data = { userId };
-    await client.join(userRoom(userId));
-
-    // Auto-join every conversation the user is an active participant of
-    const conversationIds = await this.conversationRepo.getActiveConversationIds(userId);
-    for (const conversationId of conversationIds) {
-      await client.join(convRoom(conversationId));
-    }
 
     // Cancel grace period timer if reconnecting
     const existingTimer = this.graceTimers.get(userId);
@@ -107,6 +172,10 @@ export class ChatGateway
   }
 
   async handleDisconnect(client: Socket): Promise<void> {
+    this.untrack(client);
+    const expiryTimer = this.expiryTimers.get(client);
+    if (expiryTimer) clearTimeout(expiryTimer);
+    this.expiryTimers.delete(client);
     const userId = client.data?.userId as string | undefined;
     if (!userId) return;
 
@@ -135,6 +204,10 @@ export class ChatGateway
   }
 
   onApplicationShutdown(): void {
+    for (const untrack of this.trackedSockets.values()) untrack();
+    this.trackedSockets.clear();
+    for (const timer of this.expiryTimers.values()) clearTimeout(timer);
+    this.expiryTimers.clear();
     for (const timer of this.graceTimers.values()) {
       clearTimeout(timer);
     }
@@ -145,11 +218,20 @@ export class ChatGateway
     logger.log("ChatGateway shutdown: cleared presence grace timers and connection state");
   }
 
+  private untrack(client: Socket): void {
+    this.trackedSockets.get(client)?.();
+    this.trackedSockets.delete(client);
+    const timer = this.expiryTimers.get(client);
+    if (timer) clearTimeout(timer);
+    this.expiryTimers.delete(client);
+  }
+
   @SubscribeMessage("conv:join")
   async handleJoinConversation(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { conversationId: string },
   ): Promise<{ success: boolean; conversationId: string } | void> {
+    await this.pendingConnections.get(client);
     if (!data?.conversationId) return;
     const userId = client.data?.userId as string;
     if (!userId) return;
@@ -174,6 +256,7 @@ export class ChatGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { conversationId: string },
   ): Promise<{ success: boolean; conversationId: string } | void> {
+    await this.pendingConnections.get(client);
     if (!data?.conversationId) return;
     const room = convRoom(data.conversationId);
     await client.leave(room);
@@ -186,6 +269,7 @@ export class ChatGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { conversationId: string },
   ): Promise<void> {
+    await this.pendingConnections.get(client);
     const userId = client.data?.userId as string;
     if (!userId || !data?.conversationId) return;
 
@@ -216,6 +300,7 @@ export class ChatGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { conversationId: string },
   ): Promise<void> {
+    await this.pendingConnections.get(client);
     const userId = client.data?.userId as string;
     if (!userId || !data?.conversationId) return;
 
@@ -241,6 +326,7 @@ export class ChatGateway
 
   @SubscribeMessage("presence:ping")
   async handlePresencePing(@ConnectedSocket() client: Socket): Promise<void> {
+    await this.pendingConnections.get(client);
     const userId = client.data?.userId as string;
     if (!userId) return;
     await this.setOnlinePresence(userId, this.userConnections.get(userId) ?? 1);
@@ -248,7 +334,7 @@ export class ChatGateway
 
   // --- Helper methods ---
 
-  private async extractUserId(client: Socket): Promise<string | null> {
+  private async extractUserId(client: Socket): Promise<AccessTokenPayload | null> {
     const rawAuth = client.handshake.auth?.token as string | undefined;
     const rawHeader = client.handshake.headers?.authorization as string | undefined;
     const cookieHeader = client.handshake.headers?.cookie as string | undefined;
@@ -262,7 +348,11 @@ export class ChatGateway
     } else if (cookieHeader) {
       const match = cookieHeader.match(/(?:^|;\s*)lemon_access_token=([^;]+)/);
       if (match) {
-        token = decodeURIComponent(match[1]);
+        try {
+          token = decodeURIComponent(match[1]);
+        } catch {
+          return null;
+        }
       }
     }
 
@@ -271,8 +361,7 @@ export class ChatGateway
     }
 
     try {
-      const payload = await this.jwt.verifyAccessToken(token);
-      return payload.sub;
+      return await this.jwt.verifyAccessToken(token);
     } catch (err) {
       logger.warn(`Socket JWT verification failed: ${String(err)}`);
       return null;

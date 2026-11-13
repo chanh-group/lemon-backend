@@ -4,6 +4,7 @@ import { JwtConfig } from "../../../../src/domain/auth/jwt.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
 
 const VALID_SECRET = "super_secret_jwt_key_at_least_32_bytes_long_12345";
+const SESSION_ID = "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b";
 const OTHER_SECRET = "another_super_secret_jwt_key_min_32_bytes_long_67890";
 const ACCESS_TOKEN_TTL_SECS = 15 * 60;
 const REFRESH_TOKEN_TTL_SECS = 7 * 24 * 60 * 60;
@@ -43,29 +44,43 @@ describe("JwtConfig", () => {
     vi.stubEnv("JWT_AUDIENCE", undefined);
     const config = JwtConfig.from_env();
 
-    const accessToken = await config.signAccessToken("user-123");
+    const accessToken = await config.signAccessToken("user-123", 0, SESSION_ID);
     const access = await config.verifyAccessToken(accessToken);
     expect(access.sub).toBe("user-123");
     expect(access.type).toBe("access");
+    expect(access.authVersion).toBe(0);
     expect(access.iss).toBe("lemon-chat");
     expect(access.aud).toBe("lemon-chat-client");
     expect(Number(access.exp) - Number(access.iat)).toBeCloseTo(ACCESS_TOKEN_TTL_SECS, -1);
 
-    const refreshToken = await config.signRefreshToken("user-123", "jti-456");
+    const refreshToken = await config.signRefreshToken("user-123", "jti-456", 0, SESSION_ID);
     const refresh = await config.verifyRefreshToken(refreshToken);
     expect(refresh.sub).toBe("user-123");
     expect(refresh.type).toBe("refresh");
+    expect(refresh.authVersion).toBe(0);
     expect(refresh.jti).toBe("jti-456");
     expect(refresh.iss).toBe("lemon-chat");
     expect(refresh.aud).toBe("lemon-chat-client");
     expect(Number(refresh.exp) - Number(refresh.iat)).toBeCloseTo(REFRESH_TOKEN_TTL_SECS, -1);
   });
 
+  it("rejects legacy access tokens without a credential version", async () => {
+    vi.stubEnv("JWT_SECRET", VALID_SECRET);
+    const token = await new jose.SignJWT({ type: "access" })
+      .setProtectedHeader({ alg: "HS256" })
+      .setSubject("user-123")
+      .setIssuer("lemon-chat")
+      .setAudience("lemon-chat-client")
+      .setExpirationTime("15m")
+      .sign(new TextEncoder().encode(VALID_SECRET));
+    await expectBusinessError(JwtConfig.from_env().verifyAccessToken(token), "UNAUTHORIZED");
+  });
+
   it("verifyRefreshToken rejects an access token with BusinessError INVALID_SESSION", async () => {
     vi.stubEnv("JWT_SECRET", VALID_SECRET);
     const config = JwtConfig.from_env();
 
-    const accessToken = await config.signAccessToken("user-123");
+    const accessToken = await config.signAccessToken("user-123", 0, SESSION_ID);
 
     await expectBusinessError(config.verifyRefreshToken(accessToken), "INVALID_SESSION");
   });
@@ -79,7 +94,7 @@ describe("JwtConfig", () => {
     vi.stubEnv("JWT_SECRET", OTHER_SECRET);
     const otherSecretConfig = JwtConfig.from_env();
     await expectBusinessError(
-      config.verifyAccessToken(await otherSecretConfig.signAccessToken("user-123")),
+      config.verifyAccessToken(await otherSecretConfig.signAccessToken("user-123", 0, SESSION_ID)),
       "UNAUTHORIZED",
     );
 
@@ -87,7 +102,7 @@ describe("JwtConfig", () => {
     vi.stubEnv("JWT_ISSUER", "evil-issuer");
     const evilIssuerConfig = JwtConfig.from_env();
     await expectBusinessError(
-      config.verifyAccessToken(await evilIssuerConfig.signAccessToken("user-123")),
+      config.verifyAccessToken(await evilIssuerConfig.signAccessToken("user-123", 0, SESSION_ID)),
       "UNAUTHORIZED",
     );
 

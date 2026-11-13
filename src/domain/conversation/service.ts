@@ -1,7 +1,11 @@
 import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { BusinessError } from "../../utils/errors/business.js";
 import { USER_REPOSITORY, type UserRepository } from "../user/repository.js";
-import { CONVERSATION_REPOSITORY, type ConversationRepository } from "./repository.js";
+import {
+  CONVERSATION_REPOSITORY,
+  type ConversationRepository,
+  type ConversationWithPartner,
+} from "./repository.js";
 import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
 import { UNREAD_TTL_SECONDS } from "../../utils/cache/constants.js";
@@ -35,10 +39,39 @@ function requireRedisPipelineResults(
   return results;
 }
 
-function parseUnreadCount(value: unknown): number | null {
-  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) return null;
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) ? parsed : null;
+function parseUnreadCount(value: unknown, conversation: ConversationWithPartner): number | null {
+  if (typeof value !== "string" || conversation.unreadRevision === undefined) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      !("revision" in parsed) ||
+      !("lastRead" in parsed) ||
+      !("count" in parsed)
+    )
+      return null;
+    if (
+      parsed.revision !== conversation.unreadRevision ||
+      parsed.lastRead !== (conversation.lastReadMessageId ?? null)
+    )
+      return null;
+    return typeof parsed.count === "number" &&
+      Number.isSafeInteger(parsed.count) &&
+      parsed.count >= 0
+      ? parsed.count
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function serializeUnreadCount(conversation: ConversationWithPartner, count: number): string {
+  return JSON.stringify({
+    revision: conversation.unreadRevision,
+    lastRead: conversation.lastReadMessageId ?? null,
+    count,
+  });
 }
 
 function isOnlinePresence(value: unknown): boolean {
@@ -167,7 +200,7 @@ export class ConversationService {
         for (let i = 0; i < list.length; i++) {
           const [err, val] = results[i];
           if (!err && val !== null && val !== undefined) {
-            const parsed = parseUnreadCount(val);
+            const parsed = parseUnreadCount(val, list[i]);
             if (parsed !== null) {
               list[i].unreadCount = parsed;
               this.metrics?.recordLookup("unread", "hit");
@@ -197,7 +230,11 @@ export class ConversationService {
       if (missing.length > 0) {
         const conversationIds = missing.map((i) => list[i].id);
         const counts = await this.rebuildUnreadBatch(conversationIds, userId);
-        await this.cacheUnreadCounts(userId, counts);
+        await this.cacheUnreadCounts(
+          userId,
+          missing.map((i) => list[i]),
+          counts,
+        );
         missing.forEach((idx) => {
           list[idx].unreadCount = counts.get(list[idx].id) ?? 0;
         });
@@ -224,7 +261,7 @@ export class ConversationService {
 
     // Enrich with unreadCount and presence from Redis
     if (!this.redis) {
-      conv.unreadCount = await this.rebuildUnread(userId, conversationId);
+      conv.unreadCount = await this.rebuildUnread(userId, conv);
     }
     if (this.redis) {
       let results: [Error | null, unknown][] | null;
@@ -245,17 +282,17 @@ export class ConversationService {
 
       const [errCount, valCount] = results?.[0] ?? [null, null];
       if (!errCount && valCount !== null && valCount !== undefined) {
-        const parsed = parseUnreadCount(valCount);
+        const parsed = parseUnreadCount(valCount, conv);
         if (parsed !== null) {
           conv.unreadCount = parsed;
           this.metrics?.recordLookup("unread", "hit");
         } else {
           this.metrics?.recordLookup("unread", "miss");
-          conv.unreadCount = await this.rebuildUnread(userId, conversationId);
+          conv.unreadCount = await this.rebuildUnread(userId, conv);
         }
       } else {
         this.metrics?.recordLookup("unread", "miss");
-        conv.unreadCount = await this.rebuildUnread(userId, conversationId);
+        conv.unreadCount = await this.rebuildUnread(userId, conv);
       }
 
       if (results && conv.partner && results.length > 1) {
@@ -267,7 +304,11 @@ export class ConversationService {
     return toConversationResponse(conv);
   }
 
-  private async rebuildUnread(userId: string, conversationId: string): Promise<number> {
+  private async rebuildUnread(
+    userId: string,
+    conversation: ConversationWithPartner,
+  ): Promise<number> {
+    const conversationId = conversation.id;
     let count: number;
     try {
       count = await this.convRepo.countUnread(conversationId, userId);
@@ -278,20 +319,20 @@ export class ConversationService {
       });
       throw new SystemError("database", "Unread count query failed", { cause: err });
     }
-    if (this.redis) {
+    if (this.redis && conversation.unreadRevision !== undefined) {
       try {
         await (this.metrics
           ? this.metrics.measure("unread_write", () =>
               this.redis!.set(
                 unreadCountKey(userId, conversationId),
-                String(count),
+                serializeUnreadCount(conversation, count),
                 "EX",
                 UNREAD_TTL_SECONDS,
               ),
             )
           : this.redis.set(
               unreadCountKey(userId, conversationId),
-              String(count),
+              serializeUnreadCount(conversation, count),
               "EX",
               UNREAD_TTL_SECONDS,
             ));
@@ -303,14 +344,21 @@ export class ConversationService {
     return count;
   }
 
-  private async cacheUnreadCounts(userId: string, counts: Map<string, number>): Promise<void> {
-    if (!this.redis || counts.size === 0) return;
+  private async cacheUnreadCounts(
+    userId: string,
+    conversations: ConversationWithPartner[],
+    counts: Map<string, number>,
+  ): Promise<void> {
+    const cacheable = conversations.filter(
+      (conversation) => conversation.unreadRevision !== undefined,
+    );
+    if (!this.redis || cacheable.length === 0) return;
     try {
       const pipeline = this.redis.pipeline();
-      for (const [conversationId, count] of counts) {
+      for (const conversation of cacheable) {
         pipeline.set(
-          unreadCountKey(userId, conversationId),
-          String(count),
+          unreadCountKey(userId, conversation.id),
+          serializeUnreadCount(conversation, counts.get(conversation.id) ?? 0),
           "EX",
           UNREAD_TTL_SECONDS,
         );
@@ -318,7 +366,7 @@ export class ConversationService {
       const result = this.metrics
         ? await this.metrics.measure("unread_write", () => pipeline.exec())
         : await pipeline.exec();
-      requireRedisPipelineResults(result, "unread cache pipeline", counts.size);
+      requireRedisPipelineResults(result, "unread cache pipeline", cacheable.length);
     } catch (err) {
       this.redisHealth?.markUnavailable(err);
       throw new SystemError("unavailable", "Redis unread cache pipeline failed", { cause: err });
@@ -350,27 +398,23 @@ export class ConversationService {
       throw new BusinessError("BAD_REQUEST");
     }
 
-    await this.getById(conversationId, userId);
-
-    const messageBelongsToConversation = await this.convRepo.isMessageInConversation(
-      conversationId,
-      lastReadMessageId,
-    );
+    const [exists, conversation] = await Promise.all([
+      this.convRepo.existsById(conversationId),
+      this.convRepo.findById(conversationId, userId),
+    ]);
+    if (!exists) throw new BusinessError("CONVERSATION_NOT_FOUND");
+    if (!conversation) throw new BusinessError("NOT_PARTICIPANT");
+    const [messageBelongsToConversation] = await Promise.all([
+      this.convRepo.isMessageInConversation(conversationId, lastReadMessageId),
+      conversation.kind === "DIRECT" && conversation.partner
+        ? this.friendService.assertCanChat(userId, conversation.partner.id)
+        : Promise.resolve(),
+    ]);
     if (!messageBelongsToConversation) {
       throw new BusinessError("BAD_REQUEST");
     }
 
     await this.convRepo.updateLastRead(conversationId, userId, lastReadMessageId);
-
-    // Reset unread counter in Redis
-    if (this.redis) {
-      try {
-        await this.redis.del(unreadCountKey(userId, conversationId));
-      } catch (err) {
-        this.redisHealth?.markUnavailable(err);
-        throw new SystemError("unavailable", "Redis unread reset failed", { cause: err });
-      }
-    }
 
     // Broadcast to room
     this.realtimeService.emitReadUpdated(conversationId, {

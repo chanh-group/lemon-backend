@@ -3,11 +3,9 @@ import { MessageService } from "../../../../src/domain/message/service.js";
 import type { MessageRepository } from "../../../../src/domain/message/repository.js";
 import type { ConversationRepository } from "../../../../src/domain/conversation/repository.js";
 import type { RealtimeService } from "../../../../src/domain/realtime/realtime.service.js";
-import type { Redis } from "ioredis";
 import type { Message } from "../../../../src/domain/message/schema.js";
 import type { FriendService } from "../../../../src/domain/friend/service.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
-import type { RedisHealthService } from "../../../../src/configs/redis-health.js";
 import type { StorageService } from "../../../../src/utils/storage/store.js";
 
 describe("MessageService", () => {
@@ -28,12 +26,6 @@ describe("MessageService", () => {
   let emitNewMessageMock: Mock;
   let emitMessageUpdatedMock: Mock;
   let emitMessageRevokedMock: Mock;
-
-  let redisPipelineMock: Mock;
-  let redisPipelineExecMock: Mock;
-  let redisIncrMock: Mock;
-  let redisExpireMock: Mock;
-  let redisMarkUnavailableMock: Mock;
 
   const userA = "0193a2b1-0000-7000-8000-000000000001";
   const userB = "0193a2b1-0000-7000-8000-000000000002";
@@ -99,30 +91,7 @@ describe("MessageService", () => {
       emitMessageReaction: emitMessageReactionMock,
     } as unknown as RealtimeService;
 
-    redisIncrMock = vi.fn().mockReturnThis();
-    redisExpireMock = vi.fn().mockReturnThis();
-    redisMarkUnavailableMock = vi.fn();
-    redisPipelineExecMock = vi.fn().mockResolvedValue([
-      [null, 1],
-      [null, 1],
-    ]);
-    redisPipelineMock = vi.fn().mockReturnValue({
-      eval: vi.fn().mockReturnThis(),
-      exec: redisPipelineExecMock,
-    });
-
-    const mockRedis = {
-      pipeline: redisPipelineMock,
-    } as unknown as Redis;
-
-    service = new MessageService(
-      mockMessageRepo,
-      mockConvRepo,
-      mockFriendService,
-      mockRealtime,
-      mockRedis,
-      { markUnavailable: redisMarkUnavailableMock } as unknown as RedisHealthService,
-    );
+    service = new MessageService(mockMessageRepo, mockConvRepo, mockFriendService, mockRealtime);
   });
 
   describe("sendMessage", () => {
@@ -168,7 +137,7 @@ describe("MessageService", () => {
       ).rejects.toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
     });
 
-    it("successfully creates message, increments Redis counter, and emits realtime event", async () => {
+    it("successfully creates a message and emits a realtime event", async () => {
       createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
 
       const res = await service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" });
@@ -177,9 +146,6 @@ describe("MessageService", () => {
       expect(res.id).toBe(msgId);
       expect(res.body).toBe("Hello");
       expect(res).not.toHaveProperty("clientMsgId");
-      expect(redisPipelineMock).toHaveBeenCalled();
-      expect(redisPipelineMock).toHaveBeenCalledTimes(1);
-      expect(redisExpireMock).not.toHaveBeenCalled();
       expect(emitNewMessageMock).toHaveBeenCalledWith(convId, res);
     });
 
@@ -221,31 +187,14 @@ describe("MessageService", () => {
       );
     });
 
-    it("does not emit or increment unread for idempotent retries", async () => {
+    it("does not emit for idempotent retries", async () => {
       createMessageMock.mockResolvedValue({ message: mockMessage, isNew: false });
 
       const res = await service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" });
 
       expect(res.id).toBe(msgId);
       expect(res).not.toHaveProperty("clientMsgId");
-      expect(redisPipelineMock).not.toHaveBeenCalled();
-      expect(redisIncrMock).not.toHaveBeenCalled();
-      expect(redisExpireMock).not.toHaveBeenCalled();
       expect(emitNewMessageMock).not.toHaveBeenCalled();
-    });
-
-    it("returns the persisted message and marks readiness unavailable when Redis counter update fails", async () => {
-      createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
-      redisPipelineExecMock.mockRejectedValue(new Error("Redis unavailable"));
-
-      const result = await service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" });
-
-      expect(result.id).toBe(msgId);
-      expect(redisMarkUnavailableMock).toHaveBeenCalledWith(expect.any(Error));
-      expect(emitNewMessageMock).toHaveBeenCalledWith(
-        convId,
-        expect.objectContaining({ id: msgId }),
-      );
     });
 
     it("rejects replyToId that points to a message in another conversation", async () => {
@@ -491,9 +440,6 @@ describe("MessageService", () => {
         } as any,
         { assertCanChat: assertCanChatMock } as any,
         { emitNewMessage: emitNewMessageMock } as any,
-        null,
-        undefined,
-        undefined,
         storageMock as any,
       );
 
@@ -586,9 +532,6 @@ describe("MessageService", () => {
         } as any,
         { assertCanChat: assertCanChatMock } as any,
         { emitNewMessage: emitNewMessageMock } as any,
-        null,
-        undefined,
-        undefined,
         mockStorage as any,
       );
       findByIdMock.mockResolvedValue({

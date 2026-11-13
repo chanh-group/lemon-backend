@@ -228,6 +228,9 @@ describe("StoryService", () => {
       setBestEffort: setBestEffortMock,
       deleteBestEffort: deleteBestEffortMock,
       deleteManyBestEffort: deleteManyBestEffortMock,
+      invalidateFeedsBestEffort: deleteManyBestEffortMock,
+      loadFeedBestEffort: async (_key: string, _ttl: number, load: () => Promise<unknown>) =>
+        load(),
     } as unknown as CacheStoreExt;
 
     getOrCreateDirectMock = vi.fn().mockResolvedValue({ id: "conv-1" });
@@ -474,7 +477,7 @@ describe("StoryService", () => {
     it("mutes an author and invalidates viewer feed cache", async () => {
       await service.muteAuthor("user-1", "user-2");
       expect(muteAuthorMock).toHaveBeenCalledWith("user-1", "user-2");
-      expect(deleteBestEffortMock).toHaveBeenCalledWith("stories:feed:user-1");
+      expect(deleteManyBestEffortMock).toHaveBeenCalledWith(["stories:feed:user-1"]);
     });
 
     it("throws CANNOT_MUTE_SELF when trying to mute self", async () => {

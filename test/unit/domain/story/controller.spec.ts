@@ -527,6 +527,7 @@ describe("StoryController", () => {
       const rejectingLimiter = {
         checkIpLimit: vi.fn(),
         checkEmailLimit: vi.fn(),
+        checkIpEmailLimit: vi.fn(),
         checkMixedLimit: vi.fn().mockResolvedValue(false),
       };
       const limitedController = new StoryController(

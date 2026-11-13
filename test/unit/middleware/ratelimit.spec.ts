@@ -54,6 +54,29 @@ describe("RedisRateLimiter", () => {
     );
   });
 
+  it("checks IP and email with one Redis operation and separate windows", async () => {
+    redis.eval.mockResolvedValueOnce(1).mockResolvedValueOnce(0).mockResolvedValueOnce(null);
+    await expect(limiter.checkIpEmailLimit("otp", "ip", "A@B.COM", 3, 4, 60, 3600)).resolves.toBe(
+      true,
+    );
+    expect(redis.eval).toHaveBeenCalledWith(
+      expect.any(String),
+      2,
+      "ratelimit:otp:ip:ip",
+      "ratelimit:otp:email:a@b.com",
+      60,
+      3600,
+      3,
+      4,
+    );
+    await expect(limiter.checkIpEmailLimit("otp", "ip", "a@b.com", 3, 4, 60, 3600)).resolves.toBe(
+      false,
+    );
+    await expect(
+      limiter.checkIpEmailLimit("otp", "ip", "a@b.com", 3, 4, 60, 3600),
+    ).rejects.toMatchObject({ kind: "unavailable" });
+  });
+
   it("checkMixedLimit uses user and ip keys", async () => {
     redis.eval.mockResolvedValue([1, 1]);
     await expect(
@@ -156,6 +179,19 @@ describe("MemoryRateLimiter", () => {
     expect(await limiter.checkEmailLimit("request-otp", "A@B.com", 1, 60)).toBe(true);
     expect(await limiter.checkEmailLimit("request-otp", "a@b.com", 1, 60)).toBe(false);
     expect(await limiter.checkEmailLimit("request-otp", "other@b.com", 1, 60)).toBe(true);
+  });
+
+  it("does not consume the email quota when the IP limit is already exceeded", async () => {
+    const limiter = new MemoryRateLimiter();
+    expect(await limiter.checkIpEmailLimit("otp", "ip", "first@example.com", 1, 1, 60, 3600)).toBe(
+      true,
+    );
+    expect(await limiter.checkIpEmailLimit("otp", "ip", "other@example.com", 1, 1, 60, 3600)).toBe(
+      false,
+    );
+    expect(
+      await limiter.checkIpEmailLimit("otp", "other-ip", "OTHER@example.com", 1, 1, 60, 3600),
+    ).toBe(true);
   });
 
   it("mixed tracks user and ip independently", async () => {

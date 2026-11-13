@@ -13,6 +13,7 @@ describe("UserPgRepository", () => {
     id: "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b",
     email: "lemon@example.com",
     passwordHash: "argon2id$hashed",
+    authVersion: 0,
     googleId: null,
     username: "lemon_user",
     fullName: "Nguyen Van Lemon",
@@ -28,10 +29,15 @@ describe("UserPgRepository", () => {
   };
 
   beforeEach(() => {
-    mockDb = {
+    const tx = {
       select: vi.fn(),
       insert: vi.fn(),
       update: vi.fn(),
+      execute: vi.fn().mockResolvedValue(undefined),
+    };
+    mockDb = {
+      ...tx,
+      transaction: vi.fn((callback: (db: typeof tx) => Promise<unknown>) => callback(tx)),
     };
     repository = new UserPgRepository(mockDb as DrizzleDb);
   });

@@ -103,20 +103,13 @@ export class AuthController {
   ) {
     const ip = extractClientIp(req);
     if (
-      !(await this.rateLimiter.checkIpLimit(
+      !(await this.rateLimiter.checkIpEmailLimit(
         "request-otp",
         ip,
-        RATE_LIMIT_REQUEST_OTP_IP_MAX,
-        RATE_LIMIT_WINDOW_SECS,
-      ))
-    ) {
-      throw new BusinessError("TOO_MANY_REQUESTS");
-    }
-    if (
-      !(await this.rateLimiter.checkEmailLimit(
-        "request-otp",
         body.email,
+        RATE_LIMIT_REQUEST_OTP_IP_MAX,
         RATE_LIMIT_REQUEST_OTP_EMAIL_MAX,
+        RATE_LIMIT_WINDOW_SECS,
         RATE_LIMIT_EMAIL_WINDOW_SECS,
       ))
     ) {
@@ -229,20 +222,13 @@ export class AuthController {
   ) {
     const ip = extractClientIp(req);
     if (
-      !(await this.rateLimiter.checkIpLimit(
+      !(await this.rateLimiter.checkIpEmailLimit(
         "forgot-password-otp",
         ip,
-        RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX,
-        RATE_LIMIT_WINDOW_SECS,
-      ))
-    ) {
-      throw new BusinessError("TOO_MANY_REQUESTS");
-    }
-    if (
-      !(await this.rateLimiter.checkEmailLimit(
-        "forgot-password-otp",
         body.email,
+        RATE_LIMIT_FORGOT_PASSWORD_OTP_IP_MAX,
         RATE_LIMIT_REQUEST_OTP_EMAIL_MAX,
+        RATE_LIMIT_WINDOW_SECS,
         RATE_LIMIT_EMAIL_WINDOW_SECS,
       ))
     ) {

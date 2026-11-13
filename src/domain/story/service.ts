@@ -135,13 +135,13 @@ export class StoryService {
 
     // Invalidate feed cache for affected viewers only
     if (audienceMode === "CUSTOM" && audienceUserIds) {
-      await this.cache.deleteManyBestEffort([userId, ...audienceUserIds].map(storyFeedKey));
+      await this.cache.invalidateFeedsBestEffort([userId, ...audienceUserIds].map(storyFeedKey));
     } else if (audienceMode === "EXCLUDE" && audienceUserIds) {
       const excludedSet = new Set(audienceUserIds);
       const targetFriendIds = friendIds.filter((id) => !excludedSet.has(id));
-      await this.cache.deleteManyBestEffort([userId, ...targetFriendIds].map(storyFeedKey));
+      await this.cache.invalidateFeedsBestEffort([userId, ...targetFriendIds].map(storyFeedKey));
     } else {
-      await this.cache.deleteManyBestEffort([userId, ...friendIds].map(storyFeedKey));
+      await this.cache.invalidateFeedsBestEffort([userId, ...friendIds].map(storyFeedKey));
     }
 
     this.logger.log("Story created successfully", { storyId: created.id, userId, kind: dto.kind });
@@ -161,25 +161,19 @@ export class StoryService {
       return reviveUserStoryFeed(cached.filter((entry) => visibleUserIds.has(entry.user.id)));
     }
 
-    const targetUserIds = [userId, ...friendIds];
-
-    // Fetch active stories with mute & audience filtering applied for viewer
-    const [stories, usersMap] = await Promise.all([
-      this.storyRepo.findActiveByUserIds(targetUserIds, userId),
-      this.storyRepo.findUsersByIds(targetUserIds),
-    ]);
-
-    const storyIds = stories.map((s) => s.id);
-    const [viewedStoryIds, userReactionsMap] = await Promise.all([
-      this.storyRepo.findViewedStoryIds(userId, storyIds),
-      this.storyRepo.findUserReactions(userId, storyIds),
-    ]);
-
-    const feed = groupStoriesByUser(usersMap, stories, viewedStoryIds, userReactionsMap);
-
-    await this.cache.setBestEffort(cacheKey, feed, STORY_FEED_TTL_SECS);
-
-    return feed;
+    return this.cache.loadFeedBestEffort(cacheKey, STORY_FEED_TTL_SECS, async () => {
+      const targetUserIds = [userId, ...(await this.storyRepo.getFriendUserIds(userId))];
+      const [stories, usersMap] = await Promise.all([
+        this.storyRepo.findActiveByUserIds(targetUserIds, userId),
+        this.storyRepo.findUsersByIds(targetUserIds),
+      ]);
+      const storyIds = stories.map((s) => s.id);
+      const [viewedStoryIds, userReactionsMap] = await Promise.all([
+        this.storyRepo.findViewedStoryIds(userId, storyIds),
+        this.storyRepo.findUserReactions(userId, storyIds),
+      ]);
+      return groupStoriesByUser(usersMap, stories, viewedStoryIds, userReactionsMap);
+    });
   }
 
   async getStoryById(userId: string, storyId: string): Promise<StoryItemResponse> {
@@ -244,7 +238,7 @@ export class StoryService {
     });
     if (!updated) throw new BusinessError("STORY_NOT_FOUND");
     const friends = await this.storyRepo.getFriendUserIds(userId);
-    await this.cache.deleteManyBestEffort([userId, ...friends].map(storyFeedKey));
+    await this.cache.invalidateFeedsBestEffort([userId, ...friends].map(storyFeedKey));
     return toStoryItemResponse(updated);
   }
 
@@ -264,7 +258,7 @@ export class StoryService {
     const anonymous = !settings.viewedReceiptsEnabled;
 
     await this.storyRepo.markAsViewed(storyId, userId, anonymous);
-    await this.cache.deleteBestEffort(storyFeedKey(userId));
+    await this.cache.invalidateFeedsBestEffort([storyFeedKey(userId)]);
   }
 
   async getViewers(
@@ -301,7 +295,7 @@ export class StoryService {
     }
 
     const friendIds = await this.storyRepo.getFriendUserIds(userId);
-    await this.cache.deleteManyBestEffort([userId, ...friendIds].map(storyFeedKey));
+    await this.cache.invalidateFeedsBestEffort([userId, ...friendIds].map(storyFeedKey));
 
     this.logger.log("Story deleted", { storyId, userId });
   }
@@ -351,10 +345,7 @@ export class StoryService {
       anonymous,
     );
 
-    await Promise.all([
-      this.cache.deleteBestEffort(storyFeedKey(userId)),
-      this.cache.deleteBestEffort(storyFeedKey(story.userId)),
-    ]);
+    await this.cache.invalidateFeedsBestEffort([storyFeedKey(userId), storyFeedKey(story.userId)]);
 
     const usersMap = await this.storyRepo.findUsersByIds([userId]);
     const userSummary = usersMap.get(userId);
@@ -385,6 +376,7 @@ export class StoryService {
   async unlikeStory(userId: string, storyId: string): Promise<void> {
     const removed = await this.storyRepo.deleteReaction(storyId, userId, "LIKE");
     if (!removed) throw new BusinessError("NOT_FOUND");
+    await this.cache.invalidateFeedsBestEffort([storyFeedKey(userId)]);
   }
 
   private async mirrorReactionToDirectConversation(
@@ -426,10 +418,7 @@ export class StoryService {
       return;
     }
 
-    await Promise.all([
-      this.cache.deleteBestEffort(storyFeedKey(userId)),
-      this.cache.deleteBestEffort(storyFeedKey(story.userId)),
-    ]);
+    await this.cache.invalidateFeedsBestEffort([storyFeedKey(userId), storyFeedKey(story.userId)]);
 
     const usersMap = await this.storyRepo.findUsersByIds([userId]);
     const userSummary = usersMap.get(userId);
@@ -500,7 +489,7 @@ export class StoryService {
       { kind: "STORY_REPLY", storyId: story.id, storyPreview },
     );
 
-    await this.cache.deleteBestEffort(storyFeedKey(userId));
+    await this.cache.invalidateFeedsBestEffort([storyFeedKey(userId)]);
 
     return message;
   }
@@ -535,12 +524,12 @@ export class StoryService {
       throw new BusinessError("CANNOT_MUTE_SELF");
     }
     await this.storyRepo.muteAuthor(userId, authorId);
-    await this.cache.deleteBestEffort(storyFeedKey(userId));
+    await this.cache.invalidateFeedsBestEffort([storyFeedKey(userId)]);
   }
 
   async unmuteAuthor(userId: string, authorId: string): Promise<void> {
     await this.storyRepo.unmuteAuthor(userId, authorId);
-    await this.cache.deleteBestEffort(storyFeedKey(userId));
+    await this.cache.invalidateFeedsBestEffort([storyFeedKey(userId)]);
   }
 
   async getMutedAuthorIds(userId: string): Promise<string[]> {

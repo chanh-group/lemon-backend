@@ -16,6 +16,7 @@ import {
   REFRESH_TOKEN_EXPIRATION_SECS,
 } from "./constants.js";
 import type { AccessTokenPayload, RefreshTokenPayload } from "./types.js";
+import { isUuid } from "../shared.js";
 
 export class JwtConfig {
   readonly secret: string;
@@ -55,8 +56,8 @@ export class JwtConfig {
     );
   }
 
-  async signAccessToken(userId: string): Promise<string> {
-    return new jose.SignJWT({ type: "access" })
+  async signAccessToken(userId: string, authVersion: number, sid: string): Promise<string> {
+    return new jose.SignJWT({ type: "access", authVersion, sid })
       .setProtectedHeader({ alg: JWT_ALGORITHM })
       .setSubject(userId)
       .setIssuer(this.issuer)
@@ -66,8 +67,13 @@ export class JwtConfig {
       .sign(this.secretKey);
   }
 
-  async signRefreshToken(userId: string, jti: string): Promise<string> {
-    return new jose.SignJWT({ type: "refresh", jti })
+  async signRefreshToken(
+    userId: string,
+    jti: string,
+    authVersion: number,
+    sid: string,
+  ): Promise<string> {
+    return new jose.SignJWT({ type: "refresh", jti, authVersion, sid })
       .setProtectedHeader({ alg: JWT_ALGORITHM })
       .setSubject(userId)
       .setIssuer(this.issuer)
@@ -97,7 +103,14 @@ export class JwtConfig {
       throw new BusinessError("UNAUTHORIZED");
     }
 
-    if (payload.type !== "access" || !payload.sub) {
+    if (
+      payload.type !== "access" ||
+      !payload.sub ||
+      typeof payload.sid !== "string" ||
+      !isUuid(payload.sid) ||
+      !Number.isSafeInteger(payload.authVersion) ||
+      payload.authVersion < 0
+    ) {
       throw new BusinessError("UNAUTHORIZED");
     }
 
@@ -124,7 +137,15 @@ export class JwtConfig {
       throw new BusinessError("INVALID_SESSION");
     }
 
-    if (payload.type !== "refresh" || !payload.jti || !payload.sub) {
+    if (
+      payload.type !== "refresh" ||
+      !payload.jti ||
+      !payload.sub ||
+      typeof payload.sid !== "string" ||
+      !isUuid(payload.sid) ||
+      !Number.isSafeInteger(payload.authVersion) ||
+      payload.authVersion < 0
+    ) {
       throw new BusinessError("INVALID_SESSION");
     }
 

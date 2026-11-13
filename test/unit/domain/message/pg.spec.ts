@@ -235,24 +235,12 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
     expect(preCheck.params).toEqual([conversationId, senderId, clientMsgId]);
     expect(dbSelect.selectMock).not.toHaveBeenCalled();
     expect(updateMock).toHaveBeenCalledWith(conversations);
-    expect(setMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        lastMessageId: existingRow.id,
-        lastMessageAt: existingRow.createdAt,
-        lastMessagePreview: "Hello from the first attempt",
-        updatedAt: expect.anything(),
-      }),
-    );
+    const values = setMock.mock.calls[0][0] as { unreadRevision: SQL; lastMessagePreview: SQL };
+    expect(render(values.unreadRevision).sql).toContain('"conversations"."unread_revision" + 1');
+    expect(render(values.lastMessagePreview).params).toContain("Hello from the first attempt");
     const update = render(updateWhereMock.mock.calls[0][0]);
     expect(update.sql).toContain('"conversations"."id" =');
-    expect(update.sql).toContain('"conversations"."last_message_at"');
-    expect(update.sql).toContain('"conversations"."last_message_id"');
-    expect(update.params).toEqual([
-      conversationId,
-      existingRow.createdAt.toISOString(),
-      existingRow.createdAt.toISOString(),
-      existingRow.id,
-    ]);
+    expect(update.params).toEqual([conversationId]);
   });
 
   it("uses the attachment preview when the message has no body", async () => {
@@ -270,9 +258,8 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
     });
 
     expect(result).toEqual({ message: attachmentRow, isNew: true });
-    expect(setMock).toHaveBeenCalledWith(
-      expect.objectContaining({ lastMessagePreview: ATTACHMENT_PREVIEW_TOKEN }),
-    );
+    const values = setMock.mock.calls[0][0] as { lastMessagePreview: SQL };
+    expect(render(values.lastMessagePreview).params).toContain(ATTACHMENT_PREVIEW_TOKEN);
   });
 
   it("uses the story reaction marker as the conversation preview", async () => {
@@ -290,9 +277,8 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
       clientMsgId,
     });
 
-    expect(setMock).toHaveBeenCalledWith(
-      expect.objectContaining({ lastMessagePreview: STORY_REACTION_PREVIEW_TOKEN }),
-    );
+    const values = setMock.mock.calls[0][0] as { lastMessagePreview: SQL };
+    expect(render(values.lastMessagePreview).params).toContain(STORY_REACTION_PREVIEW_TOKEN);
   });
 
   it("locks the accepted friendship until a direct message transaction commits", async () => {
