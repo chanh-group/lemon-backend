@@ -27,8 +27,20 @@ export class RealtimeService {
    */
   emitNewMessage(conversationId: string, message: MessageResponse): void {
     if (!this.gateway?.server) return;
+    const { clientMsgId, ...publicMessage } = message;
+    if (clientMsgId) {
+      try {
+        this.gateway.server.to(userRoom(message.senderId)).emit("message:correlated", {
+          conversationId,
+          id: message.id,
+          clientMsgId,
+        });
+      } catch (err) {
+        logger.warn(`Failed to emit message correlation for conv ${conversationId}: ${String(err)}`);
+      }
+    }
     try {
-      this.gateway.server.to(convRoom(conversationId)).emit("message:new", message);
+      this.gateway.server.to(convRoom(conversationId)).emit("message:new", publicMessage);
     } catch (err) {
       logger.warn(`Failed to emit message:new for conv ${conversationId}: ${String(err)}`);
     }

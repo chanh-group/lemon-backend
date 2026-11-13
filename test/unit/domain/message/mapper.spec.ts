@@ -49,6 +49,11 @@ describe("toMessageResponse", () => {
     expect(dto.deletedAt).toBe(deletedAt);
   });
 
+  it("exposes correlation only to the sender", () => {
+    expect(toMessageResponse(makeMessage(), undefined, "u1").clientMsgId).toBe("client-1");
+    expect(toMessageResponse(makeMessage(), undefined, "u2")).not.toHaveProperty("clientMsgId");
+  });
+
   it("keeps null body for attachment-only messages that are not revoked", () => {
     const dto = toMessageResponse(makeMessage({ kind: "IMAGE", body: null }));
 

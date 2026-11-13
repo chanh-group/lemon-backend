@@ -223,7 +223,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     expect(res.body.message).toBe("Đã gửi tin nhắn");
     expect(res.body.data.body).toBe("Xin chao tu User Alpha qua JWT!");
     expect(res.body.data.senderId).toBe(userA);
-    expect(res.body.data.clientMsgId).toBeUndefined();
+    expect(res.body.data.clientMsgId).toBe(clientMsgId);
 
     messageId = res.body.data.id;
 
@@ -316,8 +316,15 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     expect(res.body.data.items.length).toBeGreaterThan(0);
     const ids = res.body.data.items.map((m: { id: string }) => m.id);
     expect(ids).toContain(messageId);
-    expect(res.body.data.items[0].clientMsgId).toBeUndefined();
+    expect(res.body.data.items.find((m: { id: string }) => m.id === messageId).clientMsgId).toBeDefined();
     expect(typeof res.body.data.hasMore).toBe("boolean");
+
+    const recipient = await request(app.getHttpServer())
+      .get(`/api/conversations/${conversationId}/messages`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .expect(200);
+    expect(recipient.body.data.items.find((m: { id: string }) => m.id === messageId).clientMsgId)
+      .toBeUndefined();
   });
 
   it("PATCH /api/messages/:id - should edit own message with Bearer token", async () => {

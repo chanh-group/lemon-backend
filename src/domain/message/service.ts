@@ -196,7 +196,7 @@ export class MessageService {
       storyPreview: story?.storyPreview ?? null,
     });
 
-    const response = await toMessageResponseAsync(message, this.storage);
+    const response = await toMessageResponseAsync(message, this.storage, senderId);
 
     if (isNew) {
       // Emit realtime event to the conversation room
@@ -224,6 +224,7 @@ export class MessageService {
     return await toMessageTimelineAsync(
       await this.messageRepo.findTimeline(conversationId, cursor, limit, after),
       this.storage,
+      userId,
     );
   }
 

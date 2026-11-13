@@ -12,6 +12,19 @@ describe("RealtimeService", () => {
   }
 
   describe("emitNewMessage", () => {
+    it("sends correlation only to the sender and omits it from the conversation broadcast", () => {
+      const emit = vi.fn();
+      const to = vi.fn().mockReturnValue({ emit });
+      const service = createService(to);
+
+      service.emitNewMessage("c1", { ...message, senderId: "u1", clientMsgId: "key" });
+
+      expect(to.mock.calls.map(([room]) => room)).toEqual(["user:u1", "conv:c1"]);
+      expect(emit).toHaveBeenNthCalledWith(1, "message:correlated", {
+        conversationId: "c1", id: "m1", clientMsgId: "key",
+      });
+      expect(emit).toHaveBeenNthCalledWith(2, "message:new", { id: "m1", senderId: "u1" });
+    });
     it("emits message:new exactly once to the conversation room", () => {
       const emit = vi.fn();
       const to = vi.fn().mockReturnValue({ emit });
