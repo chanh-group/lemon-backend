@@ -53,6 +53,7 @@ export class UserController {
         id: user.id,
         name: user.fullName,
         username: user.username,
+        avatarUrl: user.avatarUrl ?? null,
       })),
     };
   }
