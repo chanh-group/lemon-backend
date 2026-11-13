@@ -57,6 +57,7 @@ export interface MessageRepository {
     after?: string,
   ): Promise<MessageTimelineResult>;
   findById(messageId: string, includeDetails?: boolean): Promise<MessageWithAttachments | null>;
+  findReplyTargets(conversationId: string, messageIds: string[]): Promise<Message[]>;
   resolveWriteMiss(
     messageId: string,
     userId: string,

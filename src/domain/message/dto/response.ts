@@ -21,6 +21,15 @@ export interface MessageReactionSummary {
   userIds: string[];
 }
 
+export interface ReplyTargetResponse {
+  id: string;
+  senderId: string;
+  kind: MessageKind;
+  body: string | null;
+  deletedAt: Date | null;
+  storyPreview?: StoryPreview | null;
+}
+
 export interface MessageResponse {
   id: string;
   conversationId: string;
@@ -28,6 +37,7 @@ export interface MessageResponse {
   kind: MessageKind;
   body: string | null;
   replyToId: string | null;
+  replyTarget?: ReplyTargetResponse | null;
   storyId?: string | null;
   storyPreview?: StoryPreview | null;
   attachments?: MessageAttachmentResponse[];

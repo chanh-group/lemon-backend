@@ -6,11 +6,13 @@ import {
 } from "../conversation/repository.js";
 import { RealtimeService } from "../realtime/realtime.service.js";
 import { MESSAGE_REPOSITORY, type MessageRepository } from "./repository.js";
+import type { Message } from "./schema.js";
 import type { SendMessageDto } from "./dto/request.js";
 import type {
   MessageReactionSummary,
   MessageResponse,
   MessageTimelineResponse,
+  ReplyTargetResponse,
 } from "./dto/response.js";
 import { toMessageResponseAsync, toMessageTimelineAsync } from "./dto/mapper.js";
 import { FriendService } from "../friend/service.js";
@@ -57,6 +59,17 @@ export class MessageService {
     private readonly realtimeService: RealtimeService,
     @Optional() @Inject(STORAGE_SERVICE) private readonly storage?: StorageService,
   ) {}
+
+  private replyTarget(message: Message): ReplyTargetResponse {
+    return {
+      id: message.id,
+      senderId: message.senderId,
+      kind: message.kind,
+      body: message.deletedAt ? null : message.body,
+      deletedAt: message.deletedAt,
+      storyPreview: message.deletedAt ? null : message.storyPreview,
+    };
+  }
 
   async sendMessage(
     senderId: string,
@@ -152,6 +165,7 @@ export class MessageService {
       if (!reply || reply.conversationId !== conversationId) {
         throw new BusinessError("BAD_REQUEST");
       }
+      if (reply.deletedAt) throw new BusinessError("MESSAGE_REVOKED");
     }
 
     let bucket = "lemon-chat-storage";
@@ -197,6 +211,11 @@ export class MessageService {
     });
 
     const response = await toMessageResponseAsync(message, this.storage);
+    if (message.replyToId) {
+      const target = await this.messageRepo.findById(message.replyToId, false);
+      response.replyTarget =
+        target && target.conversationId === conversationId ? this.replyTarget(target) : null;
+    }
 
     if (isNew) {
       // Emit realtime event to the conversation room
@@ -221,10 +240,22 @@ export class MessageService {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
 
-    return await toMessageTimelineAsync(
-      await this.messageRepo.findTimeline(conversationId, cursor, limit, after),
-      this.storage,
-    );
+    const timeline = await this.messageRepo.findTimeline(conversationId, cursor, limit, after);
+    const response = await toMessageTimelineAsync(timeline, this.storage);
+    const ids = [
+      ...new Set(timeline.items.flatMap((item) => (item.replyToId ? [item.replyToId] : []))),
+    ];
+    if (ids.length) {
+      const targets = await this.messageRepo.findReplyTargets(conversationId, ids);
+      const byId = new Map(targets.map((target) => [target.id, target]));
+      for (const item of response.items) {
+        if (item.replyToId) {
+          const target = byId.get(item.replyToId);
+          item.replyTarget = target ? this.replyTarget(target) : null;
+        }
+      }
+    }
+    return response;
   }
 
   private async assertDirectConversationAllowed(
