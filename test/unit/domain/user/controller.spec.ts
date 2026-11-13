@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UserController } from "../../../../src/domain/user/controller.js";
 import type { UserService } from "../../../../src/domain/user/service.js";
 import type { User } from "../../../../src/domain/user/schema.js";
@@ -25,14 +25,20 @@ describe("UserController", () => {
   const findByUsername = vi.fn();
   const findByEmail = vi.fn();
   const updateProfile = vi.fn();
+  const search = vi.fn();
 
   const mockUserService = {
     findByUsername,
     findByEmail,
     updateProfile,
+    search,
   } as unknown as UserService;
 
   const controller = new UserController(mockUserService);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
   describe("getByUsername", () => {
     it("returns mapped user when found", async () => {
@@ -174,6 +180,43 @@ describe("UserController", () => {
 
       expect(updateProfile).toHaveBeenCalledWith(mockUser.id, { bio: "Only new bio" });
       expect(res.data?.bio).toBe("Only new bio");
+    });
+  });
+
+  describe("search", () => {
+    it("returns users including avatarUrl when found", async () => {
+      search.mockResolvedValueOnce({
+        items: [
+          {
+            id: mockUser.id,
+            username: mockUser.username,
+            fullName: mockUser.fullName,
+            avatarUrl: mockUser.avatarUrl,
+            bio: mockUser.bio,
+          },
+        ],
+        hasMore: false,
+      });
+
+      const res = await controller.search("lemon", "username", { id: "caller-id" });
+      expect(search).toHaveBeenCalledWith("lemon", "username", "caller-id", undefined, 20);
+      expect(res).toEqual({
+        hasMore: false,
+        items: [
+          {
+            id: mockUser.id,
+            name: mockUser.fullName,
+            username: mockUser.username,
+            avatarUrl: mockUser.avatarUrl,
+          },
+        ],
+      });
+    });
+
+    it("returns empty items when query is too short", async () => {
+      const res = await controller.search("a", "username", { id: "caller-id" });
+      expect(search).not.toHaveBeenCalled();
+      expect(res).toEqual({ items: [], hasMore: false });
     });
   });
 });

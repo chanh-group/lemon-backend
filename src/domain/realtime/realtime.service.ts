@@ -115,6 +115,19 @@ export class RealtimeService {
   }
 
   /**
+   * Broadcast friend removal event to both users
+   */
+  emitFriendRemoved(userIdA: string, userIdB: string): void {
+    if (!this.gateway?.server) return;
+    try {
+      this.gateway.server.to(userRoom(userIdA)).emit("friend:removed", { friendId: userIdB });
+      this.gateway.server.to(userRoom(userIdB)).emit("friend:removed", { friendId: userIdA });
+    } catch (err) {
+      logger.warn(`Failed to emit friend:removed for users ${userIdA}, ${userIdB}: ${String(err)}`);
+    }
+  }
+
+  /**
    * Make every socket of the given participants join the conversation room.
    * Best-effort: no server (REST-only bootstrap / unit tests) is a no-op and
    * failures are logged, never thrown — conversation creation must not fail

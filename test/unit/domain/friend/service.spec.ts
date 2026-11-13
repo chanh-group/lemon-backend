@@ -170,4 +170,37 @@ describe("FriendService", () => {
 
     expect(friendRepo.blockPair).toHaveBeenCalledWith(userId, otherId);
   });
+
+  describe("removeFriend", () => {
+    it("rejects removing oneself", async () => {
+      await expect(service.removeFriend(userId, userId)).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+      });
+    });
+
+    it("rejects when no accepted pair exists", async () => {
+      friendRepo.deleteAcceptedPair.mockResolvedValue(false);
+
+      await expect(service.removeFriend(userId, otherId)).rejects.toMatchObject({
+        code: "NOT_FOUND",
+      });
+    });
+
+    it("deletes accepted pair, invalidates cache feeds and emits friend:removed", async () => {
+      const emitFriendRemoved = vi.fn();
+      friendRepo.deleteAcceptedPair.mockResolvedValue(true);
+      service = new FriendService(
+        friendRepo as never,
+        userRepo as never,
+        { emitFriendRequestReceived: vi.fn(), emitFriendRemoved } as never,
+        cache as never,
+      );
+
+      await service.removeFriend(userId, otherId);
+
+      expect(friendRepo.deleteAcceptedPair).toHaveBeenCalledWith(userId, otherId);
+      expect(cache.deleteManyBestEffort).toHaveBeenCalled();
+      expect(emitFriendRemoved).toHaveBeenCalledWith(userId, otherId);
+    });
+  });
 });

@@ -38,12 +38,14 @@ export async function mapAttachmentsToResponse(
             fileName: att.fileName,
             disposition: "inline",
             mimeType: att.mimeType,
+            expiresInSecs: 86400,
           }),
           storage.presignGet({
             objectKey: att.objectKey,
             fileName: att.fileName,
             disposition: "attachment",
             mimeType: att.mimeType,
+            expiresInSecs: 86400,
           }),
         ]);
         return {
