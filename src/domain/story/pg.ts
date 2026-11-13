@@ -539,6 +539,19 @@ export class StoryPgRepository implements StoryRepository {
     return map;
   }
 
+  async summarizeReactions(
+    storyId: string,
+    kind?: StoryReactionKind,
+  ): Promise<Array<{ emoji: string; count: number }>> {
+    return this.db
+      .select({ emoji: storyReactions.emoji, count: sql<number>`count(*)::int` })
+      .from(storyReactions)
+      .where(
+        and(eq(storyReactions.storyId, storyId), kind ? eq(storyReactions.kind, kind) : undefined),
+      )
+      .groupBy(storyReactions.emoji);
+  }
+
   async countReactions(storyIds: string[]): Promise<Map<string, number>> {
     if (storyIds.length === 0) return new Map();
     const rows = await this.db

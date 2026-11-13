@@ -26,8 +26,9 @@ describe("Story flows with PostgreSQL and Redis", () => {
   const objects = new Map<string, { body: Buffer; contentType: string }>();
   const owner = uuidv7(),
     friend = uuidv7(),
+    secondFriend = uuidv7(),
     stranger = uuidv7();
-  let ownerToken: string, friendToken: string, strangerToken: string;
+  let ownerToken: string, friendToken: string, secondFriendToken: string, strangerToken: string;
   let textId: string, mediaId: string;
 
   beforeAll(async () => {
@@ -81,12 +82,12 @@ describe("Story flows with PostgreSQL and Redis", () => {
     await app.init();
     db = module.get<DrizzleDb>(getDrizzleToken());
     const jwt = module.get<JwtConfig>(JWT_CONFIG);
-    [ownerToken, friendToken, strangerToken] = await Promise.all(
-      [owner, friend, stranger].map((id) => jwt.signAccessToken(id)),
+    [ownerToken, friendToken, secondFriendToken, strangerToken] = await Promise.all(
+      [owner, friend, secondFriend, stranger].map((id) => jwt.signAccessToken(id)),
     );
     const unique = Date.now().toString();
     await db.insert(users).values(
-      [owner, friend, stranger].map((id, i) => ({
+      [owner, friend, secondFriend, stranger].map((id, i) => ({
         id,
         email: `story${unique}${i}@example.test`,
         username: `story${unique}${i}`,
@@ -94,15 +95,22 @@ describe("Story flows with PostgreSQL and Redis", () => {
       })),
     );
     const [userLow, userHigh] = [owner, friend].sort();
-    await db
-      .insert(friendships)
-      .values({ requesterId: owner, addresseeId: friend, userLow, userHigh, status: "ACCEPTED" });
+    await db.insert(friendships).values([
+      { requesterId: owner, addresseeId: friend, userLow, userHigh, status: "ACCEPTED" },
+      {
+        requesterId: owner,
+        addresseeId: secondFriend,
+        userLow: [owner, secondFriend].sort()[0],
+        userHigh: [owner, secondFriend].sort()[1],
+        status: "ACCEPTED",
+      },
+    ]);
   }, 30000);
 
   afterAll(async () => {
     try {
       if (db) {
-        const testUserIds = [owner, friend, stranger];
+        const testUserIds = [owner, friend, secondFriend, stranger];
         const ownedConversations = db
           .select({ id: conversationParticipants.conversationId })
           .from(conversationParticipants)
@@ -161,6 +169,84 @@ describe("Story flows with PostgreSQL and Redis", () => {
       .auth(friendToken, { type: "bearer" })
       .send({ emoji: "👍" })
       .expect(200);
+    const reactions = await request(app.getHttpServer())
+      .get(`/api/stories/${textId}/reactions`)
+      .auth(ownerToken, { type: "bearer" })
+      .expect(200);
+    expect(reactions.body.data).toMatchObject({
+      totalCount: 1,
+      summary: [{ emoji: "👍", count: 1 }],
+    });
+    expect(reactions.body.data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          user: expect.objectContaining({ id: friend }),
+          emoji: "👍",
+          kind: "REACTION",
+        }),
+      ]),
+    );
+    await request(app.getHttpServer())
+      .post(`/api/stories/${textId}/react`)
+      .auth(secondFriendToken, { type: "bearer" })
+      .send({ emoji: "😍" })
+      .expect(200);
+    const firstPage = await request(app.getHttpServer())
+      .get(`/api/stories/${textId}/reactions?limit=1`)
+      .auth(ownerToken, { type: "bearer" })
+      .expect(200);
+    expect(firstPage.body.data).toMatchObject({
+      totalCount: 2,
+      hasMore: true,
+      summary: expect.arrayContaining([
+        { emoji: "👍", count: 1 },
+        { emoji: "😍", count: 1 },
+      ]),
+    });
+    const secondPage = await request(app.getHttpServer())
+      .get(
+        `/api/stories/${textId}/reactions?limit=1&cursor=${encodeURIComponent(firstPage.body.data.nextCursor)}`,
+      )
+      .auth(ownerToken, { type: "bearer" })
+      .expect(200);
+    expect(secondPage.body.data.items).toHaveLength(1);
+    expect(secondPage.body.data).toMatchObject({
+      totalCount: 2,
+      summary: firstPage.body.data.summary,
+    });
+    await request(app.getHttpServer())
+      .delete(`/api/stories/${textId}/react`)
+      .auth(secondFriendToken, { type: "bearer" })
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/api/stories/${textId}/reactions`)
+      .auth(friendToken, { type: "bearer" })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`/api/stories/${textId}/like`)
+      .auth(friendToken, { type: "bearer" })
+      .expect(200);
+    const liked = await request(app.getHttpServer())
+      .get(`/api/stories/${textId}/reactions`)
+      .auth(ownerToken, { type: "bearer" })
+      .expect(200);
+    expect(liked.body.data).toMatchObject({ totalCount: 1, summary: [{ emoji: "❤️", count: 1 }] });
+    expect(liked.body.data.items).toHaveLength(1);
+    expect(liked.body.data.items[0]).toMatchObject({
+      user: { id: friend },
+      emoji: "❤️",
+      kind: "LIKE",
+    });
+    await request(app.getHttpServer())
+      .delete(`/api/stories/${textId}/like`)
+      .auth(friendToken, { type: "bearer" })
+      .expect(200);
+    const removedReaction = await request(app.getHttpServer())
+      .get(`/api/stories/${textId}/reactions`)
+      .auth(ownerToken, { type: "bearer" })
+      .expect(200);
+    expect(removedReaction.body.data).toMatchObject({ totalCount: 0, summary: [] });
+    expect(removedReaction.body.data.items).toHaveLength(0);
     const reply = await request(app.getHttpServer())
       .post(`/api/stories/${textId}/reply`)
       .auth(friendToken, { type: "bearer" })
