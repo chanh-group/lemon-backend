@@ -210,7 +210,7 @@ export class MessageService {
       storyPreview: story?.storyPreview ?? null,
     });
 
-    const response = await toMessageResponseAsync(message, this.storage);
+    const response = await toMessageResponseAsync(message, this.storage, senderId);
     if (message.replyToId) {
       const target = await this.messageRepo.findById(message.replyToId, false);
       response.replyTarget =
@@ -241,7 +241,7 @@ export class MessageService {
     }
 
     const timeline = await this.messageRepo.findTimeline(conversationId, cursor, limit, after);
-    const response = await toMessageTimelineAsync(timeline, this.storage);
+    const response = await toMessageTimelineAsync(timeline, this.storage, userId);
     const ids = [
       ...new Set(timeline.items.flatMap((item) => (item.replyToId ? [item.replyToId] : []))),
     ];
