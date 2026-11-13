@@ -340,6 +340,47 @@ describe("Realtime chat gateway over socket.io (E2E)", () => {
   );
 
   it(
+    "sends message correlation only to the sender",
+    async () => {
+      const [clientA, clientB] = await Promise.all([
+        connectSocket(url, tokenA),
+        connectSocket(url, tokenB),
+      ]);
+      try {
+        await joinConversation(clientA, conversationId);
+        await joinConversation(clientB, conversationId);
+        const sender = collectEvents<{ id: string; clientMsgId: string }>(
+          clientA,
+          "message:correlated",
+        );
+        const recipient = collectEvents<{ id: string; clientMsgId: string }>(
+          clientB,
+          "message:correlated",
+        );
+        const messages = collectEvents<MessageNewPayload>(clientB, "message:new");
+        const clientMsgId = uuidv7();
+        const res = await request(app.getHttpServer())
+          .post(`/api/conversations/${conversationId}/messages`)
+          .set("Authorization", `Bearer ${tokenA}`)
+          .send({ body: "correlation privacy", clientMsgId })
+          .expect(201);
+        await delay(MESSAGE_FANOUT_WINDOW_MS);
+        sender.stop();
+        recipient.stop();
+        messages.stop();
+        expect(sender.events).toEqual([{ conversationId, id: res.body.data.id, clientMsgId }]);
+        expect(recipient.events).toEqual([]);
+        expect(messages.events).toHaveLength(1);
+        expect(messages.events[0]).not.toHaveProperty("clientMsgId");
+      } finally {
+        clientA.disconnect();
+        clientB.disconnect();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
     "relays typing:start to the partner without echoing it back to the sender",
     async () => {
       const [clientA, clientB] = await Promise.all([

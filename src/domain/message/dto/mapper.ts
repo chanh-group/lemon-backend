@@ -100,12 +100,16 @@ export function groupReactions(
 export function toMessageResponse(
   message: MessageWithAttachments,
   attachments?: MessageAttachmentResponse[],
+  viewerId?: string,
 ): MessageResponse {
   const reactions = groupReactions(message.reactions);
   return {
     id: message.id,
     conversationId: message.conversationId,
     senderId: message.senderId,
+    ...(viewerId === message.senderId && message.clientMsgId
+      ? { clientMsgId: message.clientMsgId }
+      : {}),
     kind: message.kind,
     body: message.deletedAt ? null : message.body,
     replyToId: message.replyToId,
@@ -123,16 +127,20 @@ export function toMessageResponse(
 export async function toMessageResponseAsync(
   message: MessageWithAttachments,
   storage?: StorageService,
+  viewerId?: string,
 ): Promise<MessageResponse> {
   const attachments = await mapAttachmentsToResponse(message.attachments, storage);
-  return toMessageResponse(message, attachments);
+  return toMessageResponse(message, attachments, viewerId);
 }
 
 export async function toMessageTimelineAsync(
   result: MessageTimelineResult,
   storage?: StorageService,
+  viewerId?: string,
 ): Promise<MessageTimelineResponse> {
-  const items = await Promise.all(result.items.map((m) => toMessageResponseAsync(m, storage)));
+  const items = await Promise.all(
+    result.items.map((m) => toMessageResponseAsync(m, storage, viewerId)),
+  );
   return {
     items,
     ...(result.nextCursor !== undefined && { nextCursor: result.nextCursor }),

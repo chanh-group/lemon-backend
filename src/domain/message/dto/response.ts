@@ -25,6 +25,7 @@ export interface MessageResponse {
   id: string;
   conversationId: string;
   senderId: string;
+  clientMsgId?: string;
   kind: MessageKind;
   body: string | null;
   replyToId: string | null;
