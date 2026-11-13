@@ -349,10 +349,8 @@ export class StoryPgRepository implements StoryRepository {
       .leftJoin(userStorySettings, eq(userStorySettings.userId, stories.userId))
       .where(
         or(
-          and(
-            isNull(stories.archivedAt),
-            or(lt(stories.expiresAt, sql`now()`), isNotNull(stories.deletedAt)),
-          ),
+          isNotNull(stories.deletedAt),
+          and(isNull(stories.archivedAt), lt(stories.expiresAt, sql`now()`)),
           and(
             isNotNull(stories.archivedAt),
             or(
