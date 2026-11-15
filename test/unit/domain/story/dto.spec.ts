@@ -65,6 +65,11 @@ describe("createStorySchema", () => {
     expect(result.data).not.toHaveProperty("mimeType");
   });
 
+  it("accepts one minute and rejects larger declared durations", () => {
+    expect(createStorySchema.safeParse({ kind: "VIDEO", durationMs: 60_000 }).success).toBe(true);
+    expect(createStorySchema.safeParse({ kind: "VIDEO", durationMs: 60_001 }).success).toBe(false);
+  });
+
   it("rejects a non-integer durationMs", () => {
     const result = createStorySchema.safeParse({
       kind: "VIDEO",
