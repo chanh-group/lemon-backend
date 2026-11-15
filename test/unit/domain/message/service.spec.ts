@@ -14,6 +14,7 @@ describe("MessageService", () => {
   let createMessageMock: Mock;
   let findByIdMock: Mock;
   let findTimelineMock: Mock;
+  let findReplyTargetsMock: Mock;
   let updateBodyMock: Mock;
   let softDeleteMock: Mock;
   let resolveWriteMissMock: Mock;
@@ -53,6 +54,7 @@ describe("MessageService", () => {
     createMessageMock = vi.fn();
     findByIdMock = vi.fn();
     findTimelineMock = vi.fn();
+    findReplyTargetsMock = vi.fn();
     updateBodyMock = vi.fn();
     softDeleteMock = vi.fn();
     resolveWriteMissMock = vi.fn();
@@ -70,6 +72,7 @@ describe("MessageService", () => {
       createMessageWithConversationUpdate: createMessageMock,
       findById: findByIdMock,
       findTimeline: findTimelineMock,
+      findReplyTargets: findReplyTargetsMock,
       updateBody: updateBodyMock,
       softDelete: softDeleteMock,
       resolveWriteMiss: resolveWriteMissMock,
@@ -220,6 +223,15 @@ describe("MessageService", () => {
       expect(createMessageMock).not.toHaveBeenCalled();
     });
 
+    it("rejects replyToId that points to a revoked message", async () => {
+      findByIdMock.mockResolvedValue({ ...mockMessage, deletedAt: new Date() });
+
+      await expect(
+        service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT", replyToId: msgId }),
+      ).rejects.toThrow(expect.objectContaining({ code: "MESSAGE_REVOKED" }));
+      expect(createMessageMock).not.toHaveBeenCalled();
+    });
+
     it("accepts replyToId that belongs to the same conversation", async () => {
       findByIdMock.mockResolvedValue(mockMessage);
       createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
@@ -245,6 +257,19 @@ describe("MessageService", () => {
   });
 
   describe("getTimeline", () => {
+    it("loads reply targets outside the page and hides revoked content", async () => {
+      const target = { ...mockMessage, deletedAt: new Date(), body: "private old text" };
+      const reply = { ...mockMessage, id: "reply", replyToId: msgId };
+      findTimelineMock.mockResolvedValue({ items: [reply], hasMore: false });
+      findReplyTargetsMock.mockResolvedValue([target]);
+      const result = await service.getTimeline(userA, convId);
+      expect(findReplyTargetsMock).toHaveBeenCalledWith(convId, [msgId]);
+      expect(result.items[0].replyTarget).toMatchObject({
+        id: msgId,
+        body: null,
+        storyPreview: null,
+      });
+    });
     it("throws NOT_PARTICIPANT if requester is not a member", async () => {
       findConversationByIdMock.mockResolvedValueOnce(null);
       await expect(service.getTimeline(outsider, convId)).rejects.toThrow(
