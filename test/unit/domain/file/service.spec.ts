@@ -121,24 +121,35 @@ describe("FileService", () => {
     }
   });
 
+  it("accepts story images and videos at the 25 MiB boundary", async () => {
+    for (const [kind, mimeType] of [
+      ["STORY_IMAGE", "image/jpeg"],
+      ["STORY_VIDEO", "video/mp4"],
+    ] as const) {
+      await expect(
+        service.presign("user-1", { kind, mimeType, sizeBytes: 25 * 1024 * 1024 }),
+      ).resolves.toMatchObject({ uploadUrl: expect.any(String) });
+    }
+  });
+
   it("rejects oversized uploads with FILE_TOO_LARGE carrying maxMb", async () => {
     await expect(
       service.presign("user-1", {
         kind: "STORY_IMAGE",
-        sizeBytes: 10 * 1024 * 1024 + 1,
+        sizeBytes: 25 * 1024 * 1024 + 1,
         mimeType: "image/jpeg",
       }),
-    ).rejects.toMatchObject({ code: "FILE_TOO_LARGE", params: { maxMb: "10" } });
+    ).rejects.toMatchObject({ code: "FILE_TOO_LARGE", params: { maxMb: "25" } });
   });
 
   it("rejects video above the video cap", async () => {
     await expect(
       service.presign("user-1", {
         kind: "STORY_VIDEO",
-        sizeBytes: 50 * 1024 * 1024 + 1,
+        sizeBytes: 25 * 1024 * 1024 + 1,
         mimeType: "video/mp4",
       }),
-    ).rejects.toMatchObject({ code: "FILE_TOO_LARGE", params: { maxMb: "50" } });
+    ).rejects.toMatchObject({ code: "FILE_TOO_LARGE", params: { maxMb: "25" } });
   });
 
   it("rejects MIME types outside the kind allowlist", async () => {

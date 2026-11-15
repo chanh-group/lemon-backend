@@ -21,8 +21,8 @@ export const STORY_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours — story lifetime
 export const STORY_DEFAULT_BUCKET = "lemon-stories";
 
 // Story media upload limits (single source used by presign AND verify).
-export const STORY_MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
-export const STORY_MAX_VIDEO_BYTES = 50 * 1024 * 1024; // 50MB
+export const STORY_MAX_IMAGE_BYTES = 25 * 1024 * 1024; // 25MB
+export const STORY_MAX_VIDEO_BYTES = 25 * 1024 * 1024; // 25MB
 export const STORY_ALLOWED_IMAGE_MIME = [
   "image/jpeg",
   "image/png",
