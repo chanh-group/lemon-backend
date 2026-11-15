@@ -223,6 +223,15 @@ describe("MessageService", () => {
       expect(createMessageMock).not.toHaveBeenCalled();
     });
 
+    it("rejects replyToId that points to a revoked message", async () => {
+      findByIdMock.mockResolvedValue({ ...mockMessage, deletedAt: new Date() });
+
+      await expect(
+        service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT", replyToId: msgId }),
+      ).rejects.toThrow(expect.objectContaining({ code: "MESSAGE_REVOKED" }));
+      expect(createMessageMock).not.toHaveBeenCalled();
+    });
+
     it("accepts replyToId that belongs to the same conversation", async () => {
       findByIdMock.mockResolvedValue(mockMessage);
       createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
