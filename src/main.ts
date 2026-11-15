@@ -1,5 +1,6 @@
 import { NestFactory } from "@nestjs/core";
 import cookieParser from "cookie-parser";
+import compression from "compression";
 import { AppModule } from "./app.js";
 import { RedisIoAdapter } from "./configs/socket-adapter.js";
 import { get_env } from "./helpers/index.js";
@@ -18,6 +19,7 @@ async function bootstrap() {
   app.getHttpAdapter().getInstance().set("trust proxy", get_env("TRUST_PROXY", "loopback"));
 
   // Middlewares & Pipes
+  app.use(compression());
   app.use(cookieParser());
   app.useGlobalPipes(standardSchemaPipe());
   app.useGlobalFilters(new ErrorFilter());
