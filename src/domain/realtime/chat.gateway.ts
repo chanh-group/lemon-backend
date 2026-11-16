@@ -15,6 +15,7 @@ import {
   PRESENCE_GRACE_MS,
   PRESENCE_OTHER_NODE_TTL_SECONDS,
   PRESENCE_TTL_SECONDS,
+  TYPING_TTL_SECONDS,
 } from "../../utils/cache/constants.js";
 import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
@@ -278,10 +279,10 @@ export class ChatGateway
       return;
     }
 
-    // Cache typing indicator in Redis with 3s TTL
+    // Cache typing indicator so a lost stop event cannot leave stale state.
     if (this.redis) {
       try {
-        await this.redis.set(typingKey(data.conversationId, userId), "1", "EX", 3);
+        await this.redis.set(typingKey(data.conversationId, userId), "1", "EX", TYPING_TTL_SECONDS);
       } catch (err) {
         logger.warn(`Redis typing cache error: ${String(err)}`);
       }

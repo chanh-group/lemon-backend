@@ -125,6 +125,7 @@ export const FEED_FILL_LEASE_SECS = 30;
 export const PRESENCE_TTL_SECONDS = 90;
 export const PRESENCE_GRACE_MS = 60_000;
 export const PRESENCE_OTHER_NODE_TTL_SECONDS = 30;
+export const TYPING_TTL_SECONDS = 3;
 
 // ioredis client tuning (mirrors Rust ConnectionManager timeouts).
 export const REDIS_COMMAND_TIMEOUT_MS = 2000;

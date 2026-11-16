@@ -3,6 +3,7 @@ import { ChatGateway } from "../../../../src/domain/realtime/chat.gateway.js";
 import type { JwtConfig } from "../../../../src/domain/auth/jwt.js";
 import type { Redis } from "ioredis";
 import type { Socket } from "socket.io";
+import { TYPING_TTL_SECONDS } from "../../../../src/utils/cache/constants.js";
 
 describe("ChatGateway", () => {
   let gateway: ChatGateway;
@@ -12,6 +13,8 @@ describe("ChatGateway", () => {
   let updateSetMock: Mock;
   let updateWhereMock: Mock;
   let redisPipelineMock: Mock;
+  let redisSetMock: Mock;
+  let redisDelMock: Mock;
   let pipelineSetMock: Mock;
   let pipelineZaddMock: Mock;
   let pipelineZremMock: Mock;
@@ -77,12 +80,14 @@ describe("ChatGateway", () => {
     });
 
     redisTtlMock = vi.fn().mockResolvedValue(-2);
+    redisSetMock = vi.fn().mockResolvedValue("OK");
+    redisDelMock = vi.fn().mockResolvedValue(1);
     mockRedis = {
       status: "ready",
       on: vi.fn(),
       pipeline: redisPipelineMock,
-      set: vi.fn().mockResolvedValue("OK"),
-      del: vi.fn().mockResolvedValue(1),
+      set: redisSetMock,
+      del: redisDelMock,
       ttl: redisTtlMock,
     } as unknown as Redis;
 
@@ -113,6 +118,7 @@ describe("ChatGateway", () => {
     disconnectMock: ReturnType<typeof vi.fn>;
     emitMock: ReturnType<typeof vi.fn>;
     toMock: ReturnType<typeof vi.fn>;
+    roomEmitMock: ReturnType<typeof vi.fn>;
   }
 
   function createMockSocket(overrides: {
@@ -123,8 +129,9 @@ describe("ChatGateway", () => {
     const leaveMock = vi.fn().mockResolvedValue(undefined);
     const disconnectMock = vi.fn();
     const emitMock = vi.fn();
+    const roomEmitMock = vi.fn();
     const toMock = vi.fn().mockReturnValue({
-      emit: vi.fn(),
+      emit: roomEmitMock,
     });
 
     const client = {
@@ -150,6 +157,7 @@ describe("ChatGateway", () => {
       disconnectMock,
       emitMock,
       toMock,
+      roomEmitMock,
     };
   }
 
@@ -595,21 +603,38 @@ describe("ChatGateway", () => {
 
   describe("typing:start and typing:stop", () => {
     it("broadcasts typing:start to room excluding sender", async () => {
-      const { client, toMock } = createMockSocket({});
+      const { client, toMock, roomEmitMock } = createMockSocket({});
       client.data = { userId: mockUserId };
 
       await gateway.handleTypingStart(client, { conversationId: mockConvId });
 
       expect(toMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
+      expect(redisSetMock).toHaveBeenCalledWith(
+        `typing:${mockConvId}:${mockUserId}`,
+        "1",
+        "EX",
+        TYPING_TTL_SECONDS,
+      );
+      expect(roomEmitMock).toHaveBeenCalledWith("typing", {
+        conversationId: mockConvId,
+        userId: mockUserId,
+        isTyping: true,
+      });
     });
 
     it("broadcasts typing:stop to room excluding sender", async () => {
-      const { client, toMock } = createMockSocket({});
+      const { client, toMock, roomEmitMock } = createMockSocket({});
       client.data = { userId: mockUserId };
 
       await gateway.handleTypingStop(client, { conversationId: mockConvId });
 
       expect(toMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
+      expect(redisDelMock).toHaveBeenCalledWith(`typing:${mockConvId}:${mockUserId}`);
+      expect(roomEmitMock).toHaveBeenCalledWith("typing", {
+        conversationId: mockConvId,
+        userId: mockUserId,
+        isTyping: false,
+      });
     });
   });
 });
