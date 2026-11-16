@@ -71,6 +71,12 @@ export class MessageService {
     };
   }
 
+  private async attachSender<T extends MessageResponse>(response: T): Promise<T> {
+    const [sender] = await this.messageRepo.findSenderProfiles([response.senderId]);
+    if (sender) response.sender = sender;
+    return response;
+  }
+
   async sendMessage(
     senderId: string,
     conversationId: string,
@@ -78,10 +84,6 @@ export class MessageService {
     story?: StoryReplyRef,
   ): Promise<MessageResponse> {
     // 1. Verify that sender is a member of this conversation
-    const participantIds = await this.convRepo.getParticipantUserIds(conversationId);
-    if (!participantIds.includes(senderId)) {
-      throw new BusinessError("NOT_PARTICIPANT");
-    }
     const directPartnerId = await this.assertDirectConversationAllowed(conversationId, senderId);
 
     let sourceMessage: Awaited<ReturnType<MessageRepository["findById"]>> = null;
@@ -93,6 +95,14 @@ export class MessageService {
       if (!sourceMessage) throw new BusinessError("MESSAGE_NOT_FOUND");
       if (sourceMessage) {
         await this.assertDirectConversationAllowed(sourceMessage.conversationId, senderId);
+        if (
+          !(await this.convRepo.canAccessMessage(
+            sourceMessage.conversationId,
+            senderId,
+            sourceMessage.id,
+          ))
+        )
+          throw new BusinessError("MESSAGE_NOT_FOUND");
         if (sourceMessage.deletedAt) throw new BusinessError("MESSAGE_REVOKED");
         if (!["TEXT", "IMAGE", "VIDEO", "AUDIO", "FILE"].includes(sourceMessage.kind)) {
           throw new BusinessError("BAD_REQUEST");
@@ -162,7 +172,11 @@ export class MessageService {
 
     if (dto.replyToId) {
       const reply = await this.messageRepo.findById(dto.replyToId);
-      if (!reply || reply.conversationId !== conversationId) {
+      if (
+        !reply ||
+        reply.conversationId !== conversationId ||
+        !(await this.convRepo.canAccessMessage(conversationId, senderId, reply.id))
+      ) {
         throw new BusinessError("BAD_REQUEST");
       }
       if (reply.deletedAt) throw new BusinessError("MESSAGE_REVOKED");
@@ -210,11 +224,21 @@ export class MessageService {
       storyPreview: story?.storyPreview ?? null,
     });
 
-    const response = await toMessageResponseAsync(message, this.storage, senderId);
+    const response = await this.attachSender(
+      await toMessageResponseAsync(message, this.storage, senderId),
+    );
     if (message.replyToId) {
       const target = await this.messageRepo.findById(message.replyToId, false);
-      response.replyTarget =
-        target && target.conversationId === conversationId ? this.replyTarget(target) : null;
+      if (
+        target &&
+        target.conversationId === conversationId &&
+        (await this.convRepo.canAccessMessage(conversationId, senderId, target.id))
+      ) {
+        const replyTarget = this.replyTarget(target);
+        const [replySender] = await this.messageRepo.findSenderProfiles([target.senderId]);
+        if (replySender) replyTarget.sender = replySender;
+        response.replyTarget = replyTarget;
+      } else response.replyTarget = null;
     }
 
     if (isNew) {
@@ -234,8 +258,8 @@ export class MessageService {
   ): Promise<MessageTimelineResponse> {
     await this.assertDirectConversationAllowed(conversationId, userId);
     if (
-      (cursor && !(await this.convRepo.isMessageInConversation(conversationId, cursor))) ||
-      (after && !(await this.convRepo.isMessageInConversation(conversationId, after)))
+      (cursor && !(await this.convRepo.canAccessMessage(conversationId, userId, cursor))) ||
+      (after && !(await this.convRepo.canAccessMessage(conversationId, userId, after)))
     ) {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
@@ -246,18 +270,38 @@ export class MessageService {
       limit,
       after,
       userId,
+      (await this.convRepo.getGroupMembership(conversationId, userId))?.historyBoundaryMessageId,
     );
     const response = await toMessageTimelineAsync(timeline, this.storage, userId);
+    const senderProfiles = await this.messageRepo.findSenderProfiles(
+      response.items.map(({ senderId }) => senderId),
+    );
+    const sendersById = new Map(senderProfiles.map((sender) => [sender.id, sender]));
+    for (const message of response.items) message.sender = sendersById.get(message.senderId);
     const ids = [
       ...new Set(timeline.items.flatMap((item) => (item.replyToId ? [item.replyToId] : []))),
     ];
     if (ids.length) {
-      const targets = await this.messageRepo.findReplyTargets(conversationId, ids, userId);
+      const targets = await this.messageRepo.findReplyTargets(
+        conversationId,
+        ids,
+        userId,
+        (await this.convRepo.getGroupMembership(conversationId, userId))?.historyBoundaryMessageId,
+      );
       const byId = new Map(targets.map((target) => [target.id, target]));
+      const targetSenders = await this.messageRepo.findSenderProfiles(
+        targets.map(({ senderId }) => senderId),
+      );
+      const targetSendersById = new Map(targetSenders.map((sender) => [sender.id, sender]));
       for (const item of response.items) {
         if (item.replyToId) {
           const target = byId.get(item.replyToId);
-          item.replyTarget = target ? this.replyTarget(target) : null;
+          if (target) {
+            const replyTarget = this.replyTarget(target);
+            const sender = targetSendersById.get(target.senderId);
+            if (sender) replyTarget.sender = sender;
+            item.replyTarget = replyTarget;
+          } else item.replyTarget = null;
         }
       }
     }
@@ -283,6 +327,8 @@ export class MessageService {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
     await this.assertDirectConversationAllowed(msg.conversationId, userId);
+    if (!(await this.convRepo.canAccessMessage(msg.conversationId, userId, msg.id)))
+      throw new BusinessError("MESSAGE_NOT_FOUND");
 
     if (msg.deletedAt) {
       throw new BusinessError("MESSAGE_REVOKED");
@@ -309,7 +355,7 @@ export class MessageService {
       return await this.resolveWriteMiss(messageId, userId, msg.conversationId);
     }
 
-    const response = await toMessageResponseAsync(updated, this.storage);
+    const response = await this.attachSender(await toMessageResponseAsync(updated, this.storage));
     this.realtimeService.emitMessageUpdated(response.conversationId, response);
     return response;
   }
@@ -320,6 +366,8 @@ export class MessageService {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
     await this.assertDirectConversationAllowed(msg.conversationId, userId);
+    if (!(await this.convRepo.canAccessMessage(msg.conversationId, userId, msg.id)))
+      throw new BusinessError("MESSAGE_NOT_FOUND");
 
     if (msg.deletedAt) {
       throw new BusinessError("MESSAGE_REVOKED");
@@ -334,7 +382,7 @@ export class MessageService {
       return await this.resolveWriteMiss(messageId, userId, msg.conversationId);
     }
 
-    const response = await toMessageResponseAsync(revoked, this.storage);
+    const response = await this.attachSender(await toMessageResponseAsync(revoked, this.storage));
     this.realtimeService.emitMessageRevoked(response.conversationId, {
       id: response.id,
       deletedAt: response.deletedAt!,
@@ -346,6 +394,8 @@ export class MessageService {
     const message = await this.messageRepo.findById(messageId, false);
     if (!message) throw new BusinessError("MESSAGE_NOT_FOUND");
     await this.assertDirectConversationAllowed(message.conversationId, userId);
+    if (!(await this.convRepo.canAccessMessage(message.conversationId, userId, message.id)))
+      throw new BusinessError("MESSAGE_NOT_FOUND");
     await this.messageRepo.hideForUser(messageId, userId);
     this.realtimeService.emitMessageHidden(userId, message.conversationId, messageId);
   }
@@ -358,6 +408,8 @@ export class MessageService {
     const message = await this.messageRepo.findById(messageId, false);
     if (!message || message.deletedAt) throw new BusinessError("MESSAGE_NOT_FOUND");
     const partnerId = await this.assertDirectConversationAllowed(message.conversationId, userId);
+    if (!(await this.convRepo.canAccessMessage(message.conversationId, userId, message.id)))
+      throw new BusinessError("MESSAGE_NOT_FOUND");
     const result = partnerId
       ? await this.messageRepo.reactMessage(userId, messageId, emoji, {
           userAId: userId,

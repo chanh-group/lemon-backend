@@ -5,6 +5,7 @@ import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../utils/errors/pg.js";
 import { conversations, conversationParticipants } from "../conversation/schema.js";
+import { users } from "../user/schema.js";
 import { friendships } from "../friend/schema.js";
 import { DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE } from "../pagination.constants.js";
 import {
@@ -45,6 +46,19 @@ function toConversationPreview(kind: Message["kind"], body: string | null): stri
 @Injectable()
 export class MessagePgRepository implements MessageRepository {
   constructor(@InjectDrizzle() private readonly db: DrizzleDb) {}
+
+  async findSenderProfiles(senderIds: string[]) {
+    if (senderIds.length === 0) return [];
+    return this.db
+      .select({
+        id: users.id,
+        username: users.username,
+        fullName: users.fullName,
+        avatarUrl: users.avatarUrl,
+      })
+      .from(users)
+      .where(inArray(users.id, [...new Set(senderIds)]));
+  }
 
   async findByClientMsgId(
     conversationId: string,
@@ -88,6 +102,25 @@ export class MessagePgRepository implements MessageRepository {
   }): Promise<CreatedMessageResult> {
     try {
       return await this.db.transaction(async (tx) => {
+        const [conversation] = await tx
+          .select({ kind: conversations.kind })
+          .from(conversations)
+          .where(eq(conversations.id, messageData.conversationId))
+          .for("update")
+          .limit(1);
+        if (!conversation) throw new BusinessError("CONVERSATION_NOT_FOUND");
+        const [participant] = await tx
+          .select({ leftAt: conversationParticipants.leftAt })
+          .from(conversationParticipants)
+          .where(
+            and(
+              eq(conversationParticipants.conversationId, messageData.conversationId),
+              eq(conversationParticipants.userId, messageData.senderId),
+            ),
+          )
+          .for("share")
+          .limit(1);
+        if (!participant || participant.leftAt) throw new BusinessError("NOT_PARTICIPANT");
         if (messageData.requiredFriendship) {
           const [userLow, userHigh] = [
             messageData.requiredFriendship.userAId,
@@ -212,6 +245,7 @@ export class MessagePgRepository implements MessageRepository {
     limit = DEFAULT_MESSAGE_PAGE_SIZE,
     after?: string,
     viewerId?: string,
+    historyBoundaryMessageId?: string | null,
   ): Promise<MessageTimelineResult> {
     const queryLimit = Math.min(Math.max(limit, 1), MAX_MESSAGE_PAGE_SIZE);
 
@@ -230,6 +264,10 @@ export class MessagePgRepository implements MessageRepository {
             ),
         ),
       );
+      if (historyBoundaryMessageId) {
+        const boundary = sql`(SELECT m.created_at, m.id FROM messages m WHERE m.id = ${historyBoundaryMessageId} AND m.conversation_id = ${conversationId})`;
+        conditions.push(sql`ROW(${messages.createdAt}, ${messages.id}) > ${boundary}`);
+      }
     }
 
     if (cursor) {
@@ -347,6 +385,7 @@ export class MessagePgRepository implements MessageRepository {
     conversationId: string,
     messageIds: string[],
     viewerId?: string,
+    historyBoundaryMessageId?: string | null,
   ): Promise<Message[]> {
     if (messageIds.length === 0) return [];
     return this.db
@@ -369,8 +408,38 @@ export class MessagePgRepository implements MessageRepository {
                   ),
               )
             : undefined,
+          viewerId && historyBoundaryMessageId
+            ? sql`ROW(${messages.createdAt}, ${messages.id}) > (SELECT m.created_at, m.id FROM messages m WHERE m.id = ${historyBoundaryMessageId})`
+            : undefined,
         ),
       );
+  }
+
+  async canAccessMessage(
+    conversationId: string,
+    userId: string,
+    messageId: string,
+  ): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: messages.id })
+      .from(messages)
+      .innerJoin(
+        conversationParticipants,
+        and(
+          eq(conversationParticipants.conversationId, messages.conversationId),
+          eq(conversationParticipants.userId, userId),
+          isNull(conversationParticipants.leftAt),
+        ),
+      )
+      .where(
+        and(
+          eq(messages.id, messageId),
+          eq(messages.conversationId, conversationId),
+          sql`(${conversationParticipants.historyBoundaryMessageId} IS NULL OR ROW(${messages.createdAt}, ${messages.id}) > (SELECT m.created_at, m.id FROM messages m WHERE m.id = ${conversationParticipants.historyBoundaryMessageId}))`,
+        ),
+      )
+      .limit(1);
+    return Boolean(row);
   }
 
   async findById(messageId: string, includeDetails = true): Promise<MessageWithAttachments | null> {

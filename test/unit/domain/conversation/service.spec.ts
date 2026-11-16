@@ -21,11 +21,17 @@ describe("ConversationService", () => {
   let existsByIdMock: Mock;
   let findByIdMock: Mock;
   let isMessageInConversationMock: Mock;
+  let canAccessMessageMock: Mock;
   let updateLastReadMock: Mock;
   let countUnreadMock: Mock;
   let countUnreadBatchMock: Mock;
+  let createGroupMock: Mock;
+  let findAcceptedFriendIdsMock: Mock;
+  let getParticipantUserIdsMock: Mock;
+  let emitGroupEventMock: Mock;
 
   let findUserByIdMock: Mock;
+  let findUsersByIdsMock: Mock;
   let assertCanChatMock: Mock;
   let emitReadUpdatedMock: Mock;
   let joinConversationMock: Mock;
@@ -70,22 +76,31 @@ describe("ConversationService", () => {
     existsByIdMock = vi.fn();
     findByIdMock = vi.fn();
     isMessageInConversationMock = vi.fn().mockResolvedValue(true);
+    canAccessMessageMock = vi.fn().mockResolvedValue(true);
     updateLastReadMock = vi.fn();
     countUnreadMock = vi.fn();
     countUnreadBatchMock = vi.fn().mockResolvedValue(new Map());
+    createGroupMock = vi.fn();
+    findAcceptedFriendIdsMock = vi.fn().mockResolvedValue(new Set([userB]));
+    getParticipantUserIdsMock = vi.fn().mockResolvedValue([userA, userB]);
+    emitGroupEventMock = vi.fn();
 
     findUserByIdMock = vi.fn();
+    findUsersByIdsMock = vi.fn();
     assertCanChatMock = vi.fn().mockResolvedValue(undefined);
     emitReadUpdatedMock = vi.fn();
     joinConversationMock = vi.fn();
 
     const mockConvRepo = {
       findDirectByParticipants: findDirectByParticipantsMock,
+      createGroup: createGroupMock,
+      getParticipantUserIds: getParticipantUserIdsMock,
       createDirectConversation: createDirectConversationMock,
       findUserConversations: findUserConversationsMock,
       existsById: existsByIdMock,
       findById: findByIdMock,
       isMessageInConversation: isMessageInConversationMock,
+      canAccessMessage: canAccessMessageMock,
       updateLastRead: updateLastReadMock,
       countUnread: countUnreadMock,
       countUnreadByConversationIds: countUnreadBatchMock,
@@ -93,15 +108,17 @@ describe("ConversationService", () => {
 
     const mockUserRepo = {
       findById: findUserByIdMock,
+      findByIds: findUsersByIdsMock,
     } as unknown as UserRepository;
 
     const mockRealtimeService = {
       emitReadUpdated: emitReadUpdatedMock,
       joinConversation: joinConversationMock,
+      emitGroupEvent: emitGroupEventMock,
     } as unknown as RealtimeService;
     const mockFriendService = {
       assertCanChat: assertCanChatMock,
-      findAcceptedFriendIds: vi.fn().mockResolvedValue(new Set([userB])),
+      findAcceptedFriendIds: findAcceptedFriendIdsMock,
     } as unknown as FriendService;
 
     redisPipelineExecMock = vi
@@ -132,6 +149,48 @@ describe("ConversationService", () => {
       mockRealtimeService,
       mockRedis,
     );
+  });
+
+  describe("createGroup", () => {
+    it("requires at least two invited friends", async () => {
+      await expect(
+        service.createGroup(userA, {
+          title: "Project",
+          memberIds: [userB],
+          clientRequestId: "0193a2b1-0000-7000-8000-000000000030",
+        }),
+      ).rejects.toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
+      expect(createGroupMock).not.toHaveBeenCalled();
+    });
+
+    it("creates a group only with active friends and joins their realtime room", async () => {
+      const userC = "0193a2b1-0000-7000-8000-000000000003";
+      findUserByIdMock.mockResolvedValue({ isActive: true });
+      findUsersByIdsMock.mockResolvedValue([{ isActive: true }, { isActive: true }]);
+      findAcceptedFriendIdsMock.mockResolvedValue(new Set([userB, userC]));
+      const group: ConversationWithPartner = {
+        ...mockConvWithPartner,
+        kind: "GROUP",
+        directKey: null,
+        title: "Project",
+        memberCount: 3,
+        myRole: "OWNER",
+        partner: undefined,
+      };
+      createGroupMock.mockResolvedValue(group);
+
+      const response = await service.createGroup(userA, {
+        title: " Project ",
+        memberIds: [userB, userC],
+        clientRequestId: "0193a2b1-0000-7000-8000-000000000030",
+      });
+
+      expect(createGroupMock).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Project", creatorId: userA }),
+      );
+      expect(joinConversationMock).toHaveBeenCalledWith([userA, userB, userC], convId);
+      expect(response.kind).toBe("GROUP");
+    });
   });
 
   describe("getOrCreateDirect", () => {

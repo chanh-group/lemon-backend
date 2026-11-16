@@ -148,6 +148,20 @@
       "when": 1794808534802,
       "tag": "0020_chubby_stingray",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794825258709,
+      "tag": "0021_broad_korvac",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794826014693,
+      "tag": "0022_mean_black_tom",
+      "breakpoints": true
     }
   ]
 }

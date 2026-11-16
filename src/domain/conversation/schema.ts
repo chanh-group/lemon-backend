@@ -27,6 +27,9 @@ export const conversations = pgTable(
     directKey: text("direct_key"),
     title: text("title"),
     avatarUrl: text("avatar_url"),
+    creatorId: uuid("creator_id").references(() => users.id, { onDelete: "set null" }),
+    createRequestId: uuid("create_request_id"),
+    createRequestHash: text("create_request_hash"),
     lastMessageId: uuid("last_message_id").references((): AnyPgColumn => messages.id, {
       onDelete: "set null",
     }),
@@ -47,6 +50,9 @@ export const conversations = pgTable(
     uniqueIndex("conversations_direct_key_uq")
       .on(table.directKey)
       .where(sql`${table.directKey} IS NOT NULL`),
+    uniqueIndex("conversations_group_request_uq")
+      .on(table.creatorId, table.createRequestId)
+      .where(sql`${table.kind} = 'GROUP' AND ${table.createRequestId} IS NOT NULL`),
     index("conversations_inbox_order_idx")
       .on(sql`coalesce(${table.lastMessageAt}, ${table.createdAt}) DESC`, table.id.desc())
       .where(sql`${table.deletedAt} IS NULL`),
@@ -68,6 +74,9 @@ export const conversationParticipants = pgTable(
     mutedUntil: timestamp("muted_until", { withTimezone: true, mode: "date" }),
     joinedAt: timestamp("joined_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
     leftAt: timestamp("left_at", { withTimezone: true, mode: "date" }),
+    historyBoundaryMessageId: uuid("history_boundary_message_id").references(() => messages.id, {
+      onDelete: "set null",
+    }),
   },
   (table) => [
     primaryKey({ columns: [table.conversationId, table.userId] }),

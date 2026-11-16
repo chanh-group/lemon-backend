@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   createDirectSchema,
+  createGroupSchema,
+  addGroupMembersSchema,
   markReadSchema,
 } from "../../../../src/domain/conversation/dto/request.js";
 
@@ -16,6 +18,38 @@ function messagesFor(schema: z.ZodType, input: unknown, path?: string): string[]
 }
 
 describe("Conversation DTOs", () => {
+  describe("group schemas", () => {
+    const userIds = [
+      "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b",
+      "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6c",
+    ];
+
+    it("requires two invited friends when creating a group", () => {
+      const result = createGroupSchema.safeParse({
+        title: "Project",
+        memberIds: userIds.slice(0, 1),
+        clientRequestId: "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6d",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("limits the group to ten people including its creator", () => {
+      const result = createGroupSchema.safeParse({
+        title: "Project",
+        memberIds: Array.from(
+          { length: 10 },
+          (_, i) => `0193a2b1-7c4d-7e8f-9a0b-${String(i).padStart(12, "0")}`,
+        ),
+        clientRequestId: "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6d",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("accepts adding one to nine members", () => {
+      expect(addGroupMembersSchema.safeParse({ memberIds: userIds }).success).toBe(true);
+    });
+  });
+
   describe("createDirectSchema", () => {
     it("accepts a valid UUID targetUserId", () => {
       const result = createDirectSchema.safeParse({

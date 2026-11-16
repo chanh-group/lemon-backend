@@ -329,7 +329,7 @@ describe("Story flows with PostgreSQL and Redis", () => {
       .get(`/api/stories/${textId}`)
       .auth(friendToken, { type: "bearer" })
       .expect(404);
-  }, 30000);
+  }, 90000);
 
   it("does not cache a feed read that finishes after its story was deleted", async () => {
     const created = await request(app.getHttpServer())

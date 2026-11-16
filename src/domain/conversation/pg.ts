@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, desc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
@@ -10,11 +10,18 @@ import { users } from "../user/schema.js";
 import type { ConversationRepository, ConversationWithPartner } from "./repository.js";
 import { conversationParticipants, conversations } from "./schema.js";
 import { canonicalPair, toCursorPage } from "../shared.js";
+import { GROUP_MAX_MEMBERS } from "./constants.js";
 
 const partnerParticipants = alias(conversationParticipants, "partner_participants");
+const lastSender = alias(users, "last_message_sender");
 
 function visiblePreview(userId: string) {
-  return sql<string | null>`CASE WHEN EXISTS (
+  const boundaryId = sql`(SELECT cp.history_boundary_message_id FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
+  return sql<string | null>`CASE WHEN ${boundaryId} IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM messages boundary_msg
+      WHERE boundary_msg.id = ${boundaryId}
+        AND ROW(${conversations.lastMessageAt}, ${conversations.lastMessageId}) > ROW(boundary_msg.created_at, boundary_msg.id))
+    THEN NULL ELSE CASE WHEN EXISTS (
     SELECT 1 FROM message_hidden_for_users h
     WHERE h.message_id = ${conversations.lastMessageId} AND h.user_id = ${userId}::uuid
   ) THEN (
@@ -25,36 +32,52 @@ function visiblePreview(userId: string) {
       ELSE '[attachment]'
     END FROM messages m
     WHERE m.conversation_id = ${conversations.id}
+      AND (${boundaryId} IS NULL OR ROW(m.created_at, m.id) >
+        (SELECT bm.created_at, bm.id FROM messages bm WHERE bm.id = ${boundaryId}))
       AND NOT EXISTS (SELECT 1 FROM message_hidden_for_users h
         WHERE h.message_id = m.id AND h.user_id = ${userId}::uuid)
     ORDER BY m.created_at DESC, m.id DESC LIMIT 1
-  ) ELSE ${conversations.lastMessagePreview} END`;
+  ) ELSE ${conversations.lastMessagePreview} END END`;
 }
 
 function visibleSenderId(userId: string) {
-  return sql<string | null>`CASE WHEN EXISTS (
+  const boundaryId = sql`(SELECT cp.history_boundary_message_id FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
+  return sql<string | null>`CASE WHEN ${boundaryId} IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM messages boundary_msg
+      WHERE boundary_msg.id = ${boundaryId}
+        AND ROW(${conversations.lastMessageAt}, ${conversations.lastMessageId}) > ROW(boundary_msg.created_at, boundary_msg.id))
+    THEN NULL ELSE CASE WHEN EXISTS (
     SELECT 1 FROM message_hidden_for_users h
     WHERE h.message_id = ${conversations.lastMessageId} AND h.user_id = ${userId}::uuid
   ) THEN (
     SELECT m.sender_id FROM messages m
     WHERE m.conversation_id = ${conversations.id}
+      AND (${boundaryId} IS NULL OR ROW(m.created_at, m.id) >
+        (SELECT bm.created_at, bm.id FROM messages bm WHERE bm.id = ${boundaryId}))
       AND NOT EXISTS (SELECT 1 FROM message_hidden_for_users h
         WHERE h.message_id = m.id AND h.user_id = ${userId}::uuid)
     ORDER BY m.created_at DESC, m.id DESC LIMIT 1
-  ) ELSE ${messages.senderId} END`;
+  ) ELSE ${messages.senderId} END END`;
 }
 
 function visibleMessageAt(userId: string) {
-  return sql<Date | null>`CASE WHEN EXISTS (
+  const boundaryId = sql`(SELECT cp.history_boundary_message_id FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
+  return sql<Date | null>`CASE WHEN ${boundaryId} IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM messages boundary_msg
+      WHERE boundary_msg.id = ${boundaryId}
+        AND ROW(${conversations.lastMessageAt}, ${conversations.lastMessageId}) > ROW(boundary_msg.created_at, boundary_msg.id))
+    THEN NULL ELSE CASE WHEN EXISTS (
     SELECT 1 FROM message_hidden_for_users h
     WHERE h.message_id = ${conversations.lastMessageId} AND h.user_id = ${userId}::uuid
   ) THEN (
     SELECT m.created_at FROM messages m
     WHERE m.conversation_id = ${conversations.id}
+      AND (${boundaryId} IS NULL OR ROW(m.created_at, m.id) >
+        (SELECT bm.created_at, bm.id FROM messages bm WHERE bm.id = ${boundaryId}))
       AND NOT EXISTS (SELECT 1 FROM message_hidden_for_users h
         WHERE h.message_id = m.id AND h.user_id = ${userId}::uuid)
     ORDER BY m.created_at DESC, m.id DESC LIMIT 1
-  ) ELSE ${conversations.lastMessageAt} END`.mapWith(conversations.lastMessageAt);
+  ) ELSE ${conversations.lastMessageAt} END END`.mapWith(conversations.lastMessageAt);
 }
 
 @Injectable()
@@ -64,6 +87,479 @@ export class ConversationPgRepository implements ConversationRepository {
   private getDirectKey(userAId: string, userBId: string): string {
     const [low, high] = canonicalPair(userAId, userBId);
     return `${low}:${high}`;
+  }
+
+  async createGroup(input: {
+    creatorId: string;
+    title: string;
+    memberIds: string[];
+    clientRequestId: string;
+    createRequestHash: string;
+  }): Promise<ConversationWithPartner> {
+    const [existing] = await this.db
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.creatorId, input.creatorId),
+          eq(conversations.createRequestId, input.clientRequestId),
+        ),
+      )
+      .limit(1);
+    if (existing) {
+      if (
+        existing.deletedAt ||
+        existing.title !== input.title ||
+        existing.createRequestHash !== input.createRequestHash
+      ) {
+        throw new BusinessError("CONFLICT");
+      }
+      return (await this.findById(existing.id, input.creatorId))!;
+    }
+
+    try {
+      return await this.db.transaction(async (tx) => {
+        const [group] = await tx
+          .insert(conversations)
+          .values({
+            kind: "GROUP",
+            title: input.title,
+            creatorId: input.creatorId,
+            createRequestId: input.clientRequestId,
+            createRequestHash: input.createRequestHash,
+          })
+          .returning();
+        await tx.insert(conversationParticipants).values([
+          { conversationId: group.id, userId: input.creatorId, role: "OWNER" },
+          ...input.memberIds.map((userId) => ({
+            conversationId: group.id,
+            userId,
+            role: "MEMBER" as const,
+          })),
+        ]);
+        return {
+          id: group.id,
+          kind: "GROUP",
+          directKey: null,
+          title: group.title,
+          avatarUrl: group.avatarUrl,
+          memberCount: input.memberIds.length + 1,
+          myRole: "OWNER",
+          lastMessagePreview: null,
+          lastMessageAt: null,
+          createdAt: group.createdAt,
+        };
+      });
+    } catch (err: unknown) {
+      if (isUniqueViolation(err, "conversations_group_request_uq")) {
+        const [retry] = await this.db
+          .select({
+            id: conversations.id,
+            title: conversations.title,
+            createRequestHash: conversations.createRequestHash,
+            deletedAt: conversations.deletedAt,
+          })
+          .from(conversations)
+          .where(
+            and(
+              eq(conversations.creatorId, input.creatorId),
+              eq(conversations.createRequestId, input.clientRequestId),
+            ),
+          )
+          .limit(1);
+        if (
+          retry &&
+          !retry.deletedAt &&
+          retry.title === input.title &&
+          retry.createRequestHash === input.createRequestHash
+        )
+          return (await this.findById(retry.id, input.creatorId))!;
+        throw new BusinessError("CONFLICT");
+      }
+      throw err;
+    }
+  }
+
+  async addGroupMembers(
+    conversationId: string,
+    actorId: string,
+    memberIds: string[],
+  ): Promise<ConversationWithPartner> {
+    return this.db.transaction(async (tx) => {
+      const [group] = await tx
+        .select()
+        .from(conversations)
+        .where(eq(conversations.id, conversationId))
+        .for("update")
+        .limit(1);
+      if (!group || group.kind !== "GROUP" || group.deletedAt)
+        throw new BusinessError("CONVERSATION_NOT_FOUND");
+      const [actor] = await tx
+        .select({ role: conversationParticipants.role })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.userId, actorId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      if (!actor || !["OWNER", "ADMIN"].includes(actor.role)) throw new BusinessError("FORBIDDEN");
+      const active = await tx
+        .select({ userId: conversationParticipants.userId })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        );
+      const activeSet = new Set(active.map(({ userId }) => userId));
+      if (memberIds.some((id) => activeSet.has(id))) throw new BusinessError("CONFLICT");
+      if (active.length + memberIds.length > GROUP_MAX_MEMBERS) {
+        throw new BusinessError("GROUP_FULL");
+      }
+      await tx
+        .insert(conversationParticipants)
+        .values(
+          memberIds.map((userId) => ({
+            conversationId,
+            userId,
+            role: "MEMBER" as const,
+            historyBoundaryMessageId: group.lastMessageId,
+          })),
+        )
+        .onConflictDoUpdate({
+          target: [conversationParticipants.conversationId, conversationParticipants.userId],
+          set: {
+            role: "MEMBER",
+            joinedAt: sql`clock_timestamp()`,
+            leftAt: null,
+            lastReadMessageId: group.lastMessageId,
+            lastReadAt: sql`clock_timestamp()`,
+            historyBoundaryMessageId: group.lastMessageId,
+          },
+          where: sql`${conversationParticipants.leftAt} IS NOT NULL`,
+        });
+      await tx
+        .update(conversations)
+        .set({ unreadRevision: sql`${conversations.unreadRevision} + 1` })
+        .where(eq(conversations.id, conversationId));
+      return {
+        id: conversationId,
+        kind: "GROUP" as const,
+        directKey: null,
+        title: group.title,
+        avatarUrl: group.avatarUrl,
+        lastMessagePreview: group.lastMessagePreview,
+        lastMessageAt: group.lastMessageAt,
+        createdAt: group.createdAt,
+        myRole: "MEMBER" as const,
+        memberCount: active.length + memberIds.length,
+      };
+    });
+  }
+
+  async removeGroupMember(conversationId: string, actorId: string, userId: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const [group] = await tx
+        .select({ kind: conversations.kind })
+        .from(conversations)
+        .where(eq(conversations.id, conversationId))
+        .for("update")
+        .limit(1);
+      if (!group || group.kind !== "GROUP") throw new BusinessError("CONVERSATION_NOT_FOUND");
+      const [actor] = await tx
+        .select({ role: conversationParticipants.role })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.userId, actorId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      const [target] = await tx
+        .select({ role: conversationParticipants.role })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.userId, userId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      if (actor?.role !== "OWNER" || !target || target.role === "OWNER" || actorId === userId)
+        throw new BusinessError("FORBIDDEN");
+      await tx
+        .update(conversationParticipants)
+        .set({ leftAt: sql`clock_timestamp()` })
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.userId, userId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        );
+      await tx
+        .update(conversations)
+        .set({ unreadRevision: sql`${conversations.unreadRevision} + 1` })
+        .where(eq(conversations.id, conversationId));
+    });
+  }
+
+  async updateGroup(conversationId: string, actorId: string, title: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(eq(conversations.id, conversationId))
+        .for("update");
+      const [actor] = await tx
+        .select({ role: conversationParticipants.role })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.userId, actorId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        )
+        .limit(1);
+      if (!actor || !["OWNER", "ADMIN"].includes(actor.role)) throw new BusinessError("FORBIDDEN");
+      await tx
+        .update(conversations)
+        .set({ title, updatedAt: sql`now()` })
+        .where(
+          and(
+            eq(conversations.id, conversationId),
+            eq(conversations.kind, "GROUP"),
+            isNull(conversations.deletedAt),
+          ),
+        );
+    });
+  }
+
+  async updateMemberRole(
+    conversationId: string,
+    actorId: string,
+    userId: string,
+    role: "ADMIN" | "MEMBER",
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(eq(conversations.id, conversationId))
+        .for("update");
+      const [actor] = await tx
+        .select({ role: conversationParticipants.role })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.userId, actorId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        )
+        .limit(1);
+      const [target] = await tx
+        .select({ role: conversationParticipants.role })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.userId, userId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        )
+        .limit(1);
+      if (actor?.role !== "OWNER" || !target || target.role === "OWNER" || actorId === userId)
+        throw new BusinessError("FORBIDDEN");
+      await tx
+        .update(conversationParticipants)
+        .set({ role })
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.userId, userId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        );
+    });
+  }
+
+  async transferOwnership(
+    conversationId: string,
+    actorId: string,
+    newOwnerId: string,
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(eq(conversations.id, conversationId))
+        .for("update");
+      const [actor] = await tx
+        .select({ role: conversationParticipants.role })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.userId, actorId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        )
+        .limit(1);
+      const [target] = await tx
+        .select({ role: conversationParticipants.role })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.userId, newOwnerId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        )
+        .limit(1);
+      if (actor?.role !== "OWNER" || !target || actorId === newOwnerId)
+        throw new BusinessError("FORBIDDEN");
+      await tx
+        .update(conversationParticipants)
+        .set({ role: "ADMIN" })
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.role, "OWNER"),
+            isNull(conversationParticipants.leftAt),
+          ),
+        );
+      await tx
+        .update(conversationParticipants)
+        .set({ role: "OWNER" })
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.userId, newOwnerId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        );
+    });
+  }
+
+  async leaveGroup(conversationId: string, userId: string): Promise<{ closed: boolean }> {
+    return this.db.transaction(async (tx) => {
+      const [group] = await tx
+        .select()
+        .from(conversations)
+        .where(eq(conversations.id, conversationId))
+        .for("update")
+        .limit(1);
+      if (!group || group.kind !== "GROUP") throw new BusinessError("CONVERSATION_NOT_FOUND");
+      const active = await tx
+        .select({ userId: conversationParticipants.userId, role: conversationParticipants.role })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        );
+      const leaving = active.find((member) => member.userId === userId);
+      if (!leaving) throw new BusinessError("NOT_PARTICIPANT");
+      if (leaving.role === "OWNER" && active.length > 1)
+        throw new BusinessError("OWNER_TRANSFER_REQUIRED");
+      await tx
+        .update(conversationParticipants)
+        .set({ leftAt: sql`clock_timestamp()` })
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.userId, userId),
+          ),
+        );
+      const closed = active.length === 1;
+      await tx
+        .update(conversations)
+        .set({
+          unreadRevision: sql`${conversations.unreadRevision} + 1`,
+          ...(closed ? { deletedAt: sql`now()` } : {}),
+        })
+        .where(eq(conversations.id, conversationId));
+      return { closed };
+    });
+  }
+
+  async listMembers(conversationId: string) {
+    return this.db
+      .select({
+        id: users.id,
+        username: users.username,
+        fullName: users.fullName,
+        avatarUrl: users.avatarUrl,
+        role: conversationParticipants.role,
+        joinedAt: conversationParticipants.joinedAt,
+      })
+      .from(conversationParticipants)
+      .innerJoin(users, eq(users.id, conversationParticipants.userId))
+      .where(
+        and(
+          eq(conversationParticipants.conversationId, conversationId),
+          isNull(conversationParticipants.leftAt),
+        ),
+      )
+      .orderBy(asc(conversationParticipants.joinedAt), asc(users.id));
+  }
+
+  async getGroupMembership(conversationId: string, userId: string) {
+    const [row] = await this.db
+      .select({
+        role: conversationParticipants.role,
+        historyBoundaryMessageId: conversationParticipants.historyBoundaryMessageId,
+      })
+      .from(conversationParticipants)
+      .where(
+        and(
+          eq(conversationParticipants.conversationId, conversationId),
+          eq(conversationParticipants.userId, userId),
+          isNull(conversationParticipants.leftAt),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  async canAccessMessage(
+    conversationId: string,
+    userId: string,
+    messageId: string,
+  ): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: messages.id })
+      .from(messages)
+      .innerJoin(
+        conversationParticipants,
+        and(
+          eq(conversationParticipants.conversationId, messages.conversationId),
+          eq(conversationParticipants.userId, userId),
+          isNull(conversationParticipants.leftAt),
+        ),
+      )
+      .where(
+        and(
+          eq(messages.id, messageId),
+          eq(messages.conversationId, conversationId),
+          sql`(${conversationParticipants.historyBoundaryMessageId} IS NULL OR ROW(${messages.createdAt}, ${messages.id}) > (SELECT m.created_at, m.id FROM messages m WHERE m.id = ${conversationParticipants.historyBoundaryMessageId}))`,
+        ),
+      )
+      .limit(1);
+    return Boolean(row);
   }
 
   async findDirectByParticipants(
@@ -77,8 +573,18 @@ export class ConversationPgRepository implements ConversationRepository {
         id: conversations.id,
         kind: conversations.kind,
         directKey: conversations.directKey,
+        title: conversations.title,
+        avatarUrl: conversations.avatarUrl,
+        myRole: conversationParticipants.role,
+        memberCount: sql<number>`(SELECT count(*)::int FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.left_at IS NULL)`,
         lastMessagePreview: visiblePreview(userAId),
         lastMessageSenderId: visibleSenderId(userAId),
+        lastMessageSender: {
+          id: lastSender.id,
+          username: lastSender.username,
+          fullName: lastSender.fullName,
+          avatarUrl: lastSender.avatarUrl,
+        },
         lastMessageAt: visibleMessageAt(userAId),
         createdAt: conversations.createdAt,
         partner: {
@@ -89,8 +595,17 @@ export class ConversationPgRepository implements ConversationRepository {
         },
       })
       .from(conversations)
+      .innerJoin(
+        conversationParticipants,
+        and(
+          eq(conversationParticipants.conversationId, conversations.id),
+          eq(conversationParticipants.userId, userAId),
+          isNull(conversationParticipants.leftAt),
+        ),
+      )
       .innerJoin(users, eq(users.id, userBId))
       .leftJoin(messages, eq(conversations.lastMessageId, messages.id))
+      .leftJoin(lastSender, eq(lastSender.id, visibleSenderId(userAId)))
       .where(and(eq(conversations.directKey, directKey), isNull(conversations.deletedAt)))
       .limit(1);
 
@@ -213,8 +728,18 @@ export class ConversationPgRepository implements ConversationRepository {
         id: conversations.id,
         kind: conversations.kind,
         directKey: conversations.directKey,
+        title: conversations.title,
+        avatarUrl: conversations.avatarUrl,
+        myRole: conversationParticipants.role,
+        memberCount: sql<number>`(SELECT count(*)::int FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.left_at IS NULL)`,
         lastMessagePreview: visiblePreview(userId),
         lastMessageSenderId: visibleSenderId(userId),
+        lastMessageSender: {
+          id: lastSender.id,
+          username: lastSender.username,
+          fullName: lastSender.fullName,
+          avatarUrl: lastSender.avatarUrl,
+        },
         lastMessageAt: visibleMessageAt(userId),
         createdAt: conversations.createdAt,
         lastReadMessageId: conversationParticipants.lastReadMessageId,
@@ -223,6 +748,7 @@ export class ConversationPgRepository implements ConversationRepository {
       .from(conversationParticipants)
       .innerJoin(conversations, eq(conversationParticipants.conversationId, conversations.id))
       .leftJoin(messages, eq(conversations.lastMessageId, messages.id))
+      .leftJoin(lastSender, eq(lastSender.id, visibleSenderId(userId)))
       .where(and(...conditions))
       .orderBy(desc(activityOrder), desc(conversations.id))
       .limit(limit + 1);
@@ -282,6 +808,16 @@ export class ConversationPgRepository implements ConversationRepository {
         partnerUsername: users.username,
         partnerFullName: users.fullName,
         partnerAvatarUrl: users.avatarUrl,
+        lastMessageSenderUserId: lastSender.id,
+        lastMessageSenderUsername: lastSender.username,
+        lastMessageSenderFullName: lastSender.fullName,
+        lastMessageSenderAvatarUrl: lastSender.avatarUrl,
+        title: conversations.title,
+        avatarUrl: conversations.avatarUrl,
+        myRole: conversationParticipants.role,
+        memberCount: sql<number>`(SELECT count(*)::int FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.left_at IS NULL)`,
+        historyBoundaryMessageId: conversationParticipants.historyBoundaryMessageId,
+        lastReadAt: conversationParticipants.lastReadAt,
       })
       .from(conversations)
       .innerJoin(
@@ -295,6 +831,7 @@ export class ConversationPgRepository implements ConversationRepository {
       .leftJoin(
         partnerParticipants,
         and(
+          eq(conversations.kind, "DIRECT"),
           eq(partnerParticipants.conversationId, conversations.id),
           ne(partnerParticipants.userId, userId),
           isNull(partnerParticipants.leftAt),
@@ -302,6 +839,7 @@ export class ConversationPgRepository implements ConversationRepository {
       )
       .leftJoin(users, eq(partnerParticipants.userId, users.id))
       .leftJoin(messages, eq(conversations.lastMessageId, messages.id))
+      .leftJoin(lastSender, eq(lastSender.id, visibleSenderId(userId)))
       .where(and(eq(conversations.id, conversationId), isNull(conversations.deletedAt)))
       .limit(1);
 
@@ -313,7 +851,24 @@ export class ConversationPgRepository implements ConversationRepository {
       directKey: row.directKey,
       lastMessagePreview: row.lastMessagePreview,
       lastMessageSenderId: row.lastMessageSenderId,
+      lastMessageSender:
+        row.lastMessageSenderUserId &&
+        row.lastMessageSenderUsername &&
+        row.lastMessageSenderFullName
+          ? {
+              id: row.lastMessageSenderUserId,
+              username: row.lastMessageSenderUsername,
+              fullName: row.lastMessageSenderFullName,
+              avatarUrl: row.lastMessageSenderAvatarUrl,
+            }
+          : undefined,
       lastMessageAt: row.lastMessageAt,
+      title: row.title,
+      avatarUrl: row.avatarUrl,
+      myRole: row.myRole,
+      memberCount: row.memberCount,
+      historyBoundaryMessageId: row.historyBoundaryMessageId,
+      lastReadAt: row.lastReadAt,
       createdAt: row.createdAt,
       partner:
         row.partnerId && row.partnerUsername && row.partnerFullName
@@ -419,6 +974,7 @@ export class ConversationPgRepository implements ConversationRepository {
         and(
           eq(conversationParticipants.conversationId, messages.conversationId),
           eq(conversationParticipants.userId, userId),
+          isNull(conversationParticipants.leftAt),
         ),
       )
       .where(
@@ -427,6 +983,7 @@ export class ConversationPgRepository implements ConversationRepository {
           isNull(messages.deletedAt),
           ne(messages.senderId, userId),
           sql`NOT EXISTS (SELECT 1 FROM message_hidden_for_users h WHERE h.message_id = ${messages.id} AND h.user_id = ${userId}::uuid)`,
+          sql`(${conversationParticipants.historyBoundaryMessageId} IS NULL OR ROW(${messages.createdAt}, ${messages.id}) > (SELECT m.created_at, m.id FROM messages m WHERE m.id = ${conversationParticipants.historyBoundaryMessageId}))`,
           or(
             isNull(conversationParticipants.lastReadMessageId),
             sql`ROW(${messages.createdAt}, ${messages.id}) > ROW(
@@ -465,6 +1022,7 @@ export class ConversationPgRepository implements ConversationRepository {
           isNull(messages.deletedAt),
           ne(messages.senderId, userId),
           sql`NOT EXISTS (SELECT 1 FROM message_hidden_for_users h WHERE h.message_id = ${messages.id} AND h.user_id = ${userId}::uuid)`,
+          sql`(${conversationParticipants.historyBoundaryMessageId} IS NULL OR ROW(${messages.createdAt}, ${messages.id}) > (SELECT m.created_at, m.id FROM messages m WHERE m.id = ${conversationParticipants.historyBoundaryMessageId}))`,
           or(
             isNull(conversationParticipants.lastReadMessageId),
             sql`ROW(${messages.createdAt}, ${messages.id}) > ROW(

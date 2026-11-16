@@ -24,6 +24,7 @@ export interface MessageReactionSummary {
 export interface ReplyTargetResponse {
   id: string;
   senderId: string;
+  sender?: { id: string; username: string; fullName: string; avatarUrl: string | null };
   kind: MessageKind;
   body: string | null;
   deletedAt: Date | null;
@@ -34,6 +35,7 @@ export interface MessageResponse {
   id: string;
   conversationId: string;
   senderId: string;
+  sender?: { id: string; username: string; fullName: string; avatarUrl: string | null };
   clientMsgId?: string;
   kind: MessageKind;
   body: string | null;

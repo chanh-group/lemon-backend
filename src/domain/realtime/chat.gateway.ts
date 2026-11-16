@@ -275,7 +275,11 @@ export class ChatGateway
     if (!userId || !data?.conversationId) return;
 
     const room = convRoom(data.conversationId);
-    if (!client.rooms.has(room)) {
+    if (
+      !client.rooms.has(room) ||
+      !(await this.conversationRepo.isParticipant(data.conversationId, userId))
+    ) {
+      if (client.rooms.has(room)) await client.leave(room);
       return;
     }
 
@@ -306,7 +310,11 @@ export class ChatGateway
     if (!userId || !data?.conversationId) return;
 
     const room = convRoom(data.conversationId);
-    if (!client.rooms.has(room)) {
+    if (
+      !client.rooms.has(room) ||
+      !(await this.conversationRepo.isParticipant(data.conversationId, userId))
+    ) {
+      if (client.rooms.has(room)) await client.leave(room);
       return;
     }
 

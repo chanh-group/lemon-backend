@@ -37,6 +37,9 @@ export interface MessageRepository {
     senderId: string,
     clientMsgId: string,
   ): Promise<MessageWithAttachments | null>;
+  findSenderProfiles(
+    senderIds: string[],
+  ): Promise<Array<{ id: string; username: string; fullName: string; avatarUrl: string | null }>>;
   createMessageWithConversationUpdate(messageData: {
     conversationId: string;
     senderId: string;
@@ -56,6 +59,7 @@ export interface MessageRepository {
     limit?: number,
     after?: string,
     viewerId?: string,
+    historyBoundaryMessageId?: string | null,
   ): Promise<MessageTimelineResult>;
   hideForUser(messageId: string, userId: string): Promise<string>;
   findById(messageId: string, includeDetails?: boolean): Promise<MessageWithAttachments | null>;
@@ -63,6 +67,7 @@ export interface MessageRepository {
     conversationId: string,
     messageIds: string[],
     viewerId?: string,
+    historyBoundaryMessageId?: string | null,
   ): Promise<Message[]>;
   resolveWriteMiss(
     messageId: string,

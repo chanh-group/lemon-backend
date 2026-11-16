@@ -20,6 +20,9 @@ describe("MessageService", () => {
   let hideForUserMock: Mock;
   let resolveWriteMissMock: Mock;
   let reactMessageMock: Mock;
+  let findSenderProfilesMock: Mock;
+  let canAccessMessageMock: Mock;
+  let getGroupMembershipMock: Mock;
   let emitMessageReactionMock: Mock;
 
   let getParticipantUserIdsMock: Mock;
@@ -62,9 +65,16 @@ describe("MessageService", () => {
     hideForUserMock = vi.fn().mockResolvedValue(convId);
     resolveWriteMissMock = vi.fn();
     reactMessageMock = vi.fn();
+    findSenderProfilesMock = vi.fn().mockResolvedValue([]);
+    canAccessMessageMock = vi.fn().mockResolvedValue(true);
+    getGroupMembershipMock = vi.fn().mockResolvedValue(null);
 
     getParticipantUserIdsMock = vi.fn().mockResolvedValue([userA, userB]);
-    findConversationByIdMock = vi.fn().mockResolvedValue({ kind: "GROUP" });
+    findConversationByIdMock = vi
+      .fn()
+      .mockImplementation((_conversationId: string, userId: string) =>
+        userId === outsider ? null : { kind: "GROUP" },
+      );
     assertCanChatMock = vi.fn().mockResolvedValue(undefined);
     emitNewMessageMock = vi.fn();
     emitMessageUpdatedMock = vi.fn();
@@ -74,6 +84,7 @@ describe("MessageService", () => {
 
     const mockMessageRepo = {
       createMessageWithConversationUpdate: createMessageMock,
+      findSenderProfiles: findSenderProfilesMock,
       findById: findByIdMock,
       findTimeline: findTimelineMock,
       findReplyTargets: findReplyTargetsMock,
@@ -87,6 +98,8 @@ describe("MessageService", () => {
     const mockConvRepo = {
       getParticipantUserIds: getParticipantUserIdsMock,
       findById: findConversationByIdMock,
+      canAccessMessage: canAccessMessageMock,
+      getGroupMembership: getGroupMembershipMock,
     } as unknown as ConversationRepository;
     const mockFriendService = {
       assertCanChat: assertCanChatMock,
@@ -269,7 +282,7 @@ describe("MessageService", () => {
       findTimelineMock.mockResolvedValue({ items: [reply], hasMore: false });
       findReplyTargetsMock.mockResolvedValue([target]);
       const result = await service.getTimeline(userA, convId);
-      expect(findReplyTargetsMock).toHaveBeenCalledWith(convId, [msgId], userA);
+      expect(findReplyTargetsMock).toHaveBeenCalledWith(convId, [msgId], userA, undefined);
       expect(result.items[0].replyTarget).toMatchObject({
         id: msgId,
         body: null,
@@ -292,7 +305,14 @@ describe("MessageService", () => {
       expect(res.items[0].id).toBe(msgId);
       expect(res.items[0]).not.toHaveProperty("clientMsgId");
       expect(res.hasMore).toBe(false);
-      expect(findTimelineMock).toHaveBeenCalledWith(convId, undefined, undefined, undefined, userA);
+      expect(findTimelineMock).toHaveBeenCalledWith(
+        convId,
+        undefined,
+        undefined,
+        undefined,
+        userA,
+        undefined,
+      );
       expect(getParticipantUserIdsMock).not.toHaveBeenCalled();
       expect(findConversationByIdMock).toHaveBeenCalledWith(convId, userA);
     });
@@ -463,11 +483,14 @@ describe("MessageService", () => {
       const serviceWithStorage = new MessageService(
         {
           createMessageWithConversationUpdate: createMessageMock,
+          findSenderProfiles: findSenderProfilesMock,
           findById: findByIdMock,
         } as any,
         {
           getParticipantUserIds: getParticipantUserIdsMock,
           findById: findConversationByIdMock,
+          canAccessMessage: canAccessMessageMock,
+          getGroupMembership: getGroupMembershipMock,
         } as any,
         { assertCanChat: assertCanChatMock } as any,
         { emitNewMessage: emitNewMessageMock } as any,
@@ -555,11 +578,14 @@ describe("MessageService", () => {
       const serviceWithStorage = new MessageService(
         {
           createMessageWithConversationUpdate: createMessageMock,
+          findSenderProfiles: findSenderProfilesMock,
           findById: findByIdMock,
         } as any,
         {
           getParticipantUserIds: getParticipantUserIdsMock,
           findById: findConversationByIdMock,
+          canAccessMessage: canAccessMessageMock,
+          getGroupMembership: getGroupMembershipMock,
         } as any,
         { assertCanChat: assertCanChatMock } as any,
         { emitNewMessage: emitNewMessageMock } as any,

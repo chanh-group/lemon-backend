@@ -86,6 +86,25 @@ export class RealtimeService {
     }
   }
 
+  leaveConversation(userIds: string[], conversationId: string): void {
+    if (!this.gateway?.server) return;
+    const room = convRoom(conversationId);
+    try {
+      for (const userId of userIds) this.gateway.server.in(userRoom(userId)).socketsLeave(room);
+    } catch (err) {
+      logger.warn(`Failed to remove users from conv ${conversationId}: ${String(err)}`);
+    }
+  }
+
+  emitGroupEvent(userIds: string[], event: string, payload: unknown): void {
+    if (!this.gateway?.server) return;
+    try {
+      for (const userId of userIds) this.gateway.server.to(userRoom(userId)).emit(event, payload);
+    } catch (err) {
+      logger.warn(`Failed to emit group event ${event}: ${String(err)}`);
+    }
+  }
+
   /**
    * Broadcast read receipt update
    */

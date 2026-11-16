@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { v7 as uuidv7 } from "uuid";
 import {
   CHAT_ALLOWED_AUDIO_MIME,
@@ -15,6 +15,10 @@ import {
   USER_AVATAR_MAX_BYTES,
 } from "../../utils/cache/constants.js";
 import { BusinessError } from "../../utils/errors/business.js";
+import {
+  CONVERSATION_REPOSITORY,
+  type ConversationRepository,
+} from "../conversation/repository.js";
 import { StorageError } from "../../utils/storage/error.js";
 import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.js";
 import {
@@ -84,7 +88,27 @@ function createObjectKey(
 export class FileService {
   private readonly logger = new Logger(FileService.name);
 
-  constructor(@Inject(STORAGE_SERVICE) private readonly storage: StorageService) {}
+  constructor(
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
+    @Optional()
+    @Inject(CONVERSATION_REPOSITORY)
+    private readonly conversations?: ConversationRepository,
+  ) {}
+
+  private async assertChatMember(
+    userId: string,
+    kind: string,
+    conversationId?: string,
+  ): Promise<void> {
+    if (!kind.startsWith("CHAT_")) return;
+    if (
+      !conversationId ||
+      !this.conversations ||
+      !(await this.conversations.isParticipant(conversationId, userId))
+    ) {
+      throw new BusinessError("NOT_PARTICIPANT");
+    }
+  }
 
   async presign(userId: string, dto: PresignFileDto): Promise<PresignFileResponse> {
     validateUpload(dto.kind, dto.sizeBytes, dto.mimeType);
@@ -95,6 +119,7 @@ export class FileService {
       dto.fileName ?? "",
       dto.conversationId,
     );
+    await this.assertChatMember(userId, dto.kind, dto.conversationId);
 
     try {
       const avatarUrl =
@@ -158,6 +183,7 @@ export class FileService {
       file.originalname,
       conversationId,
     );
+    await this.assertChatMember(userId, kind, conversationId);
     const avatarUrl = kind === "USER_AVATAR" ? avatarUrlForObjectKey(userId, objectKey) : undefined;
 
     try {

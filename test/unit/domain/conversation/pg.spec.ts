@@ -265,7 +265,7 @@ describe("ConversationPgRepository.countUnread", () => {
     expect(where.sql).toContain('"conversation_participants"."last_read_message_id" is null');
     expect(where.sql).toContain('ROW("messages"."created_at", "messages"."id") > ROW(');
     expect(where.sql).toContain("SELECT m.created_at FROM messages m");
-    expect(where.sql).not.toContain("SELECT m.created_at, m.id");
+    expect(where.sql).toContain('"history_boundary_message_id" IS NULL');
     expect(where.sql).toContain('m.id = "conversation_participants"."last_read_message_id"');
     expect(where.params).toEqual([convRow.id, userAId, userAId]);
   });
@@ -367,7 +367,7 @@ describe("ConversationPgRepository.findById", () => {
     expect(membership.params).toEqual([userAId]);
     const partnerJoin = render(dbSelect.leftJoinMock.mock.calls[0][1]);
     expect(partnerJoin.sql).toContain('"partner_participants"."left_at" is null');
-    expect(partnerJoin.params).toEqual([userAId]);
+    expect(partnerJoin.params).toEqual(["DIRECT", userAId]);
   });
 
   it("returns null when the participant has left the conversation", async () => {

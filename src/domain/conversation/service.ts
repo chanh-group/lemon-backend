@@ -1,4 +1,6 @@
 import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
+import { createHash } from "node:crypto";
+import type { CursorPage } from "../shared.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { USER_REPOSITORY, type UserRepository } from "../user/repository.js";
 import {
@@ -12,13 +14,18 @@ import { UNREAD_TTL_SECONDS } from "../../utils/cache/constants.js";
 import { presenceUserKey, unreadCountKey } from "../../utils/cache/keys.js";
 import { RealtimeService } from "../realtime/realtime.service.js";
 import type { ConversationResponse } from "./dto/response.js";
+import type { ConversationMemberResponse } from "./dto/response.js";
 import { toConversationResponse } from "./dto/mapper.js";
 import { FriendService } from "../friend/service.js";
 import { SystemError } from "../../utils/errors/system.js";
 import { RedisHealthService } from "../../configs/redis-health.js";
 import { RedisMetricsService } from "../../configs/redis-metrics.js";
-import type { CursorPage } from "../shared.js";
 import { DEFAULT_PAGE_SIZE } from "../pagination.constants.js";
+import {
+  GROUP_MAX_MEMBERS,
+  GROUP_MAX_NAME_LENGTH,
+  GROUP_MIN_INVITED_MEMBERS,
+} from "./constants.js";
 
 function requireRedisPipelineResults(
   results: [Error | null, unknown][] | null,
@@ -126,6 +133,155 @@ export class ConversationService {
     this.joinParticipantsBestEffort(conversation.id, [userId, targetUserId]);
 
     return toConversationResponse(conversation);
+  }
+
+  async createGroup(
+    userId: string,
+    input: { title: string; memberIds: string[]; clientRequestId: string },
+  ): Promise<ConversationResponse> {
+    if (
+      input.title.trim().length < 1 ||
+      input.title.trim().length > GROUP_MAX_NAME_LENGTH ||
+      input.memberIds.length < GROUP_MIN_INVITED_MEMBERS ||
+      input.memberIds.length > GROUP_MAX_MEMBERS - 1 ||
+      new Set(input.memberIds).size !== input.memberIds.length ||
+      input.memberIds.includes(userId)
+    ) {
+      throw new BusinessError("BAD_REQUEST");
+    }
+    const [creator, users, accepted] = await Promise.all([
+      this.userRepo.findById(userId),
+      this.userRepo.findByIds(input.memberIds),
+      this.friendService.findAcceptedFriendIds(userId, input.memberIds),
+    ]);
+    if (!creator) throw new BusinessError("USER_NOT_FOUND");
+    if (users.length !== input.memberIds.length || users.some((user) => !user.isActive))
+      throw new BusinessError("USER_NOT_FOUND");
+    if (accepted.size !== input.memberIds.length) throw new BusinessError("FRIENDSHIP_REQUIRED");
+    const createRequestHash = createHash("sha256")
+      .update(JSON.stringify({ title: input.title.trim(), memberIds: [...input.memberIds].sort() }))
+      .digest("hex");
+    const group = await this.convRepo.createGroup({
+      creatorId: userId,
+      ...input,
+      title: input.title.trim(),
+      createRequestHash,
+    });
+    this.realtimeService.joinConversation([userId, ...input.memberIds], group.id);
+    this.realtimeService.emitGroupEvent(
+      [userId, ...input.memberIds],
+      "conversation:created",
+      toConversationResponse(group),
+    );
+    return toConversationResponse(group);
+  }
+
+  async listGroupMembers(
+    conversationId: string,
+    userId: string,
+  ): Promise<ConversationMemberResponse[]> {
+    const group = await this.convRepo.findById(conversationId, userId);
+    if (!group) throw new BusinessError("NOT_PARTICIPANT");
+    if (group.kind !== "GROUP") throw new BusinessError("BAD_REQUEST");
+    return this.convRepo.listMembers(conversationId);
+  }
+
+  private async requireGroupManager(conversationId: string, userId: string, ownerOnly = false) {
+    const group = await this.convRepo.findById(conversationId, userId);
+    if (!group) throw new BusinessError("NOT_PARTICIPANT");
+    if (group.kind !== "GROUP") throw new BusinessError("BAD_REQUEST");
+    if (ownerOnly ? group.myRole !== "OWNER" : !["OWNER", "ADMIN"].includes(group.myRole ?? "")) {
+      throw new BusinessError("FORBIDDEN");
+    }
+    return group;
+  }
+
+  async addGroupMembers(conversationId: string, actorId: string, memberIds: string[]) {
+    await this.requireGroupManager(conversationId, actorId);
+    if (new Set(memberIds).size !== memberIds.length) throw new BusinessError("BAD_REQUEST");
+    const accepted = await this.friendService.findAcceptedFriendIds(actorId, memberIds);
+    if (accepted.size !== memberIds.length) throw new BusinessError("FRIENDSHIP_REQUIRED");
+    const added = await this.convRepo.addGroupMembers(conversationId, actorId, memberIds);
+    const userIds = await this.convRepo.getParticipantUserIds(conversationId);
+    this.realtimeService.joinConversation(memberIds, conversationId);
+    this.realtimeService.emitGroupEvent(userIds, "conversation:updated", { conversationId });
+    this.realtimeService.emitGroupEvent(userIds, "member:added", { conversationId, memberIds });
+    return added;
+  }
+
+  async removeGroupMember(
+    conversationId: string,
+    actorId: string,
+    targetId: string,
+  ): Promise<void> {
+    await this.requireGroupManager(conversationId, actorId, true);
+    if (actorId === targetId) throw new BusinessError("BAD_REQUEST");
+    const target = await this.convRepo.getGroupMembership(conversationId, targetId);
+    if (!target || target.role === "OWNER") throw new BusinessError("FORBIDDEN");
+    await this.convRepo.removeGroupMember(conversationId, actorId, targetId);
+    this.realtimeService.leaveConversation([targetId], conversationId);
+    this.realtimeService.emitGroupEvent([targetId], "member:removed", {
+      conversationId,
+      userId: targetId,
+      removedBy: actorId,
+    });
+    this.realtimeService.emitGroupEvent(
+      await this.convRepo.getParticipantUserIds(conversationId),
+      "conversation:updated",
+      { conversationId },
+    );
+  }
+
+  async updateGroupTitle(conversationId: string, actorId: string, title: string): Promise<void> {
+    await this.requireGroupManager(conversationId, actorId);
+    await this.convRepo.updateGroup(conversationId, actorId, title);
+    const memberIds = await this.convRepo.getParticipantUserIds(conversationId);
+    this.realtimeService.emitGroupEvent(memberIds, "conversation:updated", { conversationId });
+  }
+
+  async updateGroupRole(
+    conversationId: string,
+    actorId: string,
+    targetId: string,
+    role: "ADMIN" | "MEMBER",
+  ) {
+    await this.requireGroupManager(conversationId, actorId, true);
+    if (actorId === targetId || !(await this.convRepo.getGroupMembership(conversationId, targetId)))
+      throw new BusinessError("BAD_REQUEST");
+    await this.convRepo.updateMemberRole(conversationId, actorId, targetId, role);
+    this.realtimeService.emitGroupEvent(
+      await this.convRepo.getParticipantUserIds(conversationId),
+      "member:role-changed",
+      { conversationId, userId: targetId, role },
+    );
+  }
+
+  async transferGroupOwnership(conversationId: string, actorId: string, targetId: string) {
+    await this.requireGroupManager(conversationId, actorId, true);
+    if (actorId === targetId || !(await this.convRepo.getGroupMembership(conversationId, targetId)))
+      throw new BusinessError("BAD_REQUEST");
+    await this.convRepo.transferOwnership(conversationId, actorId, targetId);
+    this.realtimeService.emitGroupEvent(
+      await this.convRepo.getParticipantUserIds(conversationId),
+      "member:role-changed",
+      { conversationId },
+    );
+  }
+
+  async leaveGroup(conversationId: string, userId: string) {
+    const result = await this.convRepo.leaveGroup(conversationId, userId);
+    this.realtimeService.leaveConversation([userId], conversationId);
+    this.realtimeService.emitGroupEvent([userId], "member:removed", {
+      conversationId,
+      userId,
+      left: true,
+    });
+    this.realtimeService.emitGroupEvent(
+      await this.convRepo.getParticipantUserIds(conversationId),
+      "conversation:updated",
+      { conversationId },
+    );
+    return result;
   }
 
   private joinParticipantsBestEffort(conversationId: string, participantIds: string[]): void {
@@ -411,6 +567,9 @@ export class ConversationService {
         : Promise.resolve(),
     ]);
     if (!messageBelongsToConversation) {
+      throw new BusinessError("BAD_REQUEST");
+    }
+    if (!(await this.convRepo.canAccessMessage(conversationId, userId, lastReadMessageId))) {
       throw new BusinessError("BAD_REQUEST");
     }
 

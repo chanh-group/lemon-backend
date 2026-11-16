@@ -85,11 +85,13 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
   });
 
   afterAll(async () => {
-    if (conversationId) {
-      await db.delete(conversations).where(eq(conversations.id, conversationId));
+    if (db) {
+      if (conversationId) {
+        await db.delete(conversations).where(eq(conversations.id, conversationId));
+      }
+      await db.delete(users).where(inArray(users.id, [userA, userB]));
     }
-    await db.delete(users).where(inArray(users.id, [userA, userB]));
-    await app.close();
+    if (app) await app.close();
   });
 
   // --- SECURITY TESTS (ZERO TRUST / NO x-user-id) ---

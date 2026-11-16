@@ -3,6 +3,7 @@ import { FileService } from "../../../../src/domain/file/service.js";
 import type { StorageService } from "../../../../src/utils/storage/store.js";
 import { StorageError } from "../../../../src/utils/storage/error.js";
 import { avatarUrlForObjectKey } from "../../../../src/utils/storage/avatar.js";
+import type { ConversationRepository } from "../../../../src/domain/conversation/repository.js";
 
 describe("FileService", () => {
   let service: FileService;
@@ -18,6 +19,7 @@ describe("FileService", () => {
   >;
   let headObjectMock: Mock;
   let presignGetMock: Mock;
+  let isParticipantMock: Mock;
 
   const storage = () =>
     ({
@@ -32,7 +34,10 @@ describe("FileService", () => {
     putObjectMock = vi.fn().mockResolvedValue(undefined);
     headObjectMock = vi.fn().mockResolvedValue({ contentLength: 1024, contentType: "image/png" });
     presignGetMock = vi.fn().mockResolvedValue({ downloadUrl: "https://s3.example/avatar" });
-    service = new FileService(storage());
+    isParticipantMock = vi.fn().mockResolvedValue(true);
+    service = new FileService(storage(), {
+      isParticipant: isParticipantMock,
+    } as unknown as ConversationRepository);
   });
 
   afterEach(() => vi.unstubAllEnvs());
@@ -175,6 +180,20 @@ describe("FileService", () => {
     expect(result.uploadUrl).toBe("https://s3.example/signed");
     expect(result.objectKey).toContain("chat/0193a2b1-0000-7000-8000-000000000001/");
     expect(result.objectKey).toContain("T_i_li_u_B_o_C_o.pdf");
+  });
+
+  it("rejects chat uploads when the user is not an active conversation member", async () => {
+    isParticipantMock.mockResolvedValue(false);
+    await expect(
+      service.presign("user-1", {
+        kind: "CHAT_FILE",
+        conversationId: "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b",
+        sizeBytes: 1024,
+        mimeType: "application/pdf",
+        fileName: "notes.pdf",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_PARTICIPANT" });
+    expect(presignPutMock).not.toHaveBeenCalled();
   });
 
   it("rejects chat files exceeding 25MB", async () => {

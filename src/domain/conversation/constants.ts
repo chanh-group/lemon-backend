@@ -2,3 +2,7 @@ export {
   DEFAULT_PAGE_SIZE as DEFAULT_CONVERSATION_PAGE_SIZE,
   MAX_PAGE_SIZE as MAX_CONVERSATION_PAGE_SIZE,
 } from "../pagination.constants.js";
+
+export const GROUP_MAX_MEMBERS = 10;
+export const GROUP_MIN_INVITED_MEMBERS = 2;
+export const GROUP_MAX_NAME_LENGTH = 80;
