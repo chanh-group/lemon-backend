@@ -21,11 +21,11 @@ import { standardSchemaPipe } from "../../src/utils/validation.js";
 describe("Group conversations with PostgreSQL and Redis", () => {
   let app: INestApplication;
   let db: DrizzleDb;
-  const ownerId = uuidv7();
+  const creatorId = uuidv7();
   const memberId = uuidv7();
   const secondMemberId = uuidv7();
   const lateMemberId = uuidv7();
-  const userIds = [ownerId, memberId, secondMemberId, lateMemberId];
+  const userIds = [creatorId, memberId, secondMemberId, lateMemberId];
   const tokens = new Map<string, string>();
   let conversationId: string;
 
@@ -59,9 +59,9 @@ describe("Group conversations with PostgreSQL and Redis", () => {
     const friendIds = [memberId, secondMemberId, lateMemberId];
     await db.insert(friendships).values(
       friendIds.map((friendId) => {
-        const [userLow, userHigh] = [ownerId, friendId].sort();
+        const [userLow, userHigh] = [creatorId, friendId].sort();
         return {
-          requesterId: ownerId,
+          requesterId: creatorId,
           addresseeId: friendId,
           userLow,
           userHigh,
@@ -77,7 +77,7 @@ describe("Group conversations with PostgreSQL and Redis", () => {
   afterAll(async () => {
     try {
       if (db) {
-        await db.delete(conversations).where(eq(conversations.creatorId, ownerId));
+        await db.delete(conversations).where(eq(conversations.creatorId, creatorId));
         await db.delete(users).where(inArray(users.id, userIds));
       }
     } finally {
@@ -89,7 +89,7 @@ describe("Group conversations with PostgreSQL and Redis", () => {
     const clientRequestId = uuidv7();
     const created = await request(app.getHttpServer())
       .post("/api/conversations/groups")
-      .auth(tokens.get(ownerId)!, { type: "bearer" })
+      .auth(tokens.get(creatorId)!, { type: "bearer" })
       .send({ title: "  Project group  ", memberIds: [memberId, secondMemberId], clientRequestId })
       .expect(201);
     conversationId = created.body.data.id;
@@ -97,25 +97,25 @@ describe("Group conversations with PostgreSQL and Redis", () => {
       kind: "GROUP",
       title: "Project group",
       memberCount: 3,
-      myRole: "OWNER",
+      myRole: "ADMIN",
     });
 
     const retry = await request(app.getHttpServer())
       .post("/api/conversations/groups")
-      .auth(tokens.get(ownerId)!, { type: "bearer" })
+      .auth(tokens.get(creatorId)!, { type: "bearer" })
       .send({ title: "Project group", memberIds: [memberId, secondMemberId], clientRequestId })
       .expect(201);
     expect(retry.body.data.id).toBe(conversationId);
 
     await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
-      .auth(tokens.get(ownerId)!, { type: "bearer" })
+      .auth(tokens.get(creatorId)!, { type: "bearer" })
       .send({ body: "Before joining" })
       .expect(201);
 
     await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/members`)
-      .auth(tokens.get(ownerId)!, { type: "bearer" })
+      .auth(tokens.get(creatorId)!, { type: "bearer" })
       .send({ memberIds: [lateMemberId] })
       .expect(201);
     const hiddenHistory = await request(app.getHttpServer())
@@ -140,7 +140,7 @@ describe("Group conversations with PostgreSQL and Redis", () => {
     await db
       .update(friendships)
       .set({ status: "BLOCKED" })
-      .where(eq(friendships.userLow, [ownerId, memberId].sort()[0]));
+      .where(eq(friendships.userLow, [creatorId, memberId].sort()[0]));
     await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .auth(tokens.get(memberId)!, { type: "bearer" })
@@ -148,21 +148,21 @@ describe("Group conversations with PostgreSQL and Redis", () => {
       .expect(201);
 
     await request(app.getHttpServer())
-      .patch(`/api/conversations/${conversationId}/members/${memberId}/role`)
-      .auth(tokens.get(ownerId)!, { type: "bearer" })
-      .send({ role: "ADMIN" })
-      .expect(200);
-    await request(app.getHttpServer())
       .patch(`/api/conversations/${conversationId}`)
       .auth(tokens.get(memberId)!, { type: "bearer" })
-      .send({ title: "Renamed by admin" })
+      .send({ title: "Renamed by member" })
       .expect(200);
 
+    const lastAdminLeave = await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/leave`)
+      .auth(tokens.get(creatorId)!, { type: "bearer" })
+      .expect(409);
+    expect(lastAdminLeave.body.code).toBe("LAST_ADMIN_REQUIRED");
     await request(app.getHttpServer())
-      .post(`/api/conversations/${conversationId}/transfer-ownership`)
-      .auth(tokens.get(ownerId)!, { type: "bearer" })
-      .send({ userId: memberId })
-      .expect(201);
+      .patch(`/api/conversations/${conversationId}/members/${memberId}/role`)
+      .auth(tokens.get(creatorId)!, { type: "bearer" })
+      .send({ role: "ADMIN" })
+      .expect(200);
     await request(app.getHttpServer())
       .delete(`/api/conversations/${conversationId}/members/${lateMemberId}`)
       .auth(tokens.get(memberId)!, { type: "bearer" })
@@ -174,11 +174,20 @@ describe("Group conversations with PostgreSQL and Redis", () => {
 
     await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/leave`)
-      .auth(tokens.get(ownerId)!, { type: "bearer" })
+      .auth(tokens.get(creatorId)!, { type: "bearer" })
       .expect(201);
     await request(app.getHttpServer())
       .get(`/api/conversations/${conversationId}`)
-      .auth(tokens.get(ownerId)!, { type: "bearer" })
+      .auth(tokens.get(creatorId)!, { type: "bearer" })
       .expect(403);
+
+    await request(app.getHttpServer())
+      .delete(`/api/conversations/${conversationId}`)
+      .auth(tokens.get(memberId)!, { type: "bearer" })
+      .expect(204);
+    await request(app.getHttpServer())
+      .get(`/api/conversations/${conversationId}`)
+      .auth(tokens.get(secondMemberId)!, { type: "bearer" })
+      .expect(404);
   }, 60000);
 });

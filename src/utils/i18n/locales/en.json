@@ -76,7 +76,7 @@
   "VALIDATION_BODY_MAX": "Message body must be at most {max} characters",
   "CONVERSATION_NOT_FOUND": "Conversation not found",
   "GROUP_FULL": "The group has reached its member limit",
-  "OWNER_TRANSFER_REQUIRED": "Transfer group ownership before leaving",
+  "LAST_ADMIN_REQUIRED": "Make another member an admin before leaving the group",
   "NOT_PARTICIPANT": "Not a participant in this conversation",
   "MESSAGE_NOT_FOUND": "Message not found",
   "MESSAGE_REVOKED": "Message has been revoked",

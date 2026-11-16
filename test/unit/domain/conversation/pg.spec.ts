@@ -115,6 +115,140 @@ const partnerRow = {
 
 const uniqueViolation = { code: "23505", constraint: "conversations_direct_key_uq" };
 
+describe("ConversationPgRepository group avatar", () => {
+  it("returns the avatar only for an active group", async () => {
+    const { db, dbSelect } = makeDb();
+    const groupId = "0193a2b1-0000-7000-8000-000000000010";
+    dbSelect.limitMock.mockResolvedValueOnce([{ avatarUrl: "https://api.example.com/group.png" }]);
+
+    expect(await new ConversationPgRepository(db).getGroupAvatarUrl(groupId)).toBe(
+      "https://api.example.com/group.png",
+    );
+    const lookup = render(dbSelect.whereMock.mock.calls[0][0]);
+    expect(lookup.sql).toContain('"conversations"."kind" =');
+    expect(lookup.sql).toContain('"conversations"."deleted_at" is null');
+    expect(lookup.params).toEqual([groupId, "GROUP"]);
+  });
+
+  it("writes a new avatar when the actor is an active group member", async () => {
+    const lock = vi.fn().mockResolvedValue([]);
+    const roleLimit = vi.fn().mockResolvedValue([{ role: "MEMBER" }]);
+    const select = vi
+      .fn()
+      .mockReturnValueOnce({ from: () => ({ where: () => ({ for: lock }) }) })
+      .mockReturnValueOnce({ from: () => ({ where: () => ({ limit: roleLimit }) }) });
+    const updateWhere = vi.fn().mockResolvedValue([]);
+    const set = vi.fn().mockReturnValue({ where: updateWhere });
+    const update = vi.fn().mockReturnValue({ set });
+    const tx = { select, update };
+    const db = {
+      transaction: (cb: (value: typeof tx) => Promise<void>) => cb(tx),
+    } as unknown as DrizzleDb;
+    const url = "https://api.example.com/group.png";
+
+    await new ConversationPgRepository(db).updateGroupAvatar(convRow.id, userAId, url);
+
+    expect(set).toHaveBeenCalledWith({ avatarUrl: url, updatedAt: expect.anything() });
+    expect(update).toHaveBeenCalledWith(conversations);
+  });
+});
+
+describe("ConversationPgRepository.disbandGroup", () => {
+  function makeDisbandDb(role: "ADMIN" | "MEMBER") {
+    const active = [
+      { userId: userAId, role },
+      { userId: userBId, role: "MEMBER" as const },
+    ];
+    const groupLimit = vi.fn().mockResolvedValue([{ kind: "GROUP", deletedAt: null }]);
+    const select = vi
+      .fn()
+      .mockReturnValueOnce({
+        from: () => ({ where: () => ({ for: () => ({ limit: groupLimit }) }) }),
+      })
+      .mockReturnValueOnce({ from: () => ({ where: async () => active }) });
+    const updateWhere = vi.fn().mockResolvedValue([]);
+    const set = vi.fn().mockReturnValue({ where: updateWhere });
+    const update = vi.fn().mockReturnValue({ set });
+    const tx = { select, update };
+    const db = {
+      transaction: (cb: (value: typeof tx) => Promise<string[]>) => cb(tx),
+    } as unknown as DrizzleDb;
+    return { db, set, update };
+  }
+
+  it("closes a group and revokes every active participant for an admin", async () => {
+    const { db, set, update } = makeDisbandDb("ADMIN");
+
+    expect(await new ConversationPgRepository(db).disbandGroup(convRow.id, userAId)).toEqual([
+      userAId,
+      userBId,
+    ]);
+    expect(update).toHaveBeenNthCalledWith(1, conversationParticipants);
+    expect(update).toHaveBeenNthCalledWith(2, conversations);
+    expect(set).toHaveBeenNthCalledWith(1, { leftAt: expect.anything() });
+    expect(set).toHaveBeenNthCalledWith(2, {
+      deletedAt: expect.anything(),
+      updatedAt: expect.anything(),
+    });
+  });
+
+  it("does not change the group for a regular member", async () => {
+    const { db, update } = makeDisbandDb("MEMBER");
+
+    await expect(
+      new ConversationPgRepository(db).disbandGroup(convRow.id, userAId),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe("ConversationPgRepository.leaveGroup admin continuity", () => {
+  function makeLeaveDb(active: { userId: string; role: "ADMIN" | "MEMBER" }[]) {
+    const groupLimit = vi.fn().mockResolvedValue([{ kind: "GROUP" }]);
+    const select = vi
+      .fn()
+      .mockReturnValueOnce({
+        from: () => ({ where: () => ({ for: () => ({ limit: groupLimit }) }) }),
+      })
+      .mockReturnValueOnce({ from: () => ({ where: async () => active }) });
+    const updateWhere = vi.fn().mockResolvedValue([]);
+    const set = vi.fn().mockReturnValue({ where: updateWhere });
+    const update = vi.fn().mockReturnValue({ set });
+    const tx = { select, update };
+    const db = {
+      transaction: (cb: (value: typeof tx) => Promise<{ closed: boolean }>) => cb(tx),
+    } as unknown as DrizzleDb;
+    return { db, set, update };
+  }
+
+  it("requires the last admin to promote another member before leaving", async () => {
+    const { db, update } = makeLeaveDb([
+      { userId: userAId, role: "ADMIN" },
+      { userId: userBId, role: "MEMBER" },
+    ]);
+
+    await expect(
+      new ConversationPgRepository(db).leaveGroup(convRow.id, userAId),
+    ).rejects.toMatchObject({
+      code: "LAST_ADMIN_REQUIRED",
+    });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("allows an admin to leave after another admin exists", async () => {
+    const { db, set, update } = makeLeaveDb([
+      { userId: userAId, role: "ADMIN" },
+      { userId: userBId, role: "ADMIN" },
+    ]);
+
+    expect(await new ConversationPgRepository(db).leaveGroup(convRow.id, userAId)).toEqual({
+      closed: false,
+    });
+    expect(update).toHaveBeenCalledTimes(2);
+    expect(set).toHaveBeenNthCalledWith(1, { leftAt: expect.anything() });
+  });
+});
+
 describe("ConversationPgRepository.createDirectConversation", () => {
   it("returns the existing conversation when a concurrent insert hits the unique index", async () => {
     const { db, dbSelect, transactionMock } = makeDb();

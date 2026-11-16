@@ -60,3 +60,35 @@ export function avatarObjectKeyFromUrl(url: string, userId: string): string | nu
     return null;
   }
 }
+
+export function groupAvatarUrlForObjectKey(groupId: string, objectKey: string): string {
+  const prefix = `group-avatars/${groupId}/`;
+  const fileName = objectKey.startsWith(prefix) ? objectKey.slice(prefix.length) : "";
+  const origin = publicApiOrigin();
+  if (!origin || !isAvatarFileName(fileName)) {
+    throw new StorageError("Group avatar URL configuration or object key is invalid");
+  }
+  return `${origin}/api/files/group-avatars/${encodeURIComponent(groupId)}/${encodeURIComponent(fileName)}`;
+}
+
+export function groupAvatarObjectKeyFromUrl(url: string, groupId: string): string | null {
+  const origin = publicApiOrigin();
+  if (!origin) return null;
+  try {
+    const parsed = new URL(url);
+    const prefix = `/api/files/group-avatars/${encodeURIComponent(groupId)}/`;
+    if (
+      parsed.origin !== origin ||
+      !parsed.pathname.startsWith(prefix) ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      return null;
+    }
+    const fileName = decodeURIComponent(parsed.pathname.slice(prefix.length));
+    if (!isAvatarFileName(fileName)) return null;
+    return `group-avatars/${groupId}/${fileName}`;
+  } catch {
+    return null;
+  }
+}

@@ -10,6 +10,7 @@ import { MemoryRateLimiter, RATE_LIMITER } from "../../../../src/middleware/rate
 import type { PresignFileDto } from "../../../../src/domain/file/dto/request.js";
 import type { PresignFileResponse } from "../../../../src/domain/file/dto/response.js";
 import { UserService } from "../../../../src/domain/user/service.js";
+import { ConversationService } from "../../../../src/domain/conversation/service.js";
 import { standardSchemaPipe } from "../../../../src/utils/validation.js";
 
 describe("FileController", () => {
@@ -33,6 +34,7 @@ describe("FileController", () => {
       { presign: presignMock } as unknown as FileService,
       new MemoryRateLimiter(),
       { findById: vi.fn() } as unknown as UserService,
+      { updateGroupAvatar: vi.fn() } as unknown as ConversationService,
     );
   });
 
@@ -58,6 +60,7 @@ describe("FileController", () => {
       { getAvatarDownloadUrl } as unknown as FileService,
       new MemoryRateLimiter(),
       { findById } as unknown as UserService,
+      { updateGroupAvatar: vi.fn() } as unknown as ConversationService,
     );
     const response = { redirect } as unknown as Response;
 
@@ -72,6 +75,50 @@ describe("FileController", () => {
     expect(redirect).toHaveBeenCalledWith(302, downloadUrl);
   });
 
+  it("uploads and attaches a group photo before returning updated metadata", async () => {
+    const groupId = "0193a2b1-0000-7000-8000-000000000010";
+    const file = {
+      buffer: Buffer.from("image"),
+      size: 5,
+      mimetype: "image/png",
+      originalname: "photo.png",
+    };
+    const avatarUrl = "https://api.example.com/api/files/group-avatars/photo.png";
+    const uploadGroupAvatar = vi.fn().mockResolvedValue(avatarUrl);
+    const updateGroupAvatar = vi.fn().mockResolvedValue({ id: groupId, avatarUrl });
+    const c = new FileController(
+      { uploadGroupAvatar } as unknown as FileService,
+      new MemoryRateLimiter(),
+      { findById: vi.fn() } as unknown as UserService,
+      { updateGroupAvatar } as unknown as ConversationService,
+    );
+
+    const result = await c.uploadGroupAvatar({ user: { id: "user-1" } }, groupId, file);
+
+    expect(uploadGroupAvatar).toHaveBeenCalledWith("user-1", groupId, file);
+    expect(updateGroupAvatar).toHaveBeenCalledWith(groupId, "user-1", avatarUrl);
+    expect(result.data).toEqual({ id: groupId, avatarUrl });
+  });
+
+  it("redirects the current group photo to a fresh storage URL", async () => {
+    const groupId = "0193a2b1-0000-7000-8000-000000000010";
+    const fileName = "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b.png";
+    const downloadUrl = "https://s3.example/signed-group-avatar";
+    const getGroupAvatarDownloadUrl = vi.fn().mockResolvedValue(downloadUrl);
+    const redirect = vi.fn();
+    const c = new FileController(
+      { getGroupAvatarDownloadUrl } as unknown as FileService,
+      new MemoryRateLimiter(),
+      { findById: vi.fn() } as unknown as UserService,
+      { updateGroupAvatar: vi.fn() } as unknown as ConversationService,
+    );
+
+    await c.getGroupAvatar(groupId, fileName, { redirect } as unknown as Response);
+
+    expect(getGroupAvatarDownloadUrl).toHaveBeenCalledWith(groupId, fileName);
+    expect(redirect).toHaveBeenCalledWith(302, downloadUrl);
+  });
+
   it("handles uploadFile fallback endpoint", async () => {
     const uploadMock = vi.fn().mockResolvedValue({
       objectKey: "chat/0193a2b1-0000-7000-8000-000000000010/user-1/file.png",
@@ -80,6 +127,7 @@ describe("FileController", () => {
       { presign: presignMock, upload: uploadMock } as unknown as FileService,
       new MemoryRateLimiter(),
       { findById: vi.fn() } as unknown as UserService,
+      { updateGroupAvatar: vi.fn() } as unknown as ConversationService,
     );
 
     const result = await c.uploadFile(
@@ -130,6 +178,7 @@ describe("FileController", () => {
             } as unknown as FileService,
           },
           { provide: UserService, useValue: { findById: vi.fn() } },
+          { provide: ConversationService, useValue: { updateGroupAvatar: vi.fn() } },
           { provide: RATE_LIMITER, useValue: new MemoryRateLimiter() },
         ],
       }).compile();

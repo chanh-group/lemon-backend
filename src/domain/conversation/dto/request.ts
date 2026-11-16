@@ -40,9 +40,6 @@ export const updateMemberRoleSchema = z.object({
 });
 export type UpdateMemberRoleDto = z.infer<typeof updateMemberRoleSchema>;
 
-export const transferOwnershipSchema = z.object({ userId: z.string().uuid() });
-export type TransferOwnershipDto = z.infer<typeof transferOwnershipSchema>;
-
 export const markReadSchema = z.object({
   lastReadMessageId: z.string().uuid(vmsg("VALIDATION_UUID_LAST_READ")),
 });

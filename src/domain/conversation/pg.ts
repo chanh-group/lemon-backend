@@ -130,7 +130,7 @@ export class ConversationPgRepository implements ConversationRepository {
           })
           .returning();
         await tx.insert(conversationParticipants).values([
-          { conversationId: group.id, userId: input.creatorId, role: "OWNER" },
+          { conversationId: group.id, userId: input.creatorId, role: "ADMIN" },
           ...input.memberIds.map((userId) => ({
             conversationId: group.id,
             userId,
@@ -144,7 +144,7 @@ export class ConversationPgRepository implements ConversationRepository {
           title: group.title,
           avatarUrl: group.avatarUrl,
           memberCount: input.memberIds.length + 1,
-          myRole: "OWNER",
+          myRole: "ADMIN",
           lastMessagePreview: null,
           lastMessageAt: null,
           createdAt: group.createdAt,
@@ -206,7 +206,7 @@ export class ConversationPgRepository implements ConversationRepository {
         )
         .for("update")
         .limit(1);
-      if (!actor || !["OWNER", "ADMIN"].includes(actor.role)) throw new BusinessError("FORBIDDEN");
+      if (actor?.role !== "ADMIN") throw new BusinessError("FORBIDDEN");
       const active = await tx
         .select({ userId: conversationParticipants.userId })
         .from(conversationParticipants)
@@ -295,7 +295,7 @@ export class ConversationPgRepository implements ConversationRepository {
         )
         .for("update")
         .limit(1);
-      if (actor?.role !== "OWNER" || !target || target.role === "OWNER" || actorId === userId)
+      if (actor?.role !== "ADMIN" || !target || actorId === userId)
         throw new BusinessError("FORBIDDEN");
       await tx
         .update(conversationParticipants)
@@ -315,6 +315,37 @@ export class ConversationPgRepository implements ConversationRepository {
   }
 
   async updateGroup(conversationId: string, actorId: string, title: string): Promise<void> {
+    await this.updateGroupMetadata(conversationId, actorId, { title });
+  }
+
+  async updateGroupAvatar(
+    conversationId: string,
+    actorId: string,
+    avatarUrl: string,
+  ): Promise<void> {
+    await this.updateGroupMetadata(conversationId, actorId, { avatarUrl });
+  }
+
+  async getGroupAvatarUrl(conversationId: string): Promise<string | null> {
+    const [group] = await this.db
+      .select({ avatarUrl: conversations.avatarUrl })
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.id, conversationId),
+          eq(conversations.kind, "GROUP"),
+          isNull(conversations.deletedAt),
+        ),
+      )
+      .limit(1);
+    return group?.avatarUrl ?? null;
+  }
+
+  private async updateGroupMetadata(
+    conversationId: string,
+    actorId: string,
+    changes: { title?: string; avatarUrl?: string },
+  ): Promise<void> {
     await this.db.transaction(async (tx) => {
       await tx
         .select({ id: conversations.id })
@@ -332,10 +363,10 @@ export class ConversationPgRepository implements ConversationRepository {
           ),
         )
         .limit(1);
-      if (!actor || !["OWNER", "ADMIN"].includes(actor.role)) throw new BusinessError("FORBIDDEN");
+      if (!actor) throw new BusinessError("NOT_PARTICIPANT");
       await tx
         .update(conversations)
-        .set({ title, updatedAt: sql`now()` })
+        .set({ ...changes, updatedAt: sql`now()` })
         .where(
           and(
             eq(conversations.id, conversationId),
@@ -380,7 +411,7 @@ export class ConversationPgRepository implements ConversationRepository {
           ),
         )
         .limit(1);
-      if (actor?.role !== "OWNER" || !target || target.role === "OWNER" || actorId === userId)
+      if (actor?.role !== "ADMIN" || !target || actorId === userId)
         throw new BusinessError("FORBIDDEN");
       await tx
         .update(conversationParticipants)
@@ -394,65 +425,6 @@ export class ConversationPgRepository implements ConversationRepository {
         );
     });
   }
-
-  async transferOwnership(
-    conversationId: string,
-    actorId: string,
-    newOwnerId: string,
-  ): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      await tx
-        .select({ id: conversations.id })
-        .from(conversations)
-        .where(eq(conversations.id, conversationId))
-        .for("update");
-      const [actor] = await tx
-        .select({ role: conversationParticipants.role })
-        .from(conversationParticipants)
-        .where(
-          and(
-            eq(conversationParticipants.conversationId, conversationId),
-            eq(conversationParticipants.userId, actorId),
-            isNull(conversationParticipants.leftAt),
-          ),
-        )
-        .limit(1);
-      const [target] = await tx
-        .select({ role: conversationParticipants.role })
-        .from(conversationParticipants)
-        .where(
-          and(
-            eq(conversationParticipants.conversationId, conversationId),
-            eq(conversationParticipants.userId, newOwnerId),
-            isNull(conversationParticipants.leftAt),
-          ),
-        )
-        .limit(1);
-      if (actor?.role !== "OWNER" || !target || actorId === newOwnerId)
-        throw new BusinessError("FORBIDDEN");
-      await tx
-        .update(conversationParticipants)
-        .set({ role: "ADMIN" })
-        .where(
-          and(
-            eq(conversationParticipants.conversationId, conversationId),
-            eq(conversationParticipants.role, "OWNER"),
-            isNull(conversationParticipants.leftAt),
-          ),
-        );
-      await tx
-        .update(conversationParticipants)
-        .set({ role: "OWNER" })
-        .where(
-          and(
-            eq(conversationParticipants.conversationId, conversationId),
-            eq(conversationParticipants.userId, newOwnerId),
-            isNull(conversationParticipants.leftAt),
-          ),
-        );
-    });
-  }
-
   async leaveGroup(conversationId: string, userId: string): Promise<{ closed: boolean }> {
     return this.db.transaction(async (tx) => {
       const [group] = await tx
@@ -473,8 +445,12 @@ export class ConversationPgRepository implements ConversationRepository {
         );
       const leaving = active.find((member) => member.userId === userId);
       if (!leaving) throw new BusinessError("NOT_PARTICIPANT");
-      if (leaving.role === "OWNER" && active.length > 1)
-        throw new BusinessError("OWNER_TRANSFER_REQUIRED");
+      if (
+        leaving.role === "ADMIN" &&
+        active.length > 1 &&
+        !active.some((member) => member.userId !== userId && member.role === "ADMIN")
+      )
+        throw new BusinessError("LAST_ADMIN_REQUIRED");
       await tx
         .update(conversationParticipants)
         .set({ leftAt: sql`clock_timestamp()` })
@@ -493,6 +469,44 @@ export class ConversationPgRepository implements ConversationRepository {
         })
         .where(eq(conversations.id, conversationId));
       return { closed };
+    });
+  }
+
+  async disbandGroup(conversationId: string, actorId: string): Promise<string[]> {
+    return this.db.transaction(async (tx) => {
+      const [group] = await tx
+        .select({ kind: conversations.kind, deletedAt: conversations.deletedAt })
+        .from(conversations)
+        .where(eq(conversations.id, conversationId))
+        .for("update")
+        .limit(1);
+      if (!group || group.kind !== "GROUP" || group.deletedAt)
+        throw new BusinessError("CONVERSATION_NOT_FOUND");
+      const active = await tx
+        .select({ userId: conversationParticipants.userId, role: conversationParticipants.role })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        );
+      const actor = active.find((member) => member.userId === actorId);
+      if (actor?.role !== "ADMIN") throw new BusinessError("FORBIDDEN");
+      await tx
+        .update(conversationParticipants)
+        .set({ leftAt: sql`clock_timestamp()` })
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        );
+      await tx
+        .update(conversations)
+        .set({ deletedAt: sql`now()`, updatedAt: sql`now()` })
+        .where(eq(conversations.id, conversationId));
+      return active.map((member) => member.userId);
     });
   }
 

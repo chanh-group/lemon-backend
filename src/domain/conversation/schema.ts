@@ -17,7 +17,7 @@ import { messages } from "../message/schema.js";
 import { users } from "../user/schema.js";
 
 export const conversationKindEnum = pgEnum("conversation_kind", ["DIRECT", "GROUP"]);
-export const participantRoleEnum = pgEnum("participant_role", ["MEMBER", "ADMIN", "OWNER"]);
+export const participantRoleEnum = pgEnum("participant_role", ["MEMBER", "ADMIN"]);
 
 export const conversations = pgTable(
   "conversations",

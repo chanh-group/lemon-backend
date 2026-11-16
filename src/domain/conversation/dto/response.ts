@@ -19,7 +19,7 @@ export interface ConversationResponse {
   title?: string | null;
   avatarUrl?: string | null;
   memberCount?: number;
-  myRole?: "OWNER" | "ADMIN" | "MEMBER";
+  myRole?: "ADMIN" | "MEMBER";
 }
 
 export interface ConversationMemberResponse {
@@ -27,6 +27,6 @@ export interface ConversationMemberResponse {
   username: string;
   fullName: string;
   avatarUrl: string | null;
-  role: "OWNER" | "ADMIN" | "MEMBER";
+  role: "ADMIN" | "MEMBER";
   joinedAt: Date;
 }

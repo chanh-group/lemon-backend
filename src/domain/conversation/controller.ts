@@ -31,8 +31,6 @@ import {
   type UpdateGroupDto,
   updateMemberRoleSchema,
   type UpdateMemberRoleDto,
-  transferOwnershipSchema,
-  type TransferOwnershipDto,
   markReadSchema,
   type MarkReadDto,
 } from "./dto/request.js";
@@ -134,19 +132,15 @@ export class ConversationController {
     return ok({ conversationId: id, userId, role: dto.role });
   }
 
-  @Post(":id/transfer-ownership")
-  async transferOwnership(
-    @Req() req: { user?: unknown },
-    @Param("id", ParseUUIDPipe) id: string,
-    @Body({ schema: transferOwnershipSchema }) dto: TransferOwnershipDto,
-  ) {
-    await this.service.transferGroupOwnership(id, getAuthUser(req).id, dto.userId);
-    return ok({ conversationId: id, ownerId: dto.userId });
-  }
-
   @Post(":id/leave")
   async leaveGroup(@Req() req: { user?: unknown }, @Param("id", ParseUUIDPipe) id: string) {
     return ok(await this.service.leaveGroup(id, getAuthUser(req).id));
+  }
+
+  @Delete(":id")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async disbandGroup(@Req() req: { user?: unknown }, @Param("id", ParseUUIDPipe) id: string) {
+    await this.service.disbandGroup(id, getAuthUser(req).id);
   }
 
   @Post(":id/read")

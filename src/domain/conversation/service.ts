@@ -180,17 +180,20 @@ export class ConversationService {
     conversationId: string,
     userId: string,
   ): Promise<ConversationMemberResponse[]> {
-    const group = await this.convRepo.findById(conversationId, userId);
-    if (!group) throw new BusinessError("NOT_PARTICIPANT");
-    if (group.kind !== "GROUP") throw new BusinessError("BAD_REQUEST");
+    await this.requireGroupMember(conversationId, userId);
     return this.convRepo.listMembers(conversationId);
   }
 
-  private async requireGroupManager(conversationId: string, userId: string, ownerOnly = false) {
+  private async requireGroupMember(conversationId: string, userId: string) {
     const group = await this.convRepo.findById(conversationId, userId);
     if (!group) throw new BusinessError("NOT_PARTICIPANT");
     if (group.kind !== "GROUP") throw new BusinessError("BAD_REQUEST");
-    if (ownerOnly ? group.myRole !== "OWNER" : !["OWNER", "ADMIN"].includes(group.myRole ?? "")) {
+    return group;
+  }
+
+  private async requireGroupManager(conversationId: string, userId: string) {
+    const group = await this.requireGroupMember(conversationId, userId);
+    if (group.myRole !== "ADMIN") {
       throw new BusinessError("FORBIDDEN");
     }
     return group;
@@ -214,10 +217,10 @@ export class ConversationService {
     actorId: string,
     targetId: string,
   ): Promise<void> {
-    await this.requireGroupManager(conversationId, actorId, true);
+    await this.requireGroupManager(conversationId, actorId);
     if (actorId === targetId) throw new BusinessError("BAD_REQUEST");
     const target = await this.convRepo.getGroupMembership(conversationId, targetId);
-    if (!target || target.role === "OWNER") throw new BusinessError("FORBIDDEN");
+    if (!target) throw new BusinessError("FORBIDDEN");
     await this.convRepo.removeGroupMember(conversationId, actorId, targetId);
     this.realtimeService.leaveConversation([targetId], conversationId);
     this.realtimeService.emitGroupEvent([targetId], "member:removed", {
@@ -233,10 +236,22 @@ export class ConversationService {
   }
 
   async updateGroupTitle(conversationId: string, actorId: string, title: string): Promise<void> {
-    await this.requireGroupManager(conversationId, actorId);
+    await this.requireGroupMember(conversationId, actorId);
     await this.convRepo.updateGroup(conversationId, actorId, title);
     const memberIds = await this.convRepo.getParticipantUserIds(conversationId);
     this.realtimeService.emitGroupEvent(memberIds, "conversation:updated", { conversationId });
+  }
+
+  async updateGroupAvatar(
+    conversationId: string,
+    actorId: string,
+    avatarUrl: string,
+  ): Promise<ConversationResponse> {
+    await this.requireGroupMember(conversationId, actorId);
+    await this.convRepo.updateGroupAvatar(conversationId, actorId, avatarUrl);
+    const memberIds = await this.convRepo.getParticipantUserIds(conversationId);
+    this.realtimeService.emitGroupEvent(memberIds, "conversation:updated", { conversationId });
+    return this.getById(conversationId, actorId);
   }
 
   async updateGroupRole(
@@ -245,7 +260,7 @@ export class ConversationService {
     targetId: string,
     role: "ADMIN" | "MEMBER",
   ) {
-    await this.requireGroupManager(conversationId, actorId, true);
+    await this.requireGroupManager(conversationId, actorId);
     if (actorId === targetId || !(await this.convRepo.getGroupMembership(conversationId, targetId)))
       throw new BusinessError("BAD_REQUEST");
     await this.convRepo.updateMemberRole(conversationId, actorId, targetId, role);
@@ -253,18 +268,6 @@ export class ConversationService {
       await this.convRepo.getParticipantUserIds(conversationId),
       "member:role-changed",
       { conversationId, userId: targetId, role },
-    );
-  }
-
-  async transferGroupOwnership(conversationId: string, actorId: string, targetId: string) {
-    await this.requireGroupManager(conversationId, actorId, true);
-    if (actorId === targetId || !(await this.convRepo.getGroupMembership(conversationId, targetId)))
-      throw new BusinessError("BAD_REQUEST");
-    await this.convRepo.transferOwnership(conversationId, actorId, targetId);
-    this.realtimeService.emitGroupEvent(
-      await this.convRepo.getParticipantUserIds(conversationId),
-      "member:role-changed",
-      { conversationId },
     );
   }
 
@@ -282,6 +285,12 @@ export class ConversationService {
       { conversationId },
     );
     return result;
+  }
+
+  async disbandGroup(conversationId: string, actorId: string): Promise<void> {
+    const memberIds = await this.convRepo.disbandGroup(conversationId, actorId);
+    this.realtimeService.leaveConversation(memberIds, conversationId);
+    this.realtimeService.emitGroupEvent(memberIds, "conversation:disbanded", { conversationId });
   }
 
   private joinParticipantsBestEffort(conversationId: string, participantIds: string[]): void {

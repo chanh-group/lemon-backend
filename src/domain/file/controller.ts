@@ -39,6 +39,7 @@ import { UploadRateLimitInterceptor } from "./upload-rate-limit.interceptor.js";
 import { FileService } from "./service.js";
 import { Public } from "../../utils/decorators.js";
 import { UserService } from "../user/service.js";
+import { ConversationService } from "../conversation/service.js";
 
 interface UploadedMulterFile {
   buffer: Buffer;
@@ -54,6 +55,7 @@ export class FileController {
     @Inject(RATE_LIMITER)
     private readonly rateLimiter: RateLimiter,
     private readonly userService: UserService,
+    private readonly conversationService: ConversationService,
   ) {}
 
   @Get("avatars/:userId/:fileName")
@@ -67,6 +69,37 @@ export class FileController {
     const user = await this.userService.findById(userId);
     const url = await this.fileService.getAvatarDownloadUrl(userId, fileName, user?.avatarUrl);
     return response.redirect(HttpStatus.FOUND, url);
+  }
+
+  @Get("group-avatars/:groupId/:fileName")
+  @Public()
+  @Header("Cache-Control", "no-store")
+  async getGroupAvatar(
+    @Param("groupId", ParseUUIDPipe) groupId: string,
+    @Param("fileName") fileName: string,
+    @Res() response: Response,
+  ) {
+    const url = await this.fileService.getGroupAvatarDownloadUrl(groupId, fileName);
+    return response.redirect(HttpStatus.FOUND, url);
+  }
+
+  @Post("group-avatars/:groupId/upload")
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(
+    UploadRateLimitInterceptor,
+    FileInterceptor("file", {
+      limits: { fileSize: USER_AVATAR_MAX_BYTES, files: 1, fields: 2, fieldSize: 256, parts: 3 },
+    }),
+  )
+  async uploadGroupAvatar(
+    @Req() req: { user?: unknown },
+    @Param("groupId", ParseUUIDPipe) groupId: string,
+    @UploadedFile() file: UploadedMulterFile | undefined,
+  ) {
+    if (!file) throw new BusinessError("BAD_REQUEST");
+    const actorId = getAuthUser(req).id;
+    const avatarUrl = await this.fileService.uploadGroupAvatar(actorId, groupId, file);
+    return ok(await this.conversationService.updateGroupAvatar(groupId, actorId, avatarUrl));
   }
 
   @Post("presign")

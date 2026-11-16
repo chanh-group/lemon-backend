@@ -26,6 +26,10 @@ describe("ConversationService", () => {
   let countUnreadMock: Mock;
   let countUnreadBatchMock: Mock;
   let createGroupMock: Mock;
+  let updateGroupAvatarMock: Mock;
+  let updateGroupTitleMock: Mock;
+  let disbandGroupMock: Mock;
+  let leaveConversationMock: Mock;
   let findAcceptedFriendIdsMock: Mock;
   let getParticipantUserIdsMock: Mock;
   let emitGroupEventMock: Mock;
@@ -81,6 +85,10 @@ describe("ConversationService", () => {
     countUnreadMock = vi.fn();
     countUnreadBatchMock = vi.fn().mockResolvedValue(new Map());
     createGroupMock = vi.fn();
+    updateGroupAvatarMock = vi.fn().mockResolvedValue(undefined);
+    updateGroupTitleMock = vi.fn().mockResolvedValue(undefined);
+    disbandGroupMock = vi.fn().mockResolvedValue([userA, userB]);
+    leaveConversationMock = vi.fn();
     findAcceptedFriendIdsMock = vi.fn().mockResolvedValue(new Set([userB]));
     getParticipantUserIdsMock = vi.fn().mockResolvedValue([userA, userB]);
     emitGroupEventMock = vi.fn();
@@ -94,6 +102,9 @@ describe("ConversationService", () => {
     const mockConvRepo = {
       findDirectByParticipants: findDirectByParticipantsMock,
       createGroup: createGroupMock,
+      updateGroupAvatar: updateGroupAvatarMock,
+      updateGroup: updateGroupTitleMock,
+      disbandGroup: disbandGroupMock,
       getParticipantUserIds: getParticipantUserIdsMock,
       createDirectConversation: createDirectConversationMock,
       findUserConversations: findUserConversationsMock,
@@ -114,6 +125,7 @@ describe("ConversationService", () => {
     const mockRealtimeService = {
       emitReadUpdated: emitReadUpdatedMock,
       joinConversation: joinConversationMock,
+      leaveConversation: leaveConversationMock,
       emitGroupEvent: emitGroupEventMock,
     } as unknown as RealtimeService;
     const mockFriendService = {
@@ -151,6 +163,62 @@ describe("ConversationService", () => {
     );
   });
 
+  describe("updateGroupAvatar", () => {
+    const avatarUrl = "https://api.example.com/api/files/group-avatars/photo.png";
+
+    it("allows a group admin to attach an avatar and notifies members", async () => {
+      findByIdMock.mockResolvedValue({ id: convId, kind: "GROUP", myRole: "ADMIN" });
+      const response = { id: convId, avatarUrl } as Awaited<ReturnType<typeof service.getById>>;
+      vi.spyOn(service, "getById").mockResolvedValue(response);
+
+      expect(await service.updateGroupAvatar(convId, userA, avatarUrl)).toBe(response);
+      expect(updateGroupAvatarMock).toHaveBeenCalledWith(convId, userA, avatarUrl);
+      expect(emitGroupEventMock).toHaveBeenCalledWith([userA, userB], "conversation:updated", {
+        conversationId: convId,
+      });
+    });
+
+    it("allows a regular member to update the group photo", async () => {
+      findByIdMock.mockResolvedValue({ id: convId, kind: "GROUP", myRole: "MEMBER" });
+      vi.spyOn(service, "getById").mockResolvedValue({
+        id: convId,
+        avatarUrl,
+      } as Awaited<ReturnType<typeof service.getById>>);
+
+      await service.updateGroupAvatar(convId, userA, avatarUrl);
+      expect(updateGroupAvatarMock).toHaveBeenCalledWith(convId, userA, avatarUrl);
+    });
+
+    it("rejects a user who is no longer in the group", async () => {
+      findByIdMock.mockResolvedValue(null);
+      await expect(service.updateGroupAvatar(convId, userA, avatarUrl)).rejects.toMatchObject({
+        code: "NOT_PARTICIPANT",
+      });
+      expect(updateGroupAvatarMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it("lets a regular member rename the group", async () => {
+    findByIdMock.mockResolvedValue({ id: convId, kind: "GROUP", myRole: "MEMBER" });
+
+    await service.updateGroupTitle(convId, userA, "New title");
+
+    expect(updateGroupTitleMock).toHaveBeenCalledWith(convId, userA, "New title");
+    expect(emitGroupEventMock).toHaveBeenCalledWith([userA, userB], "conversation:updated", {
+      conversationId: convId,
+    });
+  });
+
+  it("notifies everyone and removes socket access when an admin disbands a group", async () => {
+    await service.disbandGroup(convId, userA);
+
+    expect(disbandGroupMock).toHaveBeenCalledWith(convId, userA);
+    expect(leaveConversationMock).toHaveBeenCalledWith([userA, userB], convId);
+    expect(emitGroupEventMock).toHaveBeenCalledWith([userA, userB], "conversation:disbanded", {
+      conversationId: convId,
+    });
+  });
+
   describe("createGroup", () => {
     it("requires at least two invited friends", async () => {
       await expect(
@@ -174,7 +242,7 @@ describe("ConversationService", () => {
         directKey: null,
         title: "Project",
         memberCount: 3,
-        myRole: "OWNER",
+        myRole: "ADMIN",
         partner: undefined,
       };
       createGroupMock.mockResolvedValue(group);

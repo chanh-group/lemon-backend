@@ -5,7 +5,7 @@ export interface ConversationWithPartner {
   title?: string | null;
   avatarUrl?: string | null;
   memberCount?: number;
-  myRole?: "OWNER" | "ADMIN" | "MEMBER";
+  myRole?: "ADMIN" | "MEMBER";
   historyBoundaryMessageId?: string | null;
   lastReadAt?: Date | null;
   partner?: {
@@ -45,14 +45,16 @@ export interface ConversationRepository {
   ): Promise<ConversationWithPartner>;
   removeGroupMember(conversationId: string, actorId: string, userId: string): Promise<void>;
   updateGroup(conversationId: string, actorId: string, title: string): Promise<void>;
+  updateGroupAvatar(conversationId: string, actorId: string, avatarUrl: string): Promise<void>;
+  getGroupAvatarUrl(conversationId: string): Promise<string | null>;
   updateMemberRole(
     conversationId: string,
     actorId: string,
     userId: string,
     role: "ADMIN" | "MEMBER",
   ): Promise<void>;
-  transferOwnership(conversationId: string, actorId: string, newOwnerId: string): Promise<void>;
   leaveGroup(conversationId: string, userId: string): Promise<{ closed: boolean }>;
+  disbandGroup(conversationId: string, actorId: string): Promise<string[]>;
   listMembers(
     conversationId: string,
   ): Promise<import("./dto/response.js").ConversationMemberResponse[]>;
@@ -60,7 +62,7 @@ export interface ConversationRepository {
     conversationId: string,
     userId: string,
   ): Promise<{
-    role: "OWNER" | "ADMIN" | "MEMBER";
+    role: "ADMIN" | "MEMBER";
     historyBoundaryMessageId: string | null;
   } | null>;
   findDirectByParticipants(

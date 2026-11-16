@@ -24,6 +24,8 @@ import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.
 import {
   avatarObjectKeyFromUrl,
   avatarUrlForObjectKey,
+  groupAvatarObjectKeyFromUrl,
+  groupAvatarUrlForObjectKey,
   isAvatarFileName,
 } from "../../utils/storage/avatar.js";
 import type { PresignFileDto } from "./dto/request.js";
@@ -167,6 +169,53 @@ export class FileService {
       mimeType: object.contentType,
     });
     return downloadUrl;
+  }
+
+  async getGroupAvatarDownloadUrl(groupId: string, fileName: string): Promise<string> {
+    if (!isAvatarFileName(fileName) || !this.conversations)
+      throw new BusinessError("CONVERSATION_NOT_FOUND");
+    const currentUrl = await this.conversations.getGroupAvatarUrl(groupId);
+    const objectKey = groupAvatarObjectKeyFromUrl(currentUrl ?? "", groupId);
+    if (objectKey !== `group-avatars/${groupId}/${fileName}`)
+      throw new BusinessError("CONVERSATION_NOT_FOUND");
+    const object = await this.storage.headObject(objectKey);
+    if (!object) throw new BusinessError("CONVERSATION_NOT_FOUND");
+    validateUpload("USER_AVATAR", object.contentLength, object.contentType);
+    if (object.contentLength < 1) throw new BusinessError("FILE_TYPE_NOT_ALLOWED");
+    const { downloadUrl } = await this.storage.presignGet({
+      objectKey,
+      fileName,
+      disposition: "inline",
+      mimeType: object.contentType,
+    });
+    return downloadUrl;
+  }
+
+  async uploadGroupAvatar(
+    userId: string,
+    groupId: string,
+    file: { buffer: Buffer; size: number; mimetype: string },
+  ): Promise<string> {
+    if (!this.conversations) throw new BusinessError("FORBIDDEN");
+    const group = await this.conversations.findById(groupId, userId);
+    if (group?.kind !== "GROUP") throw new BusinessError("NOT_PARTICIPANT");
+    if (file.size < 1) throw new BusinessError("FILE_TYPE_NOT_ALLOWED");
+    validateUpload("USER_AVATAR", file.size, file.mimetype);
+    const ext = MIME_EXTENSION_MAP[file.mimetype];
+    if (!ext) throw new BusinessError("FILE_TYPE_NOT_ALLOWED");
+    const objectKey = `group-avatars/${groupId}/${uuidv7()}.${ext}`;
+    try {
+      await this.storage.putObject({
+        objectKey,
+        body: file.buffer,
+        mimeType: file.mimetype,
+      });
+      this.logger.log("Uploaded group avatar", { userId, groupId, objectKey });
+      return groupAvatarUrlForObjectKey(groupId, objectKey);
+    } catch (err) {
+      if (err instanceof StorageError) throw new BusinessError("PRESIGN_FAILED");
+      throw err;
+    }
   }
 
   async upload(

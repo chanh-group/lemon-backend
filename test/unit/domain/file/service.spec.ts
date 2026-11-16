@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import { FileService } from "../../../../src/domain/file/service.js";
 import type { StorageService } from "../../../../src/utils/storage/store.js";
 import { StorageError } from "../../../../src/utils/storage/error.js";
-import { avatarUrlForObjectKey } from "../../../../src/utils/storage/avatar.js";
+import {
+  avatarUrlForObjectKey,
+  groupAvatarUrlForObjectKey,
+} from "../../../../src/utils/storage/avatar.js";
 import type { ConversationRepository } from "../../../../src/domain/conversation/repository.js";
 
 describe("FileService", () => {
@@ -20,6 +23,8 @@ describe("FileService", () => {
   let headObjectMock: Mock;
   let presignGetMock: Mock;
   let isParticipantMock: Mock;
+  let findByIdMock: Mock;
+  let getGroupAvatarUrlMock: Mock;
 
   const storage = () =>
     ({
@@ -35,12 +40,69 @@ describe("FileService", () => {
     headObjectMock = vi.fn().mockResolvedValue({ contentLength: 1024, contentType: "image/png" });
     presignGetMock = vi.fn().mockResolvedValue({ downloadUrl: "https://s3.example/avatar" });
     isParticipantMock = vi.fn().mockResolvedValue(true);
+    findByIdMock = vi.fn().mockResolvedValue({ kind: "GROUP", myRole: "ADMIN" });
+    getGroupAvatarUrlMock = vi.fn();
     service = new FileService(storage(), {
       isParticipant: isParticipantMock,
+      findById: findByIdMock,
+      getGroupAvatarUrl: getGroupAvatarUrlMock,
     } as unknown as ConversationRepository);
   });
 
   afterEach(() => vi.unstubAllEnvs());
+
+  it("uploads an avatar for an active group member and gives it a group-scoped URL", async () => {
+    vi.stubEnv("API_PUBLIC_URL", "https://api.example.com");
+    findByIdMock.mockResolvedValueOnce({ kind: "GROUP", myRole: "MEMBER" });
+    const groupId = "0193a2b1-0000-7000-8000-000000000010";
+    const file = { buffer: Buffer.from("image"), size: 5, mimetype: "image/png" };
+
+    const url = await service.uploadGroupAvatar("user-1", groupId, file);
+
+    const objectKey = putObjectMock.mock.calls[0][0].objectKey;
+    expect(objectKey).toMatch(new RegExp(`^group-avatars/${groupId}/[0-9a-f-]+\\.png$`));
+    expect(url).toBe(groupAvatarUrlForObjectKey(groupId, objectKey));
+    expect(findByIdMock).toHaveBeenCalledWith(groupId, "user-1");
+  });
+
+  it("does not store a group avatar for a nonmember", async () => {
+    findByIdMock.mockResolvedValueOnce(null);
+    await expect(
+      service.uploadGroupAvatar("user-1", "group-1", {
+        buffer: Buffer.from("image"),
+        size: 5,
+        mimetype: "image/png",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_PARTICIPANT" });
+    expect(putObjectMock).not.toHaveBeenCalled();
+  });
+
+  it("serves only the currently attached group avatar", async () => {
+    vi.stubEnv("API_PUBLIC_URL", "https://api.example.com");
+    const groupId = "0193a2b1-0000-7000-8000-000000000010";
+    const fileName = "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b.png";
+    const objectKey = `group-avatars/${groupId}/${fileName}`;
+    getGroupAvatarUrlMock.mockResolvedValueOnce(null);
+    await expect(service.getGroupAvatarDownloadUrl(groupId, fileName)).rejects.toMatchObject({
+      code: "CONVERSATION_NOT_FOUND",
+    });
+    expect(headObjectMock).not.toHaveBeenCalled();
+
+    const newerFileName = "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6c.png";
+    getGroupAvatarUrlMock.mockResolvedValueOnce(
+      groupAvatarUrlForObjectKey(groupId, `group-avatars/${groupId}/${newerFileName}`),
+    );
+    await expect(service.getGroupAvatarDownloadUrl(groupId, fileName)).rejects.toMatchObject({
+      code: "CONVERSATION_NOT_FOUND",
+    });
+    expect(headObjectMock).not.toHaveBeenCalled();
+
+    getGroupAvatarUrlMock.mockResolvedValueOnce(groupAvatarUrlForObjectKey(groupId, objectKey));
+    expect(await service.getGroupAvatarDownloadUrl(groupId, fileName)).toBe(
+      "https://s3.example/avatar",
+    );
+    expect(presignGetMock).toHaveBeenCalledWith(expect.objectContaining({ objectKey }));
+  });
 
   it("presigns an image upload with a server-generated user-scoped key", async () => {
     const result = await service.presign("user-1", {
