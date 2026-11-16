@@ -132,24 +132,15 @@ describe("FileService", () => {
     }
   });
 
-  it("rejects oversized uploads with FILE_TOO_LARGE carrying maxMb", async () => {
-    await expect(
-      service.presign("user-1", {
-        kind: "STORY_IMAGE",
-        sizeBytes: 25 * 1024 * 1024 + 1,
-        mimeType: "image/jpeg",
-      }),
-    ).rejects.toMatchObject({ code: "FILE_TOO_LARGE", params: { maxMb: "25" } });
-  });
-
-  it("rejects video above the video cap", async () => {
-    await expect(
-      service.presign("user-1", {
-        kind: "STORY_VIDEO",
-        sizeBytes: 25 * 1024 * 1024 + 1,
-        mimeType: "video/mp4",
-      }),
-    ).rejects.toMatchObject({ code: "FILE_TOO_LARGE", params: { maxMb: "25" } });
+  it("rejects oversized story uploads with FILE_TOO_LARGE carrying maxMb", async () => {
+    for (const [kind, mimeType] of [
+      ["STORY_IMAGE", "image/jpeg"],
+      ["STORY_VIDEO", "video/mp4"],
+    ] as const) {
+      await expect(
+        service.presign("user-1", { kind, mimeType, sizeBytes: 25 * 1024 * 1024 + 1 }),
+      ).rejects.toMatchObject({ code: "FILE_TOO_LARGE", params: { maxMb: "25" } });
+    }
   });
 
   it("rejects MIME types outside the kind allowlist", async () => {

@@ -369,6 +369,21 @@ describe("StoryService", () => {
         "stories:feed:friend-1",
       ]);
     });
+
+    it("rejects media above the 25 MiB cap before creating the story", async () => {
+      headObjectMock.mockResolvedValueOnce({
+        contentLength: 25 * 1024 * 1024 + 1,
+        contentType: "video/mp4",
+      });
+
+      await expect(
+        service.createStory("user-owner-1", {
+          kind: "VIDEO",
+          objectKey: "stories/user-owner-1/clip.mp4",
+        }),
+      ).rejects.toMatchObject({ code: "FILE_TOO_LARGE", params: { maxMb: "25" } });
+      expect(createStoryMock).not.toHaveBeenCalled();
+    });
   });
 
   describe("reactStory and likeStory", () => {

@@ -1,5 +1,6 @@
 export const STORY_MAX_CAPTION_LENGTH = 500;
 export const STORY_MAX_BACKGROUND_LENGTH = 200;
+export const STORY_MAX_DURATION_MS = 60_000;
 
 /**
  * Emoji allowlist for story reactions — the quick-reaction bar of the client
