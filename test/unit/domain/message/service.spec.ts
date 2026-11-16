@@ -17,6 +17,7 @@ describe("MessageService", () => {
   let findReplyTargetsMock: Mock;
   let updateBodyMock: Mock;
   let softDeleteMock: Mock;
+  let hideForUserMock: Mock;
   let resolveWriteMissMock: Mock;
   let reactMessageMock: Mock;
   let emitMessageReactionMock: Mock;
@@ -27,6 +28,7 @@ describe("MessageService", () => {
   let emitNewMessageMock: Mock;
   let emitMessageUpdatedMock: Mock;
   let emitMessageRevokedMock: Mock;
+  let emitMessageHiddenMock: Mock;
 
   const userA = "0193a2b1-0000-7000-8000-000000000001";
   const userB = "0193a2b1-0000-7000-8000-000000000002";
@@ -57,6 +59,7 @@ describe("MessageService", () => {
     findReplyTargetsMock = vi.fn();
     updateBodyMock = vi.fn();
     softDeleteMock = vi.fn();
+    hideForUserMock = vi.fn().mockResolvedValue(convId);
     resolveWriteMissMock = vi.fn();
     reactMessageMock = vi.fn();
 
@@ -66,6 +69,7 @@ describe("MessageService", () => {
     emitNewMessageMock = vi.fn();
     emitMessageUpdatedMock = vi.fn();
     emitMessageRevokedMock = vi.fn();
+    emitMessageHiddenMock = vi.fn();
     emitMessageReactionMock = vi.fn();
 
     const mockMessageRepo = {
@@ -75,6 +79,7 @@ describe("MessageService", () => {
       findReplyTargets: findReplyTargetsMock,
       updateBody: updateBodyMock,
       softDelete: softDeleteMock,
+      hideForUser: hideForUserMock,
       resolveWriteMiss: resolveWriteMissMock,
       reactMessage: reactMessageMock,
     } as unknown as MessageRepository;
@@ -91,6 +96,7 @@ describe("MessageService", () => {
       emitNewMessage: emitNewMessageMock,
       emitMessageUpdated: emitMessageUpdatedMock,
       emitMessageRevoked: emitMessageRevokedMock,
+      emitMessageHidden: emitMessageHiddenMock,
       emitMessageReaction: emitMessageReactionMock,
     } as unknown as RealtimeService;
 
@@ -263,7 +269,7 @@ describe("MessageService", () => {
       findTimelineMock.mockResolvedValue({ items: [reply], hasMore: false });
       findReplyTargetsMock.mockResolvedValue([target]);
       const result = await service.getTimeline(userA, convId);
-      expect(findReplyTargetsMock).toHaveBeenCalledWith(convId, [msgId]);
+      expect(findReplyTargetsMock).toHaveBeenCalledWith(convId, [msgId], userA);
       expect(result.items[0].replyTarget).toMatchObject({
         id: msgId,
         body: null,
@@ -286,7 +292,7 @@ describe("MessageService", () => {
       expect(res.items[0].id).toBe(msgId);
       expect(res.items[0]).not.toHaveProperty("clientMsgId");
       expect(res.hasMore).toBe(false);
-      expect(findTimelineMock).toHaveBeenCalledWith(convId, undefined, undefined, undefined);
+      expect(findTimelineMock).toHaveBeenCalledWith(convId, undefined, undefined, undefined, userA);
       expect(getParticipantUserIdsMock).not.toHaveBeenCalled();
       expect(findConversationByIdMock).toHaveBeenCalledWith(convId, userA);
     });
@@ -624,6 +630,28 @@ describe("MessageService", () => {
         }),
       ).rejects.toMatchObject({ code: "NOT_PARTICIPANT" });
       expect(createMessageMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("hideMessageForMe", () => {
+    it("hides an incoming message for only the current participant", async () => {
+      findByIdMock.mockResolvedValue(mockMessage);
+
+      await service.hideMessageForMe(userB, msgId);
+
+      expect(hideForUserMock).toHaveBeenCalledWith(msgId, userB);
+      expect(emitMessageHiddenMock).toHaveBeenCalledWith(userB, convId, msgId);
+      expect(emitMessageRevokedMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects a non-participant without hiding anything", async () => {
+      findByIdMock.mockResolvedValue(mockMessage);
+      findConversationByIdMock.mockResolvedValue(null);
+
+      await expect(service.hideMessageForMe(outsider, msgId)).rejects.toThrow(
+        expect.objectContaining({ code: "NOT_PARTICIPANT" }),
+      );
+      expect(hideForUserMock).not.toHaveBeenCalled();
     });
   });
 

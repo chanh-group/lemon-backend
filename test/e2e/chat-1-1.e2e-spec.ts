@@ -330,6 +330,39 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     ).toBeUndefined();
   });
 
+  it("hides a message only for the requesting participant, including after reloading the timeline", async () => {
+    const sent = await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/messages`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ body: "Only one side will hide this", kind: "TEXT" })
+      .expect(201);
+    const hiddenId = sent.body.data.id as string;
+
+    await request(app.getHttpServer())
+      .delete(`/api/messages/${hiddenId}/for-me`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .expect(204);
+    await request(app.getHttpServer())
+      .delete(`/api/messages/${hiddenId}/for-me`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .expect(204);
+
+    const sender = await request(app.getHttpServer())
+      .get(`/api/conversations/${conversationId}/messages`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .expect(200);
+    const recipient = await request(app.getHttpServer())
+      .get(`/api/conversations/${conversationId}/messages`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .expect(200);
+    expect(sender.body.data.items.some((message: { id: string }) => message.id === hiddenId)).toBe(
+      true,
+    );
+    expect(
+      recipient.body.data.items.some((message: { id: string }) => message.id === hiddenId),
+    ).toBe(false);
+  });
+
   it("PATCH /api/messages/:id - should edit own message with Bearer token", async () => {
     const res = await request(app.getHttpServer())
       .patch(`/api/messages/${messageId}`)
@@ -364,6 +397,17 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     expect(res.body.data.deletedAt).not.toBeNull();
     expect(res.body.data.body).toBeNull();
     expect(res.body.data.clientMsgId).toBeUndefined();
+
+    const timeline = await request(app.getHttpServer())
+      .get(`/api/conversations/${conversationId}/messages`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .expect(200);
+    const tombstone = timeline.body.data.items.find(
+      (message: { id: string }) => message.id === messageId,
+    );
+    expect(tombstone).toMatchObject({ body: null, storyPreview: null });
+    expect(tombstone).not.toHaveProperty("attachments");
+    expect(tombstone.deletedAt).not.toBeNull();
   });
 
   // --- EDGE CASES & AUTHORIZATION TESTS ---

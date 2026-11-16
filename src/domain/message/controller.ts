@@ -118,6 +118,16 @@ export class MessageController {
     return withMessage(data, t("MESSAGE_DELETED", lang));
   }
 
+  @Delete("messages/:id/for-me")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async hideMessageForMe(
+    @Req() req: { user?: unknown },
+    @Param("id", ParseUUIDPipe) messageId: string,
+  ): Promise<void> {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    await this.messageService.hideMessageForMe(userId, messageId);
+  }
+
   @Post("messages/:id/react")
   async reactMessage(
     @Req() req: { user?: unknown; ip?: string; socket?: { remoteAddress?: string | null } },

@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, notExists, or, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../utils/errors/pg.js";
@@ -25,6 +25,7 @@ import {
   type MessageAttachment,
   type MessageReaction,
   messageAttachments,
+  messageHiddenForUsers,
   messageReactions,
   messages,
 } from "./schema.js";
@@ -210,10 +211,26 @@ export class MessagePgRepository implements MessageRepository {
     cursor?: string,
     limit = DEFAULT_MESSAGE_PAGE_SIZE,
     after?: string,
+    viewerId?: string,
   ): Promise<MessageTimelineResult> {
     const queryLimit = Math.min(Math.max(limit, 1), MAX_MESSAGE_PAGE_SIZE);
 
-    const conditions = [eq(messages.conversationId, conversationId), isNull(messages.deletedAt)];
+    const conditions = [eq(messages.conversationId, conversationId)];
+    if (viewerId) {
+      conditions.push(
+        notExists(
+          this.db
+            .select({ messageId: messageHiddenForUsers.messageId })
+            .from(messageHiddenForUsers)
+            .where(
+              and(
+                eq(messageHiddenForUsers.messageId, messages.id),
+                eq(messageHiddenForUsers.userId, viewerId),
+              ),
+            ),
+        ),
+      );
+    }
 
     if (cursor) {
       const cursorCreatedAt = sql`(
@@ -263,7 +280,8 @@ export class MessagePgRepository implements MessageRepository {
       };
     }
 
-    const messageIds = items.map((m) => m.id);
+    const messageIds = items.filter((m) => !m.deletedAt).map((m) => m.id);
+    if (messageIds.length === 0) return { items, nextCursor, hasMore };
     const [attachmentRows, reactionRows] = await Promise.all([
       this.db
         .select()
@@ -302,12 +320,57 @@ export class MessagePgRepository implements MessageRepository {
     };
   }
 
-  async findReplyTargets(conversationId: string, messageIds: string[]): Promise<Message[]> {
+  async hideForUser(messageId: string, userId: string): Promise<string> {
+    return this.db.transaction(async (tx) => {
+      const [message] = await tx
+        .select({ conversationId: messages.conversationId })
+        .from(messages)
+        .where(eq(messages.id, messageId))
+        .limit(1);
+      if (!message) throw new BusinessError("MESSAGE_NOT_FOUND");
+      const [inserted] = await tx
+        .insert(messageHiddenForUsers)
+        .values({ messageId, userId })
+        .onConflictDoNothing()
+        .returning({ messageId: messageHiddenForUsers.messageId });
+      if (inserted) {
+        await tx
+          .update(conversations)
+          .set({ unreadRevision: sql`${conversations.unreadRevision} + 1` })
+          .where(eq(conversations.id, message.conversationId));
+      }
+      return message.conversationId;
+    });
+  }
+
+  async findReplyTargets(
+    conversationId: string,
+    messageIds: string[],
+    viewerId?: string,
+  ): Promise<Message[]> {
     if (messageIds.length === 0) return [];
     return this.db
       .select()
       .from(messages)
-      .where(and(eq(messages.conversationId, conversationId), inArray(messages.id, messageIds)));
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          inArray(messages.id, messageIds),
+          viewerId
+            ? notExists(
+                this.db
+                  .select({ messageId: messageHiddenForUsers.messageId })
+                  .from(messageHiddenForUsers)
+                  .where(
+                    and(
+                      eq(messageHiddenForUsers.messageId, messages.id),
+                      eq(messageHiddenForUsers.userId, viewerId),
+                    ),
+                  ),
+              )
+            : undefined,
+        ),
+      );
   }
 
   async findById(messageId: string, includeDetails = true): Promise<MessageWithAttachments | null> {

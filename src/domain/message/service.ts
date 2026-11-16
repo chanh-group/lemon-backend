@@ -240,13 +240,19 @@ export class MessageService {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
 
-    const timeline = await this.messageRepo.findTimeline(conversationId, cursor, limit, after);
+    const timeline = await this.messageRepo.findTimeline(
+      conversationId,
+      cursor,
+      limit,
+      after,
+      userId,
+    );
     const response = await toMessageTimelineAsync(timeline, this.storage, userId);
     const ids = [
       ...new Set(timeline.items.flatMap((item) => (item.replyToId ? [item.replyToId] : []))),
     ];
     if (ids.length) {
-      const targets = await this.messageRepo.findReplyTargets(conversationId, ids);
+      const targets = await this.messageRepo.findReplyTargets(conversationId, ids, userId);
       const byId = new Map(targets.map((target) => [target.id, target]));
       for (const item of response.items) {
         if (item.replyToId) {
@@ -334,6 +340,14 @@ export class MessageService {
       deletedAt: response.deletedAt!,
     });
     return response;
+  }
+
+  async hideMessageForMe(userId: string, messageId: string): Promise<void> {
+    const message = await this.messageRepo.findById(messageId, false);
+    if (!message) throw new BusinessError("MESSAGE_NOT_FOUND");
+    await this.assertDirectConversationAllowed(message.conversationId, userId);
+    await this.messageRepo.hideForUser(messageId, userId);
+    this.realtimeService.emitMessageHidden(userId, message.conversationId, messageId);
   }
 
   async reactToMessage(

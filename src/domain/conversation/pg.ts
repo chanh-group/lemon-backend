@@ -13,6 +13,50 @@ import { canonicalPair, toCursorPage } from "../shared.js";
 
 const partnerParticipants = alias(conversationParticipants, "partner_participants");
 
+function visiblePreview(userId: string) {
+  return sql<string | null>`CASE WHEN EXISTS (
+    SELECT 1 FROM message_hidden_for_users h
+    WHERE h.message_id = ${conversations.lastMessageId} AND h.user_id = ${userId}::uuid
+  ) THEN (
+    SELECT CASE
+      WHEN m.deleted_at IS NOT NULL THEN '[message-revoked]'
+      WHEN m.kind = 'STORY_REACTION' THEN '[story-reaction]'
+      WHEN m.body IS NOT NULL AND m.body <> '' THEN left(m.body, 80)
+      ELSE '[attachment]'
+    END FROM messages m
+    WHERE m.conversation_id = ${conversations.id}
+      AND NOT EXISTS (SELECT 1 FROM message_hidden_for_users h
+        WHERE h.message_id = m.id AND h.user_id = ${userId}::uuid)
+    ORDER BY m.created_at DESC, m.id DESC LIMIT 1
+  ) ELSE ${conversations.lastMessagePreview} END`;
+}
+
+function visibleSenderId(userId: string) {
+  return sql<string | null>`CASE WHEN EXISTS (
+    SELECT 1 FROM message_hidden_for_users h
+    WHERE h.message_id = ${conversations.lastMessageId} AND h.user_id = ${userId}::uuid
+  ) THEN (
+    SELECT m.sender_id FROM messages m
+    WHERE m.conversation_id = ${conversations.id}
+      AND NOT EXISTS (SELECT 1 FROM message_hidden_for_users h
+        WHERE h.message_id = m.id AND h.user_id = ${userId}::uuid)
+    ORDER BY m.created_at DESC, m.id DESC LIMIT 1
+  ) ELSE ${messages.senderId} END`;
+}
+
+function visibleMessageAt(userId: string) {
+  return sql<Date | null>`CASE WHEN EXISTS (
+    SELECT 1 FROM message_hidden_for_users h
+    WHERE h.message_id = ${conversations.lastMessageId} AND h.user_id = ${userId}::uuid
+  ) THEN (
+    SELECT m.created_at FROM messages m
+    WHERE m.conversation_id = ${conversations.id}
+      AND NOT EXISTS (SELECT 1 FROM message_hidden_for_users h
+        WHERE h.message_id = m.id AND h.user_id = ${userId}::uuid)
+    ORDER BY m.created_at DESC, m.id DESC LIMIT 1
+  ) ELSE ${conversations.lastMessageAt} END`.mapWith(conversations.lastMessageAt);
+}
+
 @Injectable()
 export class ConversationPgRepository implements ConversationRepository {
   constructor(@InjectDrizzle() private readonly db: DrizzleDb) {}
@@ -33,9 +77,9 @@ export class ConversationPgRepository implements ConversationRepository {
         id: conversations.id,
         kind: conversations.kind,
         directKey: conversations.directKey,
-        lastMessagePreview: conversations.lastMessagePreview,
-        lastMessageSenderId: messages.senderId,
-        lastMessageAt: conversations.lastMessageAt,
+        lastMessagePreview: visiblePreview(userAId),
+        lastMessageSenderId: visibleSenderId(userAId),
+        lastMessageAt: visibleMessageAt(userAId),
         createdAt: conversations.createdAt,
         partner: {
           id: users.id,
@@ -169,9 +213,9 @@ export class ConversationPgRepository implements ConversationRepository {
         id: conversations.id,
         kind: conversations.kind,
         directKey: conversations.directKey,
-        lastMessagePreview: conversations.lastMessagePreview,
-        lastMessageSenderId: messages.senderId,
-        lastMessageAt: conversations.lastMessageAt,
+        lastMessagePreview: visiblePreview(userId),
+        lastMessageSenderId: visibleSenderId(userId),
+        lastMessageAt: visibleMessageAt(userId),
         createdAt: conversations.createdAt,
         lastReadMessageId: conversationParticipants.lastReadMessageId,
         unreadRevision: sql<string>`${conversations.unreadRevision}::text`,
@@ -228,9 +272,9 @@ export class ConversationPgRepository implements ConversationRepository {
         id: conversations.id,
         kind: conversations.kind,
         directKey: conversations.directKey,
-        lastMessagePreview: conversations.lastMessagePreview,
-        lastMessageSenderId: messages.senderId,
-        lastMessageAt: conversations.lastMessageAt,
+        lastMessagePreview: visiblePreview(userId),
+        lastMessageSenderId: visibleSenderId(userId),
+        lastMessageAt: visibleMessageAt(userId),
         createdAt: conversations.createdAt,
         lastReadMessageId: conversationParticipants.lastReadMessageId,
         unreadRevision: sql<string>`${conversations.unreadRevision}::text`,
@@ -382,6 +426,7 @@ export class ConversationPgRepository implements ConversationRepository {
           eq(messages.conversationId, conversationId),
           isNull(messages.deletedAt),
           ne(messages.senderId, userId),
+          sql`NOT EXISTS (SELECT 1 FROM message_hidden_for_users h WHERE h.message_id = ${messages.id} AND h.user_id = ${userId}::uuid)`,
           or(
             isNull(conversationParticipants.lastReadMessageId),
             sql`ROW(${messages.createdAt}, ${messages.id}) > ROW(
@@ -419,6 +464,7 @@ export class ConversationPgRepository implements ConversationRepository {
           inArray(messages.conversationId, conversationIds),
           isNull(messages.deletedAt),
           ne(messages.senderId, userId),
+          sql`NOT EXISTS (SELECT 1 FROM message_hidden_for_users h WHERE h.message_id = ${messages.id} AND h.user_id = ${userId}::uuid)`,
           or(
             isNull(conversationParticipants.lastReadMessageId),
             sql`ROW(${messages.createdAt}, ${messages.id}) > ROW(

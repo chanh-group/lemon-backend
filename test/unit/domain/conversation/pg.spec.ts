@@ -267,7 +267,7 @@ describe("ConversationPgRepository.countUnread", () => {
     expect(where.sql).toContain("SELECT m.created_at FROM messages m");
     expect(where.sql).not.toContain("SELECT m.created_at, m.id");
     expect(where.sql).toContain('m.id = "conversation_participants"."last_read_message_id"');
-    expect(where.params).toEqual([convRow.id, userAId]);
+    expect(where.params).toEqual([convRow.id, userAId, userAId]);
   });
 
   it("returns 0 when the aggregate row reports zero", async () => {

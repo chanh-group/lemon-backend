@@ -114,9 +114,9 @@ export function toMessageResponse(
     body: message.deletedAt ? null : message.body,
     replyToId: message.replyToId,
     storyId: message.storyId ?? null,
-    storyPreview: message.storyPreview ?? null,
-    ...(attachments && { attachments }),
-    ...(reactions && { reactions }),
+    storyPreview: message.deletedAt ? null : (message.storyPreview ?? null),
+    ...(!message.deletedAt && attachments && { attachments }),
+    ...(!message.deletedAt && reactions && { reactions }),
     ...(message.isForwarded && { isForwarded: true }),
     createdAt: message.createdAt,
     editedAt: message.editedAt,
@@ -129,7 +129,9 @@ export async function toMessageResponseAsync(
   storage?: StorageService,
   viewerId?: string,
 ): Promise<MessageResponse> {
-  const attachments = await mapAttachmentsToResponse(message.attachments, storage);
+  const attachments = message.deletedAt
+    ? undefined
+    : await mapAttachmentsToResponse(message.attachments, storage);
   return toMessageResponse(message, attachments, viewerId);
 }
 

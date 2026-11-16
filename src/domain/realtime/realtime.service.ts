@@ -75,6 +75,17 @@ export class RealtimeService {
     }
   }
 
+  emitMessageHidden(userId: string, conversationId: string, messageId: string): void {
+    if (!this.gateway?.server) return;
+    try {
+      this.gateway.server
+        .to(userRoom(userId))
+        .emit("message:hidden", { conversationId, messageId });
+    } catch (err) {
+      logger.warn(`Failed to emit message:hidden for conv ${conversationId}: ${String(err)}`);
+    }
+  }
+
   /**
    * Broadcast read receipt update
    */
