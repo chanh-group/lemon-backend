@@ -523,6 +523,40 @@ describe("MessageService", () => {
       expect(res.attachments![0].fileName).toBe("Báo Cáo.pdf");
     });
 
+    it("checks reply lookup while verifying attachment storage", async () => {
+      const storage = {
+        getBucket: vi.fn().mockReturnValue("lemon-chat-storage"),
+        presignGet: vi.fn().mockResolvedValue({ downloadUrl: "https://storage.example/file" }),
+        headObject: vi.fn().mockResolvedValue({ contentLength: 1024 }),
+      };
+      const serviceWithStorage = new MessageService(
+        { createMessageWithConversationUpdate: createMessageMock, findById: findByIdMock } as any,
+        { getParticipantUserIds: getParticipantUserIdsMock, findById: findConversationByIdMock } as any,
+        { assertCanChat: assertCanChatMock } as any,
+        { emitNewMessage: emitNewMessageMock } as any,
+        storage as any,
+      );
+      let resolveReply!: (message: Message) => void;
+      findByIdMock.mockReturnValue(new Promise<Message>((resolve) => (resolveReply = resolve)));
+      createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
+      const request = serviceWithStorage.sendMessage(userA, convId, {
+        kind: "FILE",
+        replyToId: msgId,
+        attachments: [
+          {
+            objectKey: `chat/${convId}/${userA}/file.pdf`,
+            fileName: "file.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 1024,
+          },
+        ],
+      });
+
+      await vi.waitFor(() => expect(storage.headObject).toHaveBeenCalledOnce());
+      resolveReply(mockMessage);
+      await expect(request).resolves.toMatchObject({ id: msgId });
+    });
+
     it("forwards only attachments from an accessible source message", async () => {
       const sourceConversationId = "0193a2b1-0000-7000-8000-000000000011";
       const sourceAttachment = {

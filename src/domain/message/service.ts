@@ -133,35 +133,36 @@ export class MessageService {
       }
     }
 
-    if (attachments?.length) {
-      const storage = this.storage;
-      if (!storage) throw new BusinessError("OBJECT_NOT_UPLOADED");
-      await Promise.all(
-        attachments.map(async (attachment) => {
-          if (attachment.sizeBytes > CHAT_MAX_FILE_BYTES) {
-            throw new BusinessError("FILE_TOO_LARGE", {
-              maxMb: String(Math.floor(CHAT_MAX_FILE_BYTES / (1024 * 1024))),
-            });
-          }
-          const isValidKey = sourceMessage
-            ? sourceMessage.attachments?.some(
-                (sourceAttachment) => sourceAttachment.objectKey === attachment.objectKey,
-              )
-            : attachment.objectKey.startsWith(`chat/${conversationId}/${senderId}/`);
-          if (!isValidKey) {
-            throw new BusinessError("INVALID_OBJECT_KEY");
-          }
-          const object = await storage.headObject(attachment.objectKey);
-          if (!object) throw new BusinessError("OBJECT_NOT_UPLOADED");
-          if (object.contentLength !== attachment.sizeBytes) {
-            throw new BusinessError("INVALID_OBJECT_KEY");
-          }
-        }),
-      );
+    const storage = this.storage;
+    if (attachments?.length && !storage) throw new BusinessError("OBJECT_NOT_UPLOADED");
+    for (const attachment of attachments ?? []) {
+      if (attachment.sizeBytes > CHAT_MAX_FILE_BYTES) {
+        throw new BusinessError("FILE_TOO_LARGE", {
+          maxMb: String(Math.floor(CHAT_MAX_FILE_BYTES / (1024 * 1024))),
+        });
+      }
+      const isValidKey = sourceMessage
+        ? sourceMessage.attachments?.some(
+            (sourceAttachment) => sourceAttachment.objectKey === attachment.objectKey,
+          )
+        : attachment.objectKey.startsWith(`chat/${conversationId}/${senderId}/`);
+      if (!isValidKey) throw new BusinessError("INVALID_OBJECT_KEY");
     }
 
+    const replyPromise = dto.replyToId
+      ? this.messageRepo.findById(dto.replyToId)
+      : Promise.resolve(null);
+    const attachmentChecks = (attachments ?? []).map(async (attachment) => {
+      const object = await storage!.headObject(attachment.objectKey);
+      if (!object) throw new BusinessError("OBJECT_NOT_UPLOADED");
+      if (object.contentLength !== attachment.sizeBytes) {
+        throw new BusinessError("INVALID_OBJECT_KEY");
+      }
+    });
+    await Promise.all(attachmentChecks);
+
     if (dto.replyToId) {
-      const reply = await this.messageRepo.findById(dto.replyToId);
+      const reply = await replyPromise;
       if (!reply || reply.conversationId !== conversationId) {
         throw new BusinessError("BAD_REQUEST");
       }

@@ -315,6 +315,37 @@ describe("StoryService", () => {
       expect(presignGetMock).toHaveBeenCalledOnce();
     });
 
+    it("checks friendship and exclusions concurrently for exclude audiences", async () => {
+      findByIdMock.mockResolvedValue({
+        ...mockStory,
+        audienceMode: "EXCLUDE",
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+      let resolveFriendship!: (value: boolean) => void;
+      let resolveAudience!: (value: boolean) => void;
+      isAcceptedFriendMock.mockReturnValue(
+        new Promise<boolean>((resolve) => {
+          resolveFriendship = resolve;
+        }),
+      );
+      isStoryAudienceMock.mockReturnValue(
+        new Promise<boolean>((resolve) => {
+          resolveAudience = resolve;
+        }),
+      );
+      presignGetMock.mockResolvedValue({ downloadUrl: "https://storage.example/signed" });
+
+      const result = service.getMediaUrl("friend-1", mockStory.id);
+      await vi.waitFor(() => {
+        expect(isAcceptedFriendMock).toHaveBeenCalledOnce();
+        expect(isStoryAudienceMock).toHaveBeenCalledOnce();
+      });
+      resolveFriendship(true);
+      resolveAudience(false);
+
+      await expect(result).resolves.toMatchObject({ url: expect.any(String) });
+    });
+
     it("does not sign media for an unauthorized viewer", async () => {
       findByIdMock.mockResolvedValue({ ...mockStory, expiresAt: new Date(Date.now() + 60_000) });
       isAcceptedFriendMock.mockResolvedValue(false);

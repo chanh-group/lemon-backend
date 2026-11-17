@@ -575,12 +575,11 @@ export class StoryService {
     }
 
     if (story.audienceMode === "EXCLUDE") {
-      const isFriend = await this.storyRepo.isAcceptedFriend(story.userId, viewerId);
-      if (!isFriend) {
-        throw new BusinessError(forbiddenCode);
-      }
-      const isExcluded = await this.storyRepo.isStoryAudience(story.id, viewerId);
-      if (isExcluded) {
+      const [isFriend, isExcluded] = await Promise.all([
+        this.storyRepo.isAcceptedFriend(story.userId, viewerId),
+        this.storyRepo.isStoryAudience(story.id, viewerId),
+      ]);
+      if (!isFriend || isExcluded) {
         throw new BusinessError(forbiddenCode);
       }
       return;
