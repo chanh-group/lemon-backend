@@ -308,12 +308,19 @@ describe("MessageService", () => {
         replyToId: msgId,
       });
 
-      expect(res.replyTarget).toMatchObject({ id: msgId, body: null, storyPreview: null, deletedAt });
+      expect(res.replyTarget).toMatchObject({
+        id: msgId,
+        body: null,
+        storyPreview: null,
+        deletedAt,
+      });
       expect(emitNewMessageMock).toHaveBeenCalledWith(
         convId,
         expect.objectContaining({ replyTarget: res.replyTarget }),
         expect.arrayContaining([
-          expect.objectContaining({ payload: expect.objectContaining({ replyTarget: res.replyTarget }) }),
+          expect.objectContaining({
+            payload: expect.objectContaining({ replyTarget: res.replyTarget }),
+          }),
         ]),
       );
     });
@@ -634,7 +641,11 @@ describe("MessageService", () => {
         headObject: vi.fn().mockResolvedValue({ contentLength: 1024 }),
       };
       const serviceWithStorage = new MessageService(
-        { createMessageWithConversationUpdate: createMessageMock, findById: findByIdMock, findSenderProfiles: findSenderProfilesMock } as any,
+        {
+          createMessageWithConversationUpdate: createMessageMock,
+          findById: findByIdMock,
+          findSenderProfiles: findSenderProfilesMock,
+        } as any,
         {
           getParticipantUserIds: getParticipantUserIdsMock,
           getMessageRecipientUserIds: getMessageRecipientUserIdsMock,

@@ -458,7 +458,7 @@ describe("ConversationPgRepository.countUnreadByConversationIds", () => {
     expect(where.sql).toContain('"messages"."conversation_id" in');
     expect(where.sql).toContain('"messages"."created_at" >=');
     expect(where.sql).toContain('ROW("messages"."created_at", "messages"."id") > ROW(');
-    expect(where.sql).toContain('NOT EXISTS (SELECT 1 FROM message_hidden_for_users h');
+    expect(where.sql).toContain("NOT EXISTS (SELECT 1 FROM message_hidden_for_users h");
     expect(where.params).toEqual([convRow.id, userAId, userAId]);
   });
 
