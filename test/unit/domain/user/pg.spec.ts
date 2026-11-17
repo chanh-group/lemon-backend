@@ -137,7 +137,13 @@ describe("UserPgRepository", () => {
 
   describe("search", () => {
     it("casts citext to text for the trigram email index and escapes wildcard input", async () => {
-      const limitMock = vi.fn().mockResolvedValue([mockUser]);
+      const searchRow = {
+        id: mockUser.id,
+        username: mockUser.username,
+        fullName: mockUser.fullName,
+        avatarUrl: mockUser.avatarUrl,
+      };
+      const limitMock = vi.fn().mockResolvedValue([searchRow]);
       const orderByMock = vi.fn().mockReturnValue({ limit: limitMock });
       const whereMock = vi.fn().mockReturnValue({ orderBy: orderByMock });
       const fromMock = vi.fn().mockReturnValue({ where: whereMock });
@@ -149,12 +155,30 @@ describe("UserPgRepository", () => {
       const condition = whereMock.mock.calls[0][0] as SQL;
       const query = new PgDialect().sqlToQuery(condition);
 
-      expect(result).toEqual({ items: [mockUser], hasMore: false });
+      expect(result).toEqual({ items: [searchRow], hasMore: false });
       expect(query.sql).toContain('"users"."email"::text ilike');
       expect(query.params).toContain("%foo\\%\\_%");
       expect(query.params).toContain(mockUser.id);
       expect(orderByMock).toHaveBeenCalledOnce();
       expect(limitMock).toHaveBeenCalledWith(11);
+    });
+
+    it("selects only the public user columns", async () => {
+      const selectMock = vi.mocked((mockDb as { select: ReturnType<typeof vi.fn> }).select);
+      const limitMock = vi.fn().mockResolvedValue([]);
+      const orderByMock = vi.fn().mockReturnValue({ limit: limitMock });
+      const whereMock = vi.fn().mockReturnValue({ orderBy: orderByMock });
+      const fromMock = vi.fn().mockReturnValue({ where: whereMock });
+      selectMock.mockReturnValueOnce({ from: fromMock });
+
+      await repository.search("lemon", "username", undefined, undefined, 10);
+
+      expect(Object.keys(selectMock.mock.calls[0][0] as Record<string, unknown>)).toEqual([
+        "id",
+        "username",
+        "fullName",
+        "avatarUrl",
+      ]);
     });
   });
 

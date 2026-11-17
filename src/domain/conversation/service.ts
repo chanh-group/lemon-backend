@@ -46,6 +46,16 @@ function requireRedisPipelineResults(
   return results;
 }
 
+type ReadOutcome<T> = { ok: true; value: T } | { ok: false; error: unknown };
+
+async function settleRead<T>(read: Promise<T>): Promise<ReadOutcome<T>> {
+  try {
+    return { ok: true, value: await read };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
 function parseUnreadCount(value: unknown, conversation: ConversationWithPartner): number | null {
   if (typeof value !== "string" || conversation.unreadRevision === undefined) return null;
   try {
@@ -99,6 +109,7 @@ function isOnlinePresence(value: unknown): boolean {
 @Injectable()
 export class ConversationService {
   private readonly logger = new Logger(ConversationService.name);
+  private readonly unreadRebuildsInFlight = new Map<string, Promise<Map<string, number>>>();
 
   constructor(
     @Inject(CONVERSATION_REPOSITORY) private readonly convRepo: ConversationRepository,
@@ -119,16 +130,22 @@ export class ConversationService {
       throw new BusinessError("CANNOT_CHAT_WITH_SELF");
     }
 
-    const targetUser = await this.userRepo.findById(targetUserId);
-    if (!targetUser) {
+    const [targetUser, canChat, existing] = await Promise.all([
+      settleRead(this.userRepo.findById(targetUserId)),
+      settleRead(this.friendService.assertCanChat(userId, targetUserId)),
+      settleRead(this.convRepo.findDirectByParticipants(userId, targetUserId)),
+    ]);
+
+    // Surface failures in the historical sequential order when several reads fail at once.
+    if (!targetUser.ok) throw targetUser.error;
+    if (!targetUser.value) {
       throw new BusinessError("USER_NOT_FOUND");
     }
+    if (!canChat.ok) throw canChat.error;
+    if (!existing.ok) throw existing.error;
 
-    await this.friendService.assertCanChat(userId, targetUserId);
-
-    const existing = await this.convRepo.findDirectByParticipants(userId, targetUserId);
     const conversation =
-      existing ?? (await this.convRepo.createDirectConversation(userId, targetUserId));
+      existing.value ?? (await this.convRepo.createDirectConversation(userId, targetUserId));
 
     this.joinParticipantsBestEffort(conversation.id, [userId, targetUserId]);
 
@@ -356,10 +373,7 @@ export class ConversationService {
     // Enrich with unread counts and presence from Redis
     if (list.length > 0) {
       if (!this.redis) {
-        const counts = await this.rebuildUnreadBatch(
-          list.map((conv) => conv.id),
-          userId,
-        );
+        const counts = await this.rebuildUnreadBatch(list, userId);
         for (const conv of list) conv.unreadCount = counts.get(conv.id) ?? 0;
         return { ...page, items: list.map(toConversationResponse) };
       }
@@ -423,8 +437,10 @@ export class ConversationService {
       }
 
       if (missing.length > 0) {
-        const conversationIds = missing.map((i) => list[i].id);
-        const counts = await this.rebuildUnreadBatch(conversationIds, userId);
+        const counts = await this.rebuildUnreadBatch(
+          missing.map((i) => list[i]),
+          userId,
+        );
         await this.cacheUnreadCounts(
           userId,
           missing.map((i) => list[i]),
@@ -569,6 +585,30 @@ export class ConversationService {
   }
 
   private async rebuildUnreadBatch(
+    conversations: ConversationWithPartner[],
+    userId: string,
+  ): Promise<Map<string, number>> {
+    const conversationIds = conversations.map((conversation) => conversation.id);
+    const key = JSON.stringify([
+      userId,
+      conversations
+        .map((conversation) => [
+          conversation.id,
+          conversation.unreadRevision,
+          conversation.lastReadMessageId ?? null,
+        ])
+        .sort((a, b) => a[0]!.localeCompare(b[0]!)),
+    ]);
+    const inFlight = this.unreadRebuildsInFlight.get(key);
+    if (inFlight) return inFlight;
+    const pending = this.countUnreadFromDatabase(conversationIds, userId).finally(() => {
+      this.unreadRebuildsInFlight.delete(key);
+    });
+    this.unreadRebuildsInFlight.set(key, pending);
+    return pending;
+  }
+
+  private async countUnreadFromDatabase(
     conversationIds: string[],
     userId: string,
   ): Promise<Map<string, number>> {

@@ -130,18 +130,17 @@ export class AuthService {
       throw new BusinessError("USERNAME_TAKEN");
     }
 
-    const passwordHash = await this.hashPassword(input.password);
-
-    try {
-      await otp.check(this.cacheStore, otpKey, input.otp, true);
-    } catch (err: unknown) {
-      if (err instanceof BusinessError) throw err;
-      this.logger.error("Redis error consuming signup OTP", {
-        action: "auth.signup_consume_error",
-        err: String(err),
+    const consumeSignupOtp = otp
+      .check(this.cacheStore, otpKey, input.otp, true)
+      .catch((err: unknown): never => {
+        if (err instanceof BusinessError) throw err;
+        this.logger.error("Redis error consuming signup OTP", {
+          action: "auth.signup_consume_error",
+          err: String(err),
+        });
+        throw new SystemError("unavailable", "cache CHECK_OTP failed", { cause: err });
       });
-      throw new SystemError("unavailable", "cache CHECK_OTP failed", { cause: err });
-    }
+    const [passwordHash] = await Promise.all([this.hashPassword(input.password), consumeSignupOtp]);
 
     try {
       const createdUser = await this.userRepo.create({
@@ -249,17 +248,18 @@ export class AuthService {
 
     const payload = await this.jwt.verifyRefreshToken(rawRefreshToken);
 
-    let user: Awaited<ReturnType<UserRepository["findById"]>>;
-    let active: boolean;
+    let state: Awaited<ReturnType<AuthSessionRepository["findAuthState"]>>;
     try {
-      [user, active] = await Promise.all([
-        this.userRepo.findById(payload.sub),
-        this.sessions.isActive(payload.sub, payload.sid),
-      ]);
+      state = await this.sessions.findAuthState(payload.sub, payload.sid);
     } catch (err) {
       throw new SystemError("database", "Session verification failed", { cause: err });
     }
-    if (!user || !user.isActive || !active || user.authVersion !== payload.authVersion) {
+    if (
+      !state ||
+      !state.isActive ||
+      !state.sessionActive ||
+      state.authVersion !== payload.authVersion
+    ) {
       throw new BusinessError("INVALID_SESSION");
     }
 
@@ -417,17 +417,17 @@ export class AuthService {
       throw new BusinessError("USER_NOT_FOUND");
     }
 
-    const newHash = await this.hashPassword(input.newPassword);
-    try {
-      await otp.check(this.cacheStore, key, input.otp, true);
-    } catch (err: unknown) {
-      if (err instanceof BusinessError) throw err;
-      this.logger.error("Redis error consuming forgot password OTP", {
-        action: "auth.forgot_reset_consume_error",
-        err: String(err),
+    const consumeResetOtp = otp
+      .check(this.cacheStore, key, input.otp, true)
+      .catch((err: unknown): never => {
+        if (err instanceof BusinessError) throw err;
+        this.logger.error("Redis error consuming forgot password OTP", {
+          action: "auth.forgot_reset_consume_error",
+          err: String(err),
+        });
+        throw new SystemError("unavailable", "cache CHECK_OTP failed", { cause: err });
       });
-      throw new SystemError("unavailable", "cache CHECK_OTP failed", { cause: err });
-    }
+    const [newHash] = await Promise.all([this.hashPassword(input.newPassword), consumeResetOtp]);
     await this.userRepo.updatePasswordHash(user.id, newHash);
     await this.revokeFamily(user.id);
 

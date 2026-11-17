@@ -1,5 +1,5 @@
 import * as argon2 from "argon2";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { AuthService } from "../../../../src/domain/auth/service.js";
 import { JwtConfig } from "../../../../src/domain/auth/jwt.js";
 import type { User } from "../../../../src/domain/user/schema.js";
@@ -58,6 +58,7 @@ describe("AuthService", () => {
   let mockUserRepo: MockUserRepo;
   let mockMailService: MockMailService;
   let sessions: AuthSessionRepository;
+  let revokeAllMock: Mock<(userId: string) => Promise<void>>;
 
   const mockUser: User = {
     id: "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b",
@@ -88,18 +89,24 @@ describe("AuthService", () => {
 
     cacheStore = new MemoryCacheService();
     const active = new Map<string, string>();
+    revokeAllMock = vi.fn(async (userId: string) => {
+      for (const [id, owner] of active) if (owner === userId) active.delete(id);
+    });
     sessions = {
       create: vi.fn(async (userId, sessionId) => {
         active.set(sessionId, userId);
       }),
       isActive: vi.fn(async (userId, sessionId) => active.get(sessionId) === userId),
+      findAuthState: vi.fn(async (userId, sessionId) => ({
+        isActive: true,
+        authVersion: 0,
+        sessionActive: active.get(sessionId) === userId,
+      })),
       extend: vi.fn(async (userId, sessionId) => active.get(sessionId) === userId),
       revoke: vi.fn(async (userId, sessionId) => {
         if (active.get(sessionId) === userId) active.delete(sessionId);
       }),
-      revokeAll: vi.fn(async (userId) => {
-        for (const [id, owner] of active) if (owner === userId) active.delete(id);
-      }),
+      revokeAll: revokeAllMock,
       purgeExpired: vi.fn().mockResolvedValue(0),
     };
 
@@ -330,6 +337,26 @@ describe("AuthService", () => {
       });
 
       expect(await cacheStore.getRaw(key)).toContain("654321");
+    });
+
+    it("propagates a password hash failure as its original error", async () => {
+      const key = `${OTP_KEY_PREFIX}signup@example.com`;
+      await cacheStore.setRaw(key, JSON.stringify({ code: "123456", attempts: 0 }), 120);
+      mockUserRepo.findByEmail.mockResolvedValue(null);
+      mockUserRepo.findByUsername.mockResolvedValue(null);
+      const hashError = new Error("argon2 failure");
+      vi.spyOn(authService, "hashPassword").mockRejectedValueOnce(hashError);
+
+      await expect(
+        authService.signup({
+          email: "signup@example.com",
+          fullName: "User",
+          username: "user",
+          password: "Password#123",
+          otp: "123456",
+        }),
+      ).rejects.toBe(hashError);
+      expect(mockUserRepo.create).not.toHaveBeenCalled();
     });
   });
 
@@ -583,6 +610,42 @@ describe("AuthService", () => {
       ).rejects.toBe(dbError);
       expect(await cacheStore.getRaw(key)).not.toBeNull();
     });
+
+    it("propagates a password hash failure as its original error and keeps sessions", async () => {
+      const key = `forgot_otp:${mockUser.email}`;
+      await cacheStore.setRaw(key, JSON.stringify({ code: "654321", attempts: 0 }), 120);
+      mockUserRepo.findByEmail.mockResolvedValue(mockUser);
+      const hashError = new Error("argon2 failure");
+      vi.spyOn(authService, "hashPassword").mockRejectedValueOnce(hashError);
+
+      await expect(
+        authService.forgotPasswordReset({
+          email: mockUser.email,
+          otp: "654321",
+          newPassword: "NewMatKhau#456",
+        }),
+      ).rejects.toBe(hashError);
+      expect(mockUserRepo.updatePasswordHash).not.toHaveBeenCalled();
+      expect(revokeAllMock).not.toHaveBeenCalled();
+    });
+
+    it("does not revoke sessions when the password update fails", async () => {
+      const key = `forgot_otp:${mockUser.email}`;
+      await cacheStore.setRaw(key, JSON.stringify({ code: "654321", attempts: 0 }), 120);
+      mockUserRepo.findByEmail.mockResolvedValue(mockUser);
+      vi.spyOn(authService, "hashPassword").mockResolvedValue("hash");
+      const dbError = new Error("database unavailable");
+      mockUserRepo.updatePasswordHash.mockRejectedValueOnce(dbError);
+
+      await expect(
+        authService.forgotPasswordReset({
+          email: mockUser.email,
+          otp: "654321",
+          newPassword: "NewMatKhau#456",
+        }),
+      ).rejects.toBe(dbError);
+      expect(revokeAllMock).not.toHaveBeenCalled();
+    });
   });
 
   describe("changePassword", () => {
@@ -619,6 +682,21 @@ describe("AuthService", () => {
       });
 
       expect(mockUserRepo.updatePasswordHash).toHaveBeenCalledWith(mockUser.id, expect.any(String));
+    });
+
+    it("does not revoke sessions when the password update fails", async () => {
+      mockUserRepo.findById.mockResolvedValueOnce(mockUser);
+      vi.spyOn(authService, "hashPassword").mockResolvedValue("hash");
+      const dbError = new Error("database unavailable");
+      mockUserRepo.updatePasswordHash.mockRejectedValueOnce(dbError);
+
+      await expect(
+        authService.changePassword(mockUser.id, {
+          oldPassword: "MatKhau#123",
+          newPassword: "BrandNewPassword#456",
+        }),
+      ).rejects.toBe(dbError);
+      expect(revokeAllMock).not.toHaveBeenCalled();
     });
   });
 });

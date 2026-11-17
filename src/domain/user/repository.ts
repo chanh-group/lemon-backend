@@ -1,4 +1,5 @@
 import type { NewUser, User } from "./schema.js";
+import type { UserSummary } from "./dto/response.js";
 import type { CursorPage } from "../shared.js";
 
 export interface UserRepository {
@@ -13,7 +14,7 @@ export interface UserRepository {
     excludeId: string | undefined,
     cursor: string | undefined,
     limit: number,
-  ): Promise<CursorPage<User>>;
+  ): Promise<CursorPage<UserSummary>>;
   create(data: NewUser): Promise<User>;
   updatePasswordHash(id: string, hash: string): Promise<void>;
   updateProfile(

@@ -1128,10 +1128,16 @@ export class ConversationPgRepository implements ConversationRepository {
           sql`(${conversationParticipants.historyBoundaryMessageId} IS NULL OR ROW(${messages.createdAt}, ${messages.id}) > (SELECT m.created_at, m.id FROM messages m WHERE m.id = ${conversationParticipants.historyBoundaryMessageId}))`,
           or(
             isNull(conversationParticipants.lastReadMessageId),
-            sql`ROW(${messages.createdAt}, ${messages.id}) > ROW(
-              (SELECT m.created_at FROM messages m WHERE m.id = ${conversationParticipants.lastReadMessageId}),
-              ${conversationParticipants.lastReadMessageId}
-            )`,
+            and(
+              // Sargable pre-filter so the (conversation_id, created_at) index can range-scan;
+              // the ROW tie-break below keeps the counted rows byte-identical (>= because
+              // rows sharing the last read's created_at but with a greater id still count).
+              sql`${messages.createdAt} >= (SELECT m.created_at FROM messages m WHERE m.id = ${conversationParticipants.lastReadMessageId})`,
+              sql`ROW(${messages.createdAt}, ${messages.id}) > ROW(
+                (SELECT m.created_at FROM messages m WHERE m.id = ${conversationParticipants.lastReadMessageId}),
+                ${conversationParticipants.lastReadMessageId}
+              )`,
+            ),
           ),
         ),
       );
@@ -1167,10 +1173,16 @@ export class ConversationPgRepository implements ConversationRepository {
           sql`(${conversationParticipants.historyBoundaryMessageId} IS NULL OR ROW(${messages.createdAt}, ${messages.id}) > (SELECT m.created_at, m.id FROM messages m WHERE m.id = ${conversationParticipants.historyBoundaryMessageId}))`,
           or(
             isNull(conversationParticipants.lastReadMessageId),
-            sql`ROW(${messages.createdAt}, ${messages.id}) > ROW(
-              (SELECT m.created_at FROM messages m WHERE m.id = ${conversationParticipants.lastReadMessageId}),
-              ${conversationParticipants.lastReadMessageId}
-            )`,
+            and(
+              // Sargable pre-filter so the (conversation_id, created_at) index can range-scan;
+              // the ROW tie-break below keeps the counted rows byte-identical (>= because
+              // rows sharing the last read's created_at but with a greater id still count).
+              sql`${messages.createdAt} >= (SELECT m.created_at FROM messages m WHERE m.id = ${conversationParticipants.lastReadMessageId})`,
+              sql`ROW(${messages.createdAt}, ${messages.id}) > ROW(
+                (SELECT m.created_at FROM messages m WHERE m.id = ${conversationParticipants.lastReadMessageId}),
+                ${conversationParticipants.lastReadMessageId}
+              )`,
+            ),
           ),
         ),
       )

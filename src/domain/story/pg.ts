@@ -5,12 +5,14 @@ import {
   asc,
   desc,
   eq,
+  getTableColumns,
   gt,
   gte,
   inArray,
   isNotNull,
   isNull,
   lt,
+  notExists,
   notInArray,
   or,
   sql,
@@ -19,7 +21,7 @@ import type { DrizzleDb } from "../../configs/database.js";
 import { friendships } from "../friend/schema.js";
 import { messages } from "../message/schema.js";
 import { users } from "../user/schema.js";
-import type { StoryReactionKind } from "./constants.js";
+import { STORY_FEED_MAX_PER_AUTHOR, type StoryReactionKind } from "./constants.js";
 import type {
   StoryItemResponse,
   StoryReactionResponse,
@@ -131,15 +133,13 @@ export class StoryPgRepository implements StoryRepository {
     ];
 
     if (viewerId) {
-      // Exclude muted authors
-      const mutedRows = await this.db
-        .select({ authorId: storyMutes.authorId })
-        .from(storyMutes)
-        .where(eq(storyMutes.userId, viewerId));
-      const mutedAuthorIds = mutedRows.map((r) => r.authorId);
-      if (mutedAuthorIds.length > 0) {
-        conditions.push(notInArray(stories.userId, mutedAuthorIds));
-      }
+      // Exclude muted authors — a correlated NOT EXISTS keeps the whole feed
+      // lookup to a single round trip.
+      conditions.push(
+        notExists(
+          sql`(select 1 from ${storyMutes} where ${storyMutes.userId} = ${viewerId} and ${storyMutes.authorId} = ${stories.userId})`,
+        ),
+      );
 
       // Filter audience: author always sees their own; for others, check audienceMode
       conditions.push(
@@ -170,11 +170,28 @@ export class StoryPgRepository implements StoryRepository {
       );
     }
 
-    return this.db
-      .select()
+    // Cap every author to their most recent stories so the feed (and its
+    // cached payload) stays bounded; the audience/mute predicates above still
+    // decide which rows are eligible before the cap is applied.
+    const rankedStories = this.db
+      .select({
+        ...getTableColumns(stories),
+        feedRank:
+          sql<number>`row_number() over (partition by ${stories.userId} order by ${stories.createdAt} desc)`.as(
+            "feed_rank",
+          ),
+      })
       .from(stories)
       .where(and(...conditions))
-      .orderBy(asc(stories.createdAt));
+      .as("ranked_stories");
+
+    const rows = await this.db
+      .select()
+      .from(rankedStories)
+      .where(sql`feed_rank <= ${STORY_FEED_MAX_PER_AUTHOR}`)
+      .orderBy(sql`created_at`);
+
+    return rows.map(({ feedRank: _feedRank, ...story }) => story);
   }
 
   async findUsersByIds(userIds: string[]): Promise<Map<string, UserSummary>> {
@@ -205,15 +222,18 @@ export class StoryPgRepository implements StoryRepository {
       ? sql`(SELECT sv.viewed_at FROM story_views sv WHERE sv.story_id = ${storyId} AND sv.user_id = ${cursor})`
       : undefined;
 
-    // Viewers list filters anonymous=false and retains identities for 24h
-    const conditions = [
+    // Viewers list filters anonymous=false and retains identities for 24h.
+    // The cursor predicate must stay out of the count query, otherwise
+    // totalViewsCount shrinks as the client paginates.
+    const baseConditions = [
       eq(storyViews.storyId, storyId),
       eq(storyViews.anonymous, false),
       gte(storyViews.viewedAt, sql`now() - interval '24 hours'`),
     ];
 
+    const rowConditions = [...baseConditions];
     if (cursor && cursorViewedAt) {
-      conditions.push(
+      rowConditions.push(
         or(
           lt(storyViews.viewedAt, cursorViewedAt),
           and(eq(storyViews.viewedAt, cursorViewedAt), lt(users.id, cursor)),
@@ -241,13 +261,13 @@ export class StoryPgRepository implements StoryRepository {
             eq(storyViews.userId, storyReactions.userId),
           ),
         )
-        .where(and(...conditions))
+        .where(and(...rowConditions))
         .orderBy(desc(storyViews.viewedAt), desc(users.id))
         .limit(limit + 1),
       this.db
         .select({ total: sql<number>`count(*)::int` })
         .from(storyViews)
-        .where(and(...conditions)),
+        .where(and(...baseConditions)),
     ]);
 
     const totalViewsCount = Number(countResult[0]?.total ?? 0);

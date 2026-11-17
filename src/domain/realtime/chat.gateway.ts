@@ -15,13 +15,13 @@ import {
   PRESENCE_GRACE_MS,
   PRESENCE_OTHER_NODE_TTL_SECONDS,
   PRESENCE_TTL_SECONDS,
-  TYPING_TTL_SECONDS,
 } from "../../utils/cache/constants.js";
 import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
 import { ConversationPgRepository } from "../conversation/pg.js";
 import { UserService } from "../user/service.js";
 import { convRoom, userRoom } from "./rooms.js";
+import { REDIS_DISCONNECT_GRACE_MS, TYPING_TTL_SECS } from "./constants.js";
 import { JWT_CONFIG } from "../auth/constants.js";
 import type { JwtConfig } from "../auth/jwt.js";
 import type { AccessTokenPayload } from "../auth/types.js";
@@ -37,6 +37,17 @@ const allowedOrigins = frontendUrl.includes(",")
 
 export interface SocketUser {
   userId: string;
+}
+
+/** What this node last wrote to a user's presence state key. */
+type WrittenPresence = { state: "online"; conns: number } | { state: "offline" };
+
+/** EXPIRE reports 0 when the key is gone — the caller must rebuild the state key. */
+function presenceKeyMissing(results: [Error | null, unknown][] | null): boolean {
+  const first = results?.[0] ?? null;
+  if (first === null) return false;
+  const [err, value] = first;
+  return err === null && value === 0;
 }
 
 @WebSocketGateway({
@@ -58,6 +69,10 @@ export class ChatGateway
   private readonly expiryTimers = new Map<Socket, ReturnType<typeof setTimeout>>();
   private readonly pendingConnections = new WeakMap<Socket, Promise<void>>();
   private readonly trackedSockets = new Map<Socket, () => void>();
+  // Last written presence state per user: pings skip full writes when unchanged
+  private readonly presenceWrites = new Map<string, WrittenPresence>();
+  // Pending forced disconnect while a sustained Redis outage is being debounced
+  private redisDisconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly conversationRepo: ConversationPgRepository,
@@ -68,9 +83,15 @@ export class ChatGateway
     private readonly revocations: AuthRevocationListener,
   ) {
     if (this.redis && typeof this.redis.on === "function") {
-      const disconnectSockets = () => this.server?.disconnectSockets(true);
+      // Debounce failure events into a sustained-outage signal: a single
+      // transient error must never force a reconnect wave across all sockets.
+      const onRedisFailure = () => this.scheduleRedisDisconnect();
       for (const event of ["close", "end", "reconnecting", "error"]) {
-        this.redis.on(event, disconnectSockets);
+        this.redis.on(event, onRedisFailure);
+      }
+      const onRedisRecovery = () => this.cancelRedisDisconnect();
+      for (const event of ["ready", "connect"]) {
+        this.redis.on(event, onRedisRecovery);
       }
     }
   }
@@ -131,10 +152,11 @@ export class ChatGateway
     timer.unref();
     this.expiryTimers.set(client, timer);
     try {
-      await client.join(userRoom(userId));
-
-      // Auto-join every conversation the user is an active participant of
-      const conversationIds = await this.conversationRepo.getActiveConversationIds(userId);
+      // The user room join and the conversation lookup are independent — batch them.
+      const [, conversationIds] = await Promise.all([
+        client.join(userRoom(userId)),
+        this.conversationRepo.getActiveConversationIds(userId),
+      ]);
       if (client.disconnected) {
         this.untrack(client);
         return;
@@ -203,6 +225,7 @@ export class ChatGateway
       const timer = setTimeout(async () => {
         await this.finalizeOffline(userId);
       }, PRESENCE_GRACE_MS);
+      timer.unref();
 
       this.graceTimers.set(userId, timer);
     } else {
@@ -222,9 +245,11 @@ export class ChatGateway
     for (const timer of this.graceTimers.values()) {
       clearTimeout(timer);
     }
+    this.cancelRedisDisconnect();
 
     this.graceTimers.clear();
     this.userConnections.clear();
+    this.presenceWrites.clear();
 
     logger.log("ChatGateway shutdown: cleared presence grace timers and connection state");
   }
@@ -235,6 +260,29 @@ export class ChatGateway
     const timer = this.expiryTimers.get(client);
     if (timer) clearTimeout(timer);
     this.expiryTimers.delete(client);
+  }
+
+  /**
+   * Debounce Redis failure events into a sustained-outage signal: sockets are
+   * force-disconnected only once, after Redis has been failing for the whole
+   * grace window. Recovery within the window cancels it (see
+   * `cancelRedisDisconnect`), so a single transient error never drops sockets.
+   */
+  private scheduleRedisDisconnect(): void {
+    if (this.redisDisconnectTimer) return;
+    this.redisDisconnectTimer = setTimeout(() => {
+      this.redisDisconnectTimer = null;
+      logger.warn("Sustained Redis outage: force-disconnecting all sockets");
+      this.server?.disconnectSockets(true);
+    }, REDIS_DISCONNECT_GRACE_MS);
+    this.redisDisconnectTimer.unref();
+  }
+
+  /** Redis recovered in time — cancel the pending forced disconnect. */
+  private cancelRedisDisconnect(): void {
+    if (!this.redisDisconnectTimer) return;
+    clearTimeout(this.redisDisconnectTimer);
+    this.redisDisconnectTimer = null;
   }
 
   @SubscribeMessage("conv:join")
@@ -290,29 +338,29 @@ export class ChatGateway
     if (!userId || !data?.conversationId) return;
 
     const room = convRoom(data.conversationId);
-    if (!(await this.conversationRepo.isParticipant(data.conversationId, userId))) {
+    const participantIds = await this.conversationRepo.getParticipantUserIds(data.conversationId);
+    if (!participantIds.includes(userId)) {
       if (client.rooms.has(room)) await client.leave(room);
       return;
     }
 
-    // Cache typing indicator so a lost stop event cannot leave stale state.
+    // Cache typing indicator in Redis; fire-and-forget so keystroke events
+    // never wait on Redis before the room broadcast.
     if (this.redis) {
-      try {
-        await this.redis.set(typingKey(data.conversationId, userId), "1", "EX", TYPING_TTL_SECONDS);
-      } catch (err) {
-        logger.warn(`Redis typing cache error: ${String(err)}`);
-      }
+      this.redis
+        .set(typingKey(data.conversationId, userId), "1", "EX", TYPING_TTL_SECS)
+        .catch((err: unknown) => {
+          logger.warn("Redis typing cache write failed", { err });
+        });
     }
 
-    const participantIds = await this.conversationRepo.getParticipantUserIds(data.conversationId);
-    for (const participantId of participantIds) {
-      if (participantId === userId) continue;
-      client.to(userRoom(participantId)).emit("typing", {
-        conversationId: data.conversationId,
-        userId,
-        isTyping: true,
-      });
-    }
+    const recipientRooms = participantIds.filter((id) => id !== userId).map(userRoom);
+    if (recipientRooms.length === 0) return;
+    client.to(recipientRooms).emit("typing", {
+      conversationId: data.conversationId,
+      userId,
+      isTyping: true,
+    });
   }
 
   @SubscribeMessage("typing:stop")
@@ -325,28 +373,25 @@ export class ChatGateway
     if (!userId || !data?.conversationId) return;
 
     const room = convRoom(data.conversationId);
-    if (!(await this.conversationRepo.isParticipant(data.conversationId, userId))) {
+    const participantIds = await this.conversationRepo.getParticipantUserIds(data.conversationId);
+    if (!participantIds.includes(userId)) {
       if (client.rooms.has(room)) await client.leave(room);
       return;
     }
 
     if (this.redis) {
-      try {
-        await this.redis.del(typingKey(data.conversationId, userId));
-      } catch (err) {
-        logger.warn(`Redis del typing error: ${String(err)}`);
-      }
-    }
-
-    const participantIds = await this.conversationRepo.getParticipantUserIds(data.conversationId);
-    for (const participantId of participantIds) {
-      if (participantId === userId) continue;
-      client.to(userRoom(participantId)).emit("typing", {
-        conversationId: data.conversationId,
-        userId,
-        isTyping: false,
+      this.redis.del(typingKey(data.conversationId, userId)).catch((err: unknown) => {
+        logger.warn("Redis typing cache delete failed", { err });
       });
     }
+
+    const recipientRooms = participantIds.filter((id) => id !== userId).map(userRoom);
+    if (recipientRooms.length === 0) return;
+    client.to(recipientRooms).emit("typing", {
+      conversationId: data.conversationId,
+      userId,
+      isTyping: false,
+    });
   }
 
   @SubscribeMessage("presence:ping")
@@ -354,7 +399,7 @@ export class ChatGateway
     await this.pendingConnections.get(client);
     const userId = client.data?.userId as string;
     if (!userId) return;
-    await this.setOnlinePresence(userId, this.userConnections.get(userId) ?? 1);
+    await this.touchOnlinePresence(userId, this.userConnections.get(userId) ?? 1);
   }
 
   // --- Helper methods ---
@@ -409,6 +454,7 @@ export class ChatGateway
           const timer = setTimeout(() => {
             void this.finalizeOffline(userId);
           }, retryDelayMs);
+          timer.unref();
           this.graceTimers.set(userId, timer);
           return;
         }
@@ -429,6 +475,7 @@ export class ChatGateway
     }
   }
 
+  /** Full presence write (SET + ZADD) and record what was written. */
   private async setOnlinePresence(userId: string, conns: number): Promise<void> {
     if (!this.redis) return;
     try {
@@ -443,13 +490,42 @@ export class ChatGateway
         )
         .zadd(presenceOnlineKey(), now, userId)
         .exec();
+      this.presenceWrites.set(userId, { state: "online", conns });
     } catch (err) {
       logger.warn(`Failed to set online presence for ${userId}: ${String(err)}`);
     }
   }
 
+  /**
+   * Ping path: when the written state and connection count are unchanged, only
+   * refresh liveness (EXPIRE + ZADD) instead of re-serializing the JSON.
+   */
+  private async touchOnlinePresence(userId: string, conns: number): Promise<void> {
+    const written = this.presenceWrites.get(userId);
+    if (written === undefined || written.state !== "online" || written.conns !== conns) {
+      await this.setOnlinePresence(userId, conns);
+      return;
+    }
+    if (!this.redis) return;
+    try {
+      const now = Date.now();
+      const results = await this.redis
+        .pipeline()
+        .expire(presenceUserKey(userId), PRESENCE_TTL_SECONDS)
+        .zadd(presenceOnlineKey(), now, userId)
+        .exec();
+      if (presenceKeyMissing(results)) {
+        // The state key expired since the last write — rebuild it in full.
+        await this.setOnlinePresence(userId, conns);
+      }
+    } catch (err) {
+      logger.warn(`Failed to refresh presence liveness for ${userId}: ${String(err)}`);
+    }
+  }
+
   private async setOfflinePresence(userId: string): Promise<void> {
     if (!this.redis) return;
+    if (this.presenceWrites.get(userId)?.state === "offline") return;
     try {
       const now = Date.now();
       await this.redis
@@ -462,6 +538,7 @@ export class ChatGateway
         )
         .zrem(presenceOnlineKey(), userId)
         .exec();
+      this.presenceWrites.set(userId, { state: "offline" });
     } catch (err) {
       logger.warn(`Failed to set offline presence for ${userId}: ${String(err)}`);
     }

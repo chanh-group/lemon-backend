@@ -223,12 +223,11 @@ export class RealtimeService {
    * because realtime is unavailable. Idempotent on repeat calls.
    */
   joinConversation(participantIds: string[], conversationId: string): void {
-    if (!this.gateway?.server) return;
+    if (!this.gateway?.server || participantIds.length === 0) return;
     const room = convRoom(conversationId);
     try {
-      for (const userId of participantIds) {
-        this.gateway.server.in(userRoom(userId)).socketsJoin(room);
-      }
+      // One adapter round trip: `.in()` unions the participant user rooms.
+      this.gateway.server.in(participantIds.map(userRoom)).socketsJoin(room);
     } catch (err) {
       logger.warn(`Failed to join participants to conv ${conversationId}: ${String(err)}`);
     }

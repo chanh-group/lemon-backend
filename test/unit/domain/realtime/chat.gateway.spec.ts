@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { ChatGateway } from "../../../../src/domain/realtime/chat.gateway.js";
+import {
+  REDIS_DISCONNECT_GRACE_MS,
+  TYPING_TTL_SECS,
+} from "../../../../src/domain/realtime/constants.js";
 import type { JwtConfig } from "../../../../src/domain/auth/jwt.js";
 import type { Redis } from "ioredis";
-import type { Socket } from "socket.io";
-import { TYPING_TTL_SECONDS } from "../../../../src/utils/cache/constants.js";
+import type { Server, Socket } from "socket.io";
 
 describe("ChatGateway", () => {
   let gateway: ChatGateway;
@@ -18,6 +21,7 @@ describe("ChatGateway", () => {
   let pipelineSetMock: Mock;
   let pipelineZaddMock: Mock;
   let pipelineZremMock: Mock;
+  let pipelineExpireMock: Mock;
   let redisTtlMock: Mock;
   let mockJwt: JwtConfig;
   let mockRedis: Redis;
@@ -74,10 +78,12 @@ describe("ChatGateway", () => {
     pipelineSetMock = vi.fn().mockReturnThis();
     pipelineZaddMock = vi.fn().mockReturnThis();
     pipelineZremMock = vi.fn().mockReturnThis();
+    pipelineExpireMock = vi.fn().mockReturnThis();
     redisPipelineMock = vi.fn().mockReturnValue({
       set: pipelineSetMock,
       zadd: pipelineZaddMock,
       zrem: pipelineZremMock,
+      expire: pipelineExpireMock,
       exec: vi.fn().mockResolvedValue([]),
     });
 
@@ -162,6 +168,32 @@ describe("ChatGateway", () => {
       toMock,
       roomEmitMock,
     };
+  }
+
+  function redisHandler(event: string): () => void {
+    const entry = (mockRedis.on as unknown as Mock).mock.calls.find(([name]) => name === event);
+    if (!entry) throw new Error(`no redis listener registered for "${event}"`);
+    return entry[1] as () => void;
+  }
+
+  interface TrackedTimer {
+    unref: Mock;
+  }
+
+  // Wraps the active setTimeout so each created timer's unref() call is spyable.
+  function trackUnrefCalls(): { timers: TrackedTimer[]; restore: () => void } {
+    const timers: TrackedTimer[] = [];
+    const activeSetTimeout = globalThis.setTimeout;
+    const spy = vi.spyOn(globalThis, "setTimeout");
+    spy.mockImplementation(((handler: () => void, ms?: number) => {
+      const handle = activeSetTimeout(handler, ms) as unknown as { unref?: () => unknown };
+      const originalUnref = handle.unref?.bind(handle);
+      const unrefMock: Mock = vi.fn(() => originalUnref?.());
+      handle.unref = unrefMock as unknown as () => unknown;
+      timers.push({ unref: unrefMock });
+      return handle as unknown as ReturnType<typeof setTimeout>;
+    }) as unknown as typeof setTimeout);
+    return { timers, restore: () => spy.mockRestore() };
   }
 
   describe("handleConnection", () => {
@@ -293,6 +325,30 @@ describe("ChatGateway", () => {
       expect(joinMock).toHaveBeenCalledWith([`conv:${mockConvId}`, `conv:${mockConvId2}`]);
     });
 
+    it("fetches active conversation ids without waiting for the user room join", async () => {
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
+      const { client, joinMock } = createMockSocket({ auth: { token: "valid-jwt" } });
+      let releaseJoin!: () => void;
+      joinMock.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          releaseJoin = resolve;
+        }),
+      );
+
+      const connection = gateway.handleConnection(client);
+      await vi.waitFor(() => {
+        expect(activeConversationIdsMock).toHaveBeenCalledWith(mockUserId);
+      });
+      releaseJoin();
+      await connection;
+      await gateway.handleDisconnect(client);
+      gateway.onApplicationShutdown();
+    });
+
     it("accepts connection with valid JWT in Authorization header", async () => {
       verifyAccessTokenMock.mockImplementation(async () => ({
         sub: mockUserId,
@@ -381,7 +437,7 @@ describe("ChatGateway", () => {
       );
     });
 
-    it("presence:ping refreshes online presence with the tracked connection count", async () => {
+    it("presence:ping rewrites the payload when the connection count changed", async () => {
       verifyAccessTokenMock.mockImplementation(async () => ({
         sub: mockUserId,
         authVersion: 0,
@@ -392,6 +448,7 @@ describe("ChatGateway", () => {
 
       await gateway.handleConnection(first);
       await gateway.handleConnection(second);
+      await gateway.handleDisconnect(second);
       await gateway.handlePresencePing(first);
 
       expect(pipelineSetMock).toHaveBeenCalledTimes(3);
@@ -399,8 +456,82 @@ describe("ChatGateway", () => {
       expect(JSON.parse(lastCall[1] as string)).toEqual({
         state: "online",
         lastSeen: expect.any(Number),
-        conns: 2,
+        conns: 1,
       });
+    });
+
+    it("presence:ping refreshes only liveness when state and connection count are unchanged", async () => {
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
+      const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
+
+      await gateway.handleConnection(client);
+      await gateway.handlePresencePing(client);
+
+      // no re-serialization / re-SET of the presence JSON — only EXPIRE + ZADD
+      expect(pipelineSetMock).toHaveBeenCalledTimes(1);
+      expect(pipelineExpireMock).toHaveBeenCalledWith(`presence:${mockUserId}`, 90);
+      expect(pipelineZaddMock).toHaveBeenCalledTimes(2);
+      expect(pipelineZaddMock).toHaveBeenLastCalledWith(
+        "presence:online",
+        expect.any(Number),
+        mockUserId,
+      );
+    });
+
+    it("presence:ping rebuilds the state key when it expired since the last write", async () => {
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
+      const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
+
+      await gateway.handleConnection(client);
+      expect(pipelineSetMock).toHaveBeenCalledTimes(1);
+
+      // EXPIRE on a vanished key returns 0 — the cheap refresh must fall back
+      // to a full write that restores the presence JSON.
+      redisPipelineMock.mockReturnValue({
+        set: pipelineSetMock,
+        zadd: pipelineZaddMock,
+        zrem: pipelineZremMock,
+        expire: pipelineExpireMock,
+        exec: vi.fn().mockResolvedValue([
+          [null, 0],
+          [null, 1],
+        ]),
+      });
+      await gateway.handlePresencePing(client);
+
+      expect(pipelineSetMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("skips the redundant offline write when the user is already marked offline", async () => {
+      vi.useFakeTimers();
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
+      const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
+
+      await gateway.handleConnection(client);
+      await gateway.handleDisconnect(client);
+
+      redisTtlMock.mockResolvedValue(-1);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(pipelineSetMock).toHaveBeenCalledTimes(2); // online + offline write
+
+      const internal = gateway as unknown as {
+        finalizeOffline(userId: string): Promise<void>;
+      };
+      await internal.finalizeOffline(mockUserId);
+
+      expect(pipelineSetMock).toHaveBeenCalledTimes(2); // offline state unchanged — skipped
     });
 
     it("rechecks offline presence after another node's heartbeat expires", async () => {
@@ -544,9 +675,11 @@ describe("ChatGateway", () => {
       const internal = gateway as unknown as {
         graceTimers: Map<string, unknown>;
         userConnections: Map<string, number>;
+        presenceWrites: Map<string, unknown>;
       };
       expect(internal.graceTimers.size).toBe(0);
       expect(internal.userConnections.size).toBe(0);
+      expect(internal.presenceWrites.size).toBe(0);
 
       redisTtlMock.mockResolvedValue(-1);
       await vi.advanceTimersByTimeAsync(60_000);
@@ -624,18 +757,65 @@ describe("ChatGateway", () => {
   });
 
   describe("typing:start and typing:stop", () => {
+    it.each(["start", "stop"] as const)(
+      "broadcasts %s once to active recipients only",
+      async (event) => {
+        getParticipantUserIdsMock.mockResolvedValue([mockUserId, "other-user", "third-user"]);
+        const { client, toMock, roomEmitMock } = createMockSocket({});
+        client.data = { userId: mockUserId };
+
+        await (event === "start"
+          ? gateway.handleTypingStart(client, { conversationId: mockConvId })
+          : gateway.handleTypingStop(client, { conversationId: mockConvId }));
+
+        expect(toMock).toHaveBeenCalledExactlyOnceWith(["user:other-user", "user:third-user"]);
+        expect(roomEmitMock).toHaveBeenCalledOnce();
+        expect(isParticipantMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(["start", "stop"] as const)("rejects removed senders for %s", async (event) => {
+      getParticipantUserIdsMock.mockResolvedValue(["other-user"]);
+      const { client, toMock, leaveMock } = createMockSocket({});
+      client.data = { userId: mockUserId };
+      client.rooms.add(`conv:${mockConvId}`);
+
+      await (event === "start"
+        ? gateway.handleTypingStart(client, { conversationId: mockConvId })
+        : gateway.handleTypingStop(client, { conversationId: mockConvId }));
+
+      expect(leaveMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
+      expect(toMock).not.toHaveBeenCalled();
+      expect(redisSetMock).not.toHaveBeenCalled();
+      expect(redisDelMock).not.toHaveBeenCalled();
+    });
+
+    it.each(["start", "stop"] as const)(
+      "does not broadcast %s to an empty recipient set",
+      async (event) => {
+        getParticipantUserIdsMock.mockResolvedValue([mockUserId]);
+        const { client, toMock } = createMockSocket({});
+        client.data = { userId: mockUserId };
+
+        await (event === "start"
+          ? gateway.handleTypingStart(client, { conversationId: mockConvId })
+          : gateway.handleTypingStop(client, { conversationId: mockConvId }));
+
+        expect(toMock).not.toHaveBeenCalled();
+      },
+    );
     it("broadcasts typing:start to room excluding sender", async () => {
       const { client, toMock, roomEmitMock } = createMockSocket({});
       client.data = { userId: mockUserId };
 
       await gateway.handleTypingStart(client, { conversationId: mockConvId });
 
-      expect(toMock).toHaveBeenCalledWith("user:other-user");
+      expect(toMock).toHaveBeenCalledWith(["user:other-user"]);
       expect(redisSetMock).toHaveBeenCalledWith(
         `typing:${mockConvId}:${mockUserId}`,
         "1",
         "EX",
-        TYPING_TTL_SECONDS,
+        TYPING_TTL_SECS,
       );
       expect(roomEmitMock).toHaveBeenCalledWith("typing", {
         conversationId: mockConvId,
@@ -650,13 +830,155 @@ describe("ChatGateway", () => {
 
       await gateway.handleTypingStop(client, { conversationId: mockConvId });
 
-      expect(toMock).toHaveBeenCalledWith("user:other-user");
+      expect(toMock).toHaveBeenCalledWith(["user:other-user"]);
       expect(redisDelMock).toHaveBeenCalledWith(`typing:${mockConvId}:${mockUserId}`);
       expect(roomEmitMock).toHaveBeenCalledWith("typing", {
         conversationId: mockConvId,
         userId: mockUserId,
         isTyping: false,
       });
+    });
+
+    it("emits typing:start without waiting for the redis write", async () => {
+      let releaseWrite!: () => void;
+      redisSetMock.mockReturnValue(
+        new Promise<void>((resolve) => {
+          releaseWrite = resolve;
+        }),
+      );
+      const { client, toMock } = createMockSocket({});
+      client.data = { userId: mockUserId };
+
+      // Resolves while the Redis write is still pending — the handler must not await it
+      await gateway.handleTypingStart(client, { conversationId: mockConvId });
+
+      expect(toMock).toHaveBeenCalledWith(["user:other-user"]);
+      expect(redisSetMock).toHaveBeenCalledWith(
+        `typing:${mockConvId}:${mockUserId}`,
+        "1",
+        "EX",
+        TYPING_TTL_SECS,
+      );
+      releaseWrite();
+    });
+
+    it("emits typing:stop without waiting for the redis delete", async () => {
+      let releaseDelete!: () => void;
+      redisDelMock.mockReturnValue(
+        new Promise<void>((resolve) => {
+          releaseDelete = resolve;
+        }),
+      );
+      const { client, toMock } = createMockSocket({});
+      client.data = { userId: mockUserId };
+
+      await gateway.handleTypingStop(client, { conversationId: mockConvId });
+
+      expect(toMock).toHaveBeenCalledWith(["user:other-user"]);
+      expect(redisDelMock).toHaveBeenCalledWith(`typing:${mockConvId}:${mockUserId}`);
+      releaseDelete();
+    });
+
+    it("still broadcasts typing when the redis writes fail", async () => {
+      redisSetMock.mockRejectedValue(new Error("redis down"));
+      redisDelMock.mockRejectedValue(new Error("redis down"));
+      const { client: startClient, toMock: startTo } = createMockSocket({});
+      startClient.data = { userId: mockUserId };
+      const { client: stopClient, toMock: stopTo } = createMockSocket({});
+      stopClient.data = { userId: mockUserId };
+
+      await gateway.handleTypingStart(startClient, { conversationId: mockConvId });
+      await gateway.handleTypingStop(stopClient, { conversationId: mockConvId });
+
+      expect(startTo).toHaveBeenCalledWith(["user:other-user"]);
+      expect(stopTo).toHaveBeenCalledWith(["user:other-user"]);
+    });
+  });
+
+  describe("redis failure handling", () => {
+    it("keeps sockets connected when redis recovers within the disconnect grace period", async () => {
+      vi.useFakeTimers();
+      const disconnectSocketsMock = vi.fn();
+      gateway.server = { disconnectSockets: disconnectSocketsMock } as unknown as Server;
+
+      redisHandler("error")();
+      redisHandler("reconnecting")();
+      redisHandler("ready")(); // recovered before the grace period elapsed
+
+      await vi.advanceTimersByTimeAsync(REDIS_DISCONNECT_GRACE_MS * 2);
+
+      expect(disconnectSocketsMock).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("cancels a scheduled disconnect when redis recovers after a partial outage", async () => {
+      vi.useFakeTimers();
+      const disconnectSocketsMock = vi.fn();
+      gateway.server = { disconnectSockets: disconnectSocketsMock } as unknown as Server;
+
+      redisHandler("close")();
+      await vi.advanceTimersByTimeAsync(REDIS_DISCONNECT_GRACE_MS / 2);
+      redisHandler("connect")();
+
+      await vi.advanceTimersByTimeAsync(REDIS_DISCONNECT_GRACE_MS * 2);
+
+      expect(disconnectSocketsMock).not.toHaveBeenCalled();
+    });
+
+    it("disconnects every socket when the redis outage outlasts the grace period", async () => {
+      vi.useFakeTimers();
+      const disconnectSocketsMock = vi.fn();
+      gateway.server = { disconnectSockets: disconnectSocketsMock } as unknown as Server;
+
+      redisHandler("close")();
+      redisHandler("error")(); // repeat failures must not stack timers
+      redisHandler("reconnecting")();
+
+      await vi.advanceTimersByTimeAsync(REDIS_DISCONNECT_GRACE_MS - 1);
+      expect(disconnectSocketsMock).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(disconnectSocketsMock).toHaveBeenCalledTimes(1);
+      expect(disconnectSocketsMock).toHaveBeenCalledWith(true);
+    });
+  });
+
+  describe("timer ref hygiene", () => {
+    it("unrefs presence timers so pending grace work cannot delay process exit", async () => {
+      vi.useFakeTimers();
+      const tracker = trackUnrefCalls();
+      try {
+        verifyAccessTokenMock.mockImplementation(async () => ({
+          sub: mockUserId,
+          authVersion: 0,
+          exp: Math.floor(Date.now() / 1000) + 900,
+        }));
+        const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
+        await gateway.handleConnection(client);
+        await gateway.handleDisconnect(client);
+        redisTtlMock.mockResolvedValue(60); // another node heartbeats → offline recheck scheduled
+        await vi.advanceTimersByTimeAsync(60_000);
+
+        // expiry timer + presence grace timer + offline recheck timer
+        expect(tracker.timers).toHaveLength(3);
+        expect(tracker.timers.every((timer) => timer.unref.mock.calls.length > 0)).toBe(true);
+      } finally {
+        tracker.restore();
+      }
+    });
+
+    it("unrefs the redis outage timer so it cannot delay process exit", async () => {
+      vi.useFakeTimers();
+      const tracker = trackUnrefCalls();
+      try {
+        gateway.server = { disconnectSockets: vi.fn() } as unknown as Server;
+        redisHandler("error")();
+
+        expect(tracker.timers).toHaveLength(1);
+        expect(tracker.timers.every((timer) => timer.unref.mock.calls.length > 0)).toBe(true);
+      } finally {
+        tracker.restore();
+      }
     });
   });
 });

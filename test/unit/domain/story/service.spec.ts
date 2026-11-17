@@ -8,6 +8,7 @@ import type { ConversationService } from "../../../../src/domain/conversation/se
 import type { MessageService } from "../../../../src/domain/message/service.js";
 import type { RealtimeService } from "../../../../src/domain/realtime/realtime.service.js";
 import type { CreateStoryDto } from "../../../../src/domain/story/dto/request.js";
+import type { UserStoryFeedResponse } from "../../../../src/domain/story/dto/response.js";
 
 describe("StoryService", () => {
   let service: StoryService;
@@ -44,6 +45,7 @@ describe("StoryService", () => {
 
   let getBestEffortMock: Mock;
   let setBestEffortMock: Mock;
+  let loadFeedBestEffortMock: Mock;
   let deleteBestEffortMock: Mock;
   let deleteManyBestEffortMock: Mock;
 
@@ -80,6 +82,29 @@ describe("StoryService", () => {
     expiresAt: new Date("2026-10-15T00:00:00Z"),
     deletedAt: null,
   };
+
+  /** JSON-shaped feed entry as it comes out of the cache (string dates). */
+  const makeRawFeedEntry = (userId: string): unknown => ({
+    user: { id: userId, username: `u-${userId}`, fullName: `User ${userId}`, avatarUrl: null },
+    stories: [
+      {
+        id: `story-${userId}`,
+        userId,
+        kind: "TEXT",
+        bucket: null,
+        objectKey: null,
+        mimeType: null,
+        width: null,
+        height: null,
+        durationMs: null,
+        caption: "hello",
+        background: null,
+        createdAt: "2026-11-01T00:00:00.000Z",
+        expiresAt: "2026-11-02T00:00:00.000Z",
+        archivedAt: null,
+      },
+    ],
+  });
 
   beforeEach(() => {
     createStoryMock = vi.fn().mockImplementation((data: NewStory, _audienceIds?: string[]) =>
@@ -175,6 +200,9 @@ describe("StoryService", () => {
 
     getBestEffortMock = vi.fn().mockResolvedValue(null);
     setBestEffortMock = vi.fn().mockResolvedValue(undefined);
+    loadFeedBestEffortMock = vi.fn((_key: string, _ttl: number, load: () => Promise<unknown>) =>
+      load(),
+    );
     deleteBestEffortMock = vi.fn().mockResolvedValue(undefined);
     deleteManyBestEffortMock = vi.fn().mockResolvedValue(undefined);
 
@@ -229,8 +257,7 @@ describe("StoryService", () => {
       deleteBestEffort: deleteBestEffortMock,
       deleteManyBestEffort: deleteManyBestEffortMock,
       invalidateFeedsBestEffort: deleteManyBestEffortMock,
-      loadFeedBestEffort: async (_key: string, _ttl: number, load: () => Promise<unknown>) =>
-        load(),
+      loadFeedBestEffort: loadFeedBestEffortMock,
     } as unknown as CacheStoreExt;
 
     getOrCreateDirectMock = vi.fn().mockResolvedValue({ id: "conv-1" });
@@ -258,6 +285,47 @@ describe("StoryService", () => {
       messageServiceMock,
       realtimeServiceMock,
     );
+  });
+
+  describe("getFeed", () => {
+    it("reuses the friend ids fetched for the cache lookup inside the feed loader", async () => {
+      await service.getFeed("user-1");
+
+      expect(getFriendUserIdsMock).toHaveBeenCalledTimes(1);
+      expect(findActiveByUserIdsMock).toHaveBeenCalledWith(
+        ["user-1", "friend-1", "friend-2"],
+        "user-1",
+      );
+      expect(findUsersByIdsMock).toHaveBeenCalledWith(["user-1", "friend-1", "friend-2"]);
+    });
+
+    it("filters cached entries down to visible users on a cache hit", async () => {
+      getBestEffortMock.mockResolvedValueOnce([
+        makeRawFeedEntry("friend-1"),
+        makeRawFeedEntry("stranger-1"),
+      ]);
+
+      const result = await service.getFeed("user-1");
+
+      expect(result.map((entry) => entry.user.id)).toEqual(["friend-1"]);
+      expect(result[0].stories[0].createdAt).toBeInstanceOf(Date);
+    });
+
+    it("passes a revive to loadFeedBestEffort that applies the same filter and date revival to mid-fill values", async () => {
+      await service.getFeed("user-1");
+
+      expect(loadFeedBestEffortMock).toHaveBeenCalledTimes(1);
+      const revive = loadFeedBestEffortMock.mock.calls[0][3] as (
+        raw: unknown,
+      ) => UserStoryFeedResponse[];
+      expect(typeof revive).toBe("function");
+
+      const revived = revive([makeRawFeedEntry("friend-1"), makeRawFeedEntry("stranger-1")]);
+      expect(revived.map((entry) => entry.user.id)).toEqual(["friend-1"]);
+      expect(revived[0].stories[0].createdAt).toBeInstanceOf(Date);
+      expect(revived[0].stories[0].expiresAt).toBeInstanceOf(Date);
+      expect(revived[0].stories[0].archivedAt).toBeNull();
+    });
   });
 
   describe("updateStory", () => {
@@ -315,6 +383,37 @@ describe("StoryService", () => {
       expect(presignGetMock).toHaveBeenCalledOnce();
     });
 
+    it("checks friendship and exclusions concurrently for exclude audiences", async () => {
+      findByIdMock.mockResolvedValue({
+        ...mockStory,
+        audienceMode: "EXCLUDE",
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+      let resolveFriendship!: (value: boolean) => void;
+      let resolveAudience!: (value: boolean) => void;
+      isAcceptedFriendMock.mockReturnValue(
+        new Promise<boolean>((resolve) => {
+          resolveFriendship = resolve;
+        }),
+      );
+      isStoryAudienceMock.mockReturnValue(
+        new Promise<boolean>((resolve) => {
+          resolveAudience = resolve;
+        }),
+      );
+      presignGetMock.mockResolvedValue({ downloadUrl: "https://storage.example/signed" });
+
+      const result = service.getMediaUrl("friend-1", mockStory.id);
+      await vi.waitFor(() => {
+        expect(isAcceptedFriendMock).toHaveBeenCalledOnce();
+        expect(isStoryAudienceMock).toHaveBeenCalledOnce();
+      });
+      resolveFriendship(true);
+      resolveAudience(false);
+
+      await expect(result).resolves.toMatchObject({ url: expect.any(String) });
+    });
+
     it("does not sign media for an unauthorized viewer", async () => {
       findByIdMock.mockResolvedValue({ ...mockStory, expiresAt: new Date(Date.now() + 60_000) });
       isAcceptedFriendMock.mockResolvedValue(false);
@@ -368,6 +467,21 @@ describe("StoryService", () => {
         "stories:feed:user-owner-1",
         "stories:feed:friend-1",
       ]);
+    });
+
+    it("rejects media above the 25 MiB cap before creating the story", async () => {
+      headObjectMock.mockResolvedValueOnce({
+        contentLength: 25 * 1024 * 1024 + 1,
+        contentType: "video/mp4",
+      });
+
+      await expect(
+        service.createStory("user-owner-1", {
+          kind: "VIDEO",
+          objectKey: "stories/user-owner-1/clip.mp4",
+        }),
+      ).rejects.toMatchObject({ code: "FILE_TOO_LARGE", params: { maxMb: "25" } });
+      expect(createStoryMock).not.toHaveBeenCalled();
     });
   });
 

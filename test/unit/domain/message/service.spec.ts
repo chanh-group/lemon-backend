@@ -27,6 +27,7 @@ describe("MessageService", () => {
 
   let getParticipantUserIdsMock: Mock;
   let getMessageRecipientUserIdsMock: Mock;
+  let isMessageInConversationMock: Mock;
   let findConversationByIdMock: Mock;
   let assertCanChatMock: Mock;
   let emitNewMessageMock: Mock;
@@ -72,6 +73,7 @@ describe("MessageService", () => {
 
     getParticipantUserIdsMock = vi.fn().mockResolvedValue([userA, userB]);
     getMessageRecipientUserIdsMock = vi.fn().mockResolvedValue([userA, userB]);
+    isMessageInConversationMock = vi.fn().mockResolvedValue(true);
     findConversationByIdMock = vi
       .fn()
       .mockImplementation((_conversationId: string, userId: string) =>
@@ -100,6 +102,7 @@ describe("MessageService", () => {
     const mockConvRepo = {
       getParticipantUserIds: getParticipantUserIdsMock,
       getMessageRecipientUserIds: getMessageRecipientUserIdsMock,
+      isMessageInConversation: isMessageInConversationMock,
       findById: findConversationByIdMock,
       canAccessMessage: canAccessMessageMock,
       getGroupMembership: getGroupMembershipMock,
@@ -121,6 +124,8 @@ describe("MessageService", () => {
 
   describe("sendMessage", () => {
     it("throws NOT_PARTICIPANT if sender is not in the conversation", async () => {
+      findConversationByIdMock.mockResolvedValueOnce(null);
+
       await expect(
         service.sendMessage(outsider, convId, { body: "Hello", kind: "TEXT" }),
       ).rejects.toThrow(expect.objectContaining({ code: "NOT_PARTICIPANT" }));
@@ -265,8 +270,52 @@ describe("MessageService", () => {
       });
 
       expect(res.id).toBe(msgId);
-      expect(findByIdMock).toHaveBeenCalledWith(msgId);
+      expect(findByIdMock).toHaveBeenCalledWith(msgId, false);
       expect(createMessageMock).toHaveBeenCalledWith(expect.objectContaining({ replyToId: msgId }));
+    });
+
+    it("refreshes the reply target after persistence", async () => {
+      findByIdMock.mockResolvedValue(mockMessage);
+      createMessageMock.mockResolvedValue({
+        message: { ...mockMessage, replyToId: msgId },
+        isNew: true,
+      });
+
+      const res = await service.sendMessage(userA, convId, {
+        body: "Hello",
+        kind: "TEXT",
+        replyToId: msgId,
+      });
+
+      expect(findByIdMock).toHaveBeenCalledTimes(2);
+      expect(findByIdMock).toHaveBeenCalledWith(msgId, false);
+      expect(res.replyTarget).toMatchObject({ id: msgId, body: "Hello", deletedAt: null });
+    });
+
+    it("redacts a reply target revoked after validation from the response and event", async () => {
+      const deletedAt = new Date();
+      findByIdMock
+        .mockResolvedValueOnce(mockMessage)
+        .mockResolvedValueOnce({ ...mockMessage, deletedAt, body: "private old text" });
+      createMessageMock.mockResolvedValue({
+        message: { ...mockMessage, id: "reply", replyToId: msgId },
+        isNew: true,
+      });
+
+      const res = await service.sendMessage(userA, convId, {
+        body: "Hello",
+        kind: "TEXT",
+        replyToId: msgId,
+      });
+
+      expect(res.replyTarget).toMatchObject({ id: msgId, body: null, storyPreview: null, deletedAt });
+      expect(emitNewMessageMock).toHaveBeenCalledWith(
+        convId,
+        expect.objectContaining({ replyTarget: res.replyTarget }),
+        expect.arrayContaining([
+          expect.objectContaining({ payload: expect.objectContaining({ replyTarget: res.replyTarget }) }),
+        ]),
+      );
     });
 
     it("does not look up a reply message when replyToId is absent", async () => {
@@ -297,6 +346,32 @@ describe("MessageService", () => {
       await expect(service.getTimeline(outsider, convId)).rejects.toThrow(
         expect.objectContaining({ code: "NOT_PARTICIPANT" }),
       );
+    });
+
+    it("throws MESSAGE_NOT_FOUND when the cursor is outside the conversation", async () => {
+      canAccessMessageMock.mockResolvedValueOnce(false);
+
+      await expect(service.getTimeline(userA, convId, msgId)).rejects.toMatchObject({
+        code: "MESSAGE_NOT_FOUND",
+      });
+      expect(findTimelineMock).not.toHaveBeenCalled();
+    });
+
+    it("throws MESSAGE_NOT_FOUND when the after anchor is outside the conversation", async () => {
+      canAccessMessageMock.mockResolvedValueOnce(false);
+
+      await expect(
+        service.getTimeline(userA, convId, undefined, undefined, msgId),
+      ).rejects.toMatchObject({ code: "MESSAGE_NOT_FOUND" });
+      expect(findTimelineMock).not.toHaveBeenCalled();
+    });
+
+    it("skips cursor and after membership checks when neither is provided", async () => {
+      findTimelineMock.mockResolvedValue({ items: [], hasMore: false });
+
+      await service.getTimeline(userA, convId);
+
+      expect(canAccessMessageMock).not.toHaveBeenCalled();
     });
 
     it("returns message timeline for member", async () => {
@@ -552,6 +627,45 @@ describe("MessageService", () => {
       expect(res.attachments![0].fileName).toBe("Báo Cáo.pdf");
     });
 
+    it("checks reply lookup while verifying attachment storage", async () => {
+      const storage = {
+        getBucket: vi.fn().mockReturnValue("lemon-chat-storage"),
+        presignGet: vi.fn().mockResolvedValue({ downloadUrl: "https://storage.example/file" }),
+        headObject: vi.fn().mockResolvedValue({ contentLength: 1024 }),
+      };
+      const serviceWithStorage = new MessageService(
+        { createMessageWithConversationUpdate: createMessageMock, findById: findByIdMock, findSenderProfiles: findSenderProfilesMock } as any,
+        {
+          getParticipantUserIds: getParticipantUserIdsMock,
+          getMessageRecipientUserIds: getMessageRecipientUserIdsMock,
+          canAccessMessage: canAccessMessageMock,
+          findById: findConversationByIdMock,
+        } as any,
+        { assertCanChat: assertCanChatMock } as any,
+        { emitNewMessage: emitNewMessageMock } as any,
+        storage as any,
+      );
+      let resolveReply!: (message: Message) => void;
+      findByIdMock.mockReturnValue(new Promise<Message>((resolve) => (resolveReply = resolve)));
+      createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
+      const request = serviceWithStorage.sendMessage(userA, convId, {
+        kind: "FILE",
+        replyToId: msgId,
+        attachments: [
+          {
+            objectKey: `chat/${convId}/${userA}/file.pdf`,
+            fileName: "file.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 1024,
+          },
+        ],
+      });
+
+      await vi.waitFor(() => expect(storage.headObject).toHaveBeenCalledOnce());
+      resolveReply(mockMessage);
+      await expect(request).resolves.toMatchObject({ id: msgId });
+    });
+
     it("forwards only attachments from an accessible source message", async () => {
       const sourceConversationId = "0193a2b1-0000-7000-8000-000000000011";
       const sourceAttachment = {
@@ -708,15 +822,13 @@ describe("MessageService", () => {
       });
     });
 
-    it("rejects reactions after a direct conversation is blocked", async () => {
+    it("propagates USER_BLOCKED from the reaction transaction without emitting", async () => {
       findByIdMock.mockResolvedValue(mockMessage);
-      findConversationByIdMock.mockResolvedValue({ kind: "DIRECT", partner: { id: userB } });
-      assertCanChatMock.mockRejectedValue(new BusinessError("USER_BLOCKED"));
+      reactMessageMock.mockRejectedValue(new BusinessError("USER_BLOCKED"));
 
       await expect(service.reactToMessage(userA, msgId, "❤️")).rejects.toMatchObject({
         code: "USER_BLOCKED",
       });
-      expect(reactMessageMock).not.toHaveBeenCalled();
       expect(emitMessageReactionMock).not.toHaveBeenCalled();
     });
   });

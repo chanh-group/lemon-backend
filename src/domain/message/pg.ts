@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, asc, desc, eq, gt, inArray, isNull, lt, notExists, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, notExists, or, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../utils/errors/pg.js";
@@ -15,16 +15,18 @@ import {
 } from "./constants.js";
 import type {
   AttachmentInsertData,
+  AttachmentResponseSource,
   CreatedMessageResult,
   MessageRepository,
   MessageTimelineResult,
   MessageWithAttachments,
+  ReactionResponseSource,
+  ReplyTargetMessage,
 } from "./repository.js";
 import type { StoryPreview } from "../story/types.js";
 import {
   type Message,
   type MessageAttachment,
-  type MessageReaction,
   messageAttachments,
   messageHiddenForUsers,
   messageReactions,
@@ -32,6 +34,9 @@ import {
 } from "./schema.js";
 import { groupReactions } from "./dto/mapper.js";
 import type { MessageReactionSummary } from "./dto/response.js";
+
+/** Transaction handle handed to `db.transaction` callbacks. */
+type DbTx = Parameters<Parameters<DrizzleDb["transaction"]>[0]>[0];
 
 /**
  * Conversation inbox preview. A story reaction carries the emoji as its body,
@@ -60,23 +65,31 @@ export class MessagePgRepository implements MessageRepository {
       .where(inArray(users.id, [...new Set(senderIds)]));
   }
 
-  async findByClientMsgId(
-    conversationId: string,
-    senderId: string,
-    clientMsgId: string,
-  ): Promise<MessageWithAttachments | null> {
-    const [msg] = await this.db
+  private async findExistingByClientMsgId(
+    db: Pick<DrizzleDb, "select">,
+    messageData: {
+      conversationId: string;
+      senderId: string;
+      clientMsgId: string;
+    },
+  ): Promise<CreatedMessageResult | null> {
+    const [existing] = await db
       .select()
       .from(messages)
       .where(
         and(
-          eq(messages.conversationId, conversationId),
-          eq(messages.senderId, senderId),
-          eq(messages.clientMsgId, clientMsgId),
+          eq(messages.conversationId, messageData.conversationId),
+          eq(messages.senderId, messageData.senderId),
+          eq(messages.clientMsgId, messageData.clientMsgId),
         ),
       )
       .limit(1);
-    return msg ?? null;
+    if (!existing) return null;
+    const existingAttachments = await db
+      .select()
+      .from(messageAttachments)
+      .where(eq(messageAttachments.messageId, existing.id));
+    return { message: { ...existing, attachments: existingAttachments }, isNew: false };
   }
 
   async createMessageWithConversationUpdate(messageData: {
@@ -137,32 +150,9 @@ export class MessagePgRepository implements MessageRepository {
           if (relation?.status !== "ACCEPTED") throw new BusinessError("FRIENDSHIP_REQUIRED");
         }
 
-        // 1. Idempotency check with clientMsgId
-        if (messageData.clientMsgId) {
-          const [existing] = await tx
-            .select()
-            .from(messages)
-            .where(
-              and(
-                eq(messages.conversationId, messageData.conversationId),
-                eq(messages.senderId, messageData.senderId),
-                eq(messages.clientMsgId, messageData.clientMsgId),
-              ),
-            )
-            .limit(1);
-          if (existing) {
-            if (messageData.attachments && messageData.attachments.length > 0) {
-              const existingAttachments = await tx
-                .select()
-                .from(messageAttachments)
-                .where(eq(messageAttachments.messageId, existing.id));
-              return { message: { ...existing, attachments: existingAttachments }, isNew: false };
-            }
-            return { message: existing, isNew: false };
-          }
-        }
-
-        // 2. Insert new message
+        // 1. Insert the message. The partial unique index on clientMsgId
+        // swallows duplicate retries, so the happy path skips a pre-check
+        // round trip; a swallowed insert resolves the existing row below.
         const [newMsg] = await tx
           .insert(messages)
           .values({
@@ -176,7 +166,23 @@ export class MessagePgRepository implements MessageRepository {
             storyPreview: messageData.storyPreview ?? null,
             isForwarded: messageData.isForwarded ?? false,
           })
+          .onConflictDoNothing({
+            target: [messages.conversationId, messages.senderId, messages.clientMsgId],
+            where: sql`${messages.clientMsgId} IS NOT NULL`,
+          })
           .returning();
+
+        if (!newMsg) {
+          if (messageData.clientMsgId) {
+            const existing = await this.findExistingByClientMsgId(tx, {
+              conversationId: messageData.conversationId,
+              senderId: messageData.senderId,
+              clientMsgId: messageData.clientMsgId,
+            });
+            if (existing) return existing;
+          }
+          throw new BusinessError("CONFLICT");
+        }
 
         let insertedAttachments: MessageAttachment[] | undefined;
         if (messageData.attachments && messageData.attachments.length > 0) {
@@ -200,7 +206,7 @@ export class MessagePgRepository implements MessageRepository {
             .returning();
         }
 
-        // 3. Atomically update parent conversation inbox fields
+        // 2. Atomically update parent conversation inbox fields
         const preview = toConversationPreview(newMsg.kind, newMsg.body);
         const isLatest = sql`(${conversations.lastMessageAt} IS NULL
           OR ${conversations.lastMessageAt} < ${newMsg.createdAt}
@@ -224,12 +230,12 @@ export class MessagePgRepository implements MessageRepository {
       });
     } catch (err: unknown) {
       if (messageData.clientMsgId && isUniqueViolation(err, "messages_client_msg_uq")) {
-        const existing = await this.findByClientMsgId(
-          messageData.conversationId,
-          messageData.senderId,
-          messageData.clientMsgId,
-        );
-        if (existing) return { message: existing, isNew: false };
+        const existing = await this.findExistingByClientMsgId(this.db, {
+          conversationId: messageData.conversationId,
+          senderId: messageData.senderId,
+          clientMsgId: messageData.clientMsgId,
+        });
+        if (existing) return existing;
         throw new BusinessError("CONFLICT");
       }
       if (isForeignKeyViolation(err)) {
@@ -338,23 +344,38 @@ export class MessagePgRepository implements MessageRepository {
     if (messageIds.length === 0) return { items, nextCursor, hasMore, authorized };
     const [attachmentRows, reactionRows] = await Promise.all([
       this.db
-        .select()
+        .select({
+          id: messageAttachments.id,
+          messageId: messageAttachments.messageId,
+          kind: messageAttachments.kind,
+          objectKey: messageAttachments.objectKey,
+          fileName: messageAttachments.fileName,
+          mimeType: messageAttachments.mimeType,
+          sizeBytes: messageAttachments.sizeBytes,
+          width: messageAttachments.width,
+          height: messageAttachments.height,
+          durationMs: messageAttachments.durationMs,
+        })
         .from(messageAttachments)
         .where(inArray(messageAttachments.messageId, messageIds)),
       this.db
-        .select()
+        .select({
+          messageId: messageReactions.messageId,
+          userId: messageReactions.userId,
+          emoji: messageReactions.emoji,
+        })
         .from(messageReactions)
         .where(inArray(messageReactions.messageId, messageIds)),
     ]);
 
-    const attachmentsByMessageId = new Map<string, MessageAttachment[]>();
+    const attachmentsByMessageId = new Map<string, AttachmentResponseSource[]>();
     for (const att of attachmentRows) {
       const list = attachmentsByMessageId.get(att.messageId) ?? [];
       list.push(att);
       attachmentsByMessageId.set(att.messageId, list);
     }
 
-    const reactionsByMessageId = new Map<string, MessageReaction[]>();
+    const reactionsByMessageId = new Map<string, ReactionResponseSource[]>();
     for (const r of reactionRows) {
       const list = reactionsByMessageId.get(r.messageId) ?? [];
       list.push(r);
@@ -423,7 +444,7 @@ export class MessagePgRepository implements MessageRepository {
     conversationId: string,
     messageIds: string[],
     viewerId?: string,
-  ): Promise<Message[]> {
+  ): Promise<ReplyTargetMessage[]> {
     if (messageIds.length === 0) return [];
     let historyBoundaryMessageId: string | null | undefined;
     if (viewerId) {
@@ -442,7 +463,14 @@ export class MessagePgRepository implements MessageRepository {
       historyBoundaryMessageId = membership.historyBoundaryMessageId;
     }
     return this.db
-      .select()
+      .select({
+        id: messages.id,
+        senderId: messages.senderId,
+        kind: messages.kind,
+        body: messages.body,
+        deletedAt: messages.deletedAt,
+        storyPreview: messages.storyPreview,
+      })
       .from(messages)
       .where(
         and(
@@ -667,21 +695,8 @@ export class MessagePgRepository implements MessageRepository {
     userId: string,
     messageId: string,
     emoji: string,
-    requiredFriendship?: { userAId: string; userBId: string },
   ): Promise<{ reactions: MessageReactionSummary[]; conversationId: string }> {
     return this.db.transaction(async (tx) => {
-      if (requiredFriendship) {
-        const [userLow, userHigh] = [requiredFriendship.userAId, requiredFriendship.userBId].sort();
-        const [relation] = await tx
-          .select({ status: friendships.status })
-          .from(friendships)
-          .where(and(eq(friendships.userLow, userLow), eq(friendships.userHigh, userHigh)))
-          .for("share")
-          .limit(1);
-        if (relation?.status === "BLOCKED") throw new BusinessError("USER_BLOCKED");
-        if (relation?.status !== "ACCEPTED") throw new BusinessError("FRIENDSHIP_REQUIRED");
-      }
-
       const [msg] = await tx
         .select({
           id: messages.id,
@@ -709,6 +724,8 @@ export class MessagePgRepository implements MessageRepository {
         .limit(1);
 
       if (!participant) throw new BusinessError("NOT_PARTICIPANT");
+
+      await this.assertDirectReactionAllowed(tx, msg.conversationId, userId);
 
       const [existing] = await tx
         .select()
@@ -742,5 +759,46 @@ export class MessagePgRepository implements MessageRepository {
         conversationId: msg.conversationId,
       };
     });
+  }
+
+  /**
+   * Direct conversations gate reactions on the accepted friendship, checked
+   * under the transaction lock. The pair is derived from the conversation so
+   * the locked message select stays the single source of truth.
+   */
+  private async assertDirectReactionAllowed(
+    tx: DbTx,
+    conversationId: string,
+    userId: string,
+  ): Promise<void> {
+    const [conversation] = await tx
+      .select({ kind: conversations.kind })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .limit(1);
+    if (conversation?.kind !== "DIRECT") return;
+
+    const [partner] = await tx
+      .select({ userId: conversationParticipants.userId })
+      .from(conversationParticipants)
+      .where(
+        and(
+          eq(conversationParticipants.conversationId, conversationId),
+          ne(conversationParticipants.userId, userId),
+          isNull(conversationParticipants.leftAt),
+        ),
+      )
+      .limit(1);
+    if (!partner) return;
+
+    const [userLow, userHigh] = [userId, partner.userId].sort();
+    const [relation] = await tx
+      .select({ status: friendships.status })
+      .from(friendships)
+      .where(and(eq(friendships.userLow, userLow), eq(friendships.userHigh, userHigh)))
+      .for("share")
+      .limit(1);
+    if (relation?.status === "BLOCKED") throw new BusinessError("USER_BLOCKED");
+    if (relation?.status !== "ACCEPTED") throw new BusinessError("FRIENDSHIP_REQUIRED");
   }
 }

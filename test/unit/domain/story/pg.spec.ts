@@ -4,9 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 import type { DrizzleDb } from "../../../../src/configs/database.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
 import { StoryPgRepository } from "../../../../src/domain/story/pg.js";
+import { STORY_FEED_MAX_PER_AUTHOR } from "../../../../src/domain/story/constants.js";
 import { encodeReactionCursor } from "../../../../src/domain/story/dto/mapper.js";
 import {
   stories,
+  storyMutes,
   storyReactions,
   storyViews,
   userStorySettings,
@@ -16,12 +18,16 @@ import { friendships } from "../../../../src/domain/friend/schema.js";
 function makeDb(rows: unknown[] = []) {
   const limitMock = vi.fn<(limit: number) => Promise<unknown>>();
   const groupByMock = vi.fn<(column: unknown) => Promise<unknown>>();
-  const orderByMock = vi.fn<(condition: SQL) => unknown>(() => ({ limit: limitMock }));
+  const asMock = vi.fn<(alias: string) => unknown>((alias) => ({ subqueryAlias: alias }));
+  const orderByMock = vi.fn<(condition: SQL) => unknown>(() =>
+    Object.assign(Promise.resolve(rows), { limit: limitMock }),
+  );
   const whereMock = vi.fn<(condition: SQL) => unknown>(() =>
     Object.assign(Promise.resolve(rows), {
       orderBy: orderByMock,
       limit: limitMock,
       groupBy: groupByMock,
+      as: asMock,
     }),
   );
   const joinMock = vi.fn(() => ({
@@ -33,7 +39,7 @@ function makeDb(rows: unknown[] = []) {
     innerJoin: joinMock,
     leftJoin: vi.fn(() => ({ where: whereMock })),
   }));
-  const selectMock = vi.fn(() => ({ from: fromMock }));
+  const selectMock = vi.fn((_selection?: unknown) => ({ from: fromMock }));
   const returningMock = vi.fn();
   const onConflictMock = vi.fn<(conflict: unknown) => unknown>(() => ({
     returning: returningMock,
@@ -60,9 +66,11 @@ function makeDb(rows: unknown[] = []) {
   return {
     db,
     selectMock,
+    fromMock,
     whereMock,
     orderByMock,
     groupByMock,
+    asMock,
     limitMock,
     deleteMock,
     deleteWhereMock,
@@ -374,5 +382,138 @@ describe("StoryPgRepository purge queries", () => {
       expect(groupByMock).toHaveBeenCalledWith(storyReactions.storyId);
       expect(result.get("s1")).toBe(3);
     });
+  });
+});
+
+describe("StoryPgRepository.findActiveByUserIds", () => {
+  const storyRow = {
+    id: "s1",
+    userId: "u1",
+    kind: "TEXT",
+    bucket: null,
+    objectKey: null,
+    mimeType: null,
+    width: null,
+    height: null,
+    durationMs: null,
+    caption: "hello",
+    background: null,
+    allowReplies: true,
+    allowReactions: true,
+    audienceMode: "ALL_FRIENDS",
+    archivedAt: null,
+    createdAt: new Date("2026-11-01T00:00:00Z"),
+    expiresAt: new Date("2026-11-02T00:00:00Z"),
+    deletedAt: null,
+    feedRank: 1,
+  };
+
+  it("does not query for an empty user list", async () => {
+    const { db, selectMock } = makeDb();
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.findActiveByUserIds([])).resolves.toEqual([]);
+    expect(selectMock).not.toHaveBeenCalled();
+  });
+
+  it("caps each author to their most recent stories with a row_number window", async () => {
+    const { db, selectMock, whereMock, orderByMock } = makeDb([storyRow]);
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.findActiveByUserIds(["u1"]);
+
+    const fields = selectMock.mock.calls[0][0] as { feedRank: { getSQL(): SQL } };
+    const windowSql = render(fields.feedRank.getSQL());
+    expect(windowSql).toContain("row_number() over (partition by");
+    expect(windowSql).toContain(
+      'partition by "stories"."user_id" order by "stories"."created_at" desc',
+    );
+
+    const capWhere = whereMock.mock.calls[1][0];
+    expect(render(capWhere)).toContain("feed_rank <=");
+    expect(dialect.sqlToQuery(capWhere).params).toEqual([STORY_FEED_MAX_PER_AUTHOR]);
+    expect(render(orderByMock.mock.calls[0][0])).toContain("created_at");
+
+    const { feedRank: _feedRank, ...expectedStory } = storyRow;
+    expect(result).toEqual([expectedStory]);
+    expect(result[0]).not.toHaveProperty("feedRank");
+  });
+
+  it("excludes muted authors with a NOT EXISTS in the same query instead of a second round trip", async () => {
+    const { db, fromMock, whereMock } = makeDb([]);
+    const repo = new StoryPgRepository(db);
+
+    await repo.findActiveByUserIds(["u1"], "viewer-1");
+
+    const feedWhere = whereMock.mock.calls
+      .map(([condition]) => render(condition))
+      .find((where) => where.includes('"stories"."expires_at" > now()'));
+    expect(feedWhere).toContain('not exists (select 1 from "story_mutes"');
+    expect(feedWhere).toContain('"story_mutes"."author_id" = "stories"."user_id"');
+    expect(fromMock).not.toHaveBeenCalledWith(storyMutes);
+  });
+
+  it("keeps the audience visibility rules for the viewer", async () => {
+    const { db, whereMock } = makeDb([]);
+    const repo = new StoryPgRepository(db);
+
+    await repo.findActiveByUserIds(["u1"], "viewer-1");
+
+    const rendered = whereMock.mock.calls.map(([condition]) => render(condition));
+    const feedWhere = rendered.find((where) => where.includes('"stories"."expires_at" > now()'));
+    expect(feedWhere).toContain('"stories"."user_id" =');
+    expect(feedWhere).toContain('"stories"."audience_mode" =');
+    expect(feedWhere).toContain('"stories"."id" in');
+    expect(feedWhere).toContain('"stories"."id" not in');
+
+    // CUSTOM/EXCLUDE membership lookups still resolve the viewer's audience rows
+    const audienceLookups = rendered.filter((where) =>
+      where.includes('"story_audiences"."user_id" ='),
+    );
+    expect(audienceLookups).toHaveLength(2);
+    for (const lookup of audienceLookups) {
+      expect(lookup).toContain('"story_audiences"."user_id" = $1');
+    }
+  });
+});
+
+describe("StoryPgRepository.findViewersByStoryId", () => {
+  const viewerRow = {
+    userId: "u1",
+    username: "f1",
+    fullName: "F1",
+    avatarUrl: null,
+    viewedAt: new Date("2026-11-01T00:00:00Z"),
+    reaction: null,
+    reactionKind: null,
+  };
+
+  it("reports the same totalViewsCount on a cursor page as on the first page", async () => {
+    const { db, limitMock } = makeDb([{ total: 7 }]);
+    limitMock.mockResolvedValue([viewerRow]);
+    const repo = new StoryPgRepository(db);
+
+    const first = await repo.findViewersByStoryId("s1", undefined, 20);
+    const second = await repo.findViewersByStoryId("s1", "u0", 20);
+
+    expect(first.totalViewsCount).toBe(7);
+    expect(second.totalViewsCount).toBe(7);
+    expect(second.items).toHaveLength(1);
+  });
+
+  it("keeps the cursor predicate out of the count query while rows still page from it", async () => {
+    const { db, whereMock, limitMock } = makeDb([{ total: 7 }]);
+    limitMock.mockResolvedValue([]);
+    const repo = new StoryPgRepository(db);
+
+    await repo.findViewersByStoryId("s1", "u0", 20);
+
+    const rowWhere = render(whereMock.mock.calls[0][0]);
+    const countWhere = render(whereMock.mock.calls[1][0]);
+    expect(rowWhere).toContain("SELECT sv.viewed_at FROM story_views sv");
+    expect(countWhere).not.toContain("SELECT sv.viewed_at FROM story_views sv");
+    expect(countWhere).toContain('"story_views"."story_id" = $1');
+    expect(countWhere).toContain('"story_views"."anonymous" = $2');
+    expect(countWhere).toContain("now() - interval '24 hours'");
   });
 });

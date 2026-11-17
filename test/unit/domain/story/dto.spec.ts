@@ -4,6 +4,7 @@ import {
   reactStorySchema,
   replyStorySchema,
 } from "../../../../src/domain/story/dto/request.js";
+import { STORY_MAX_DURATION_MS } from "../../../../src/domain/story/constants.js";
 
 describe("createStorySchema", () => {
   it("accepts a valid IMAGE payload", () => {
@@ -63,6 +64,15 @@ describe("createStorySchema", () => {
       throw new Error("expected the payload to be accepted");
     }
     expect(result.data).not.toHaveProperty("mimeType");
+  });
+
+  it("accepts one minute and rejects larger declared durations", () => {
+    expect(
+      createStorySchema.safeParse({ kind: "VIDEO", durationMs: STORY_MAX_DURATION_MS }).success,
+    ).toBe(true);
+    expect(
+      createStorySchema.safeParse({ kind: "VIDEO", durationMs: STORY_MAX_DURATION_MS + 1 }).success,
+    ).toBe(false);
   });
 
   it("rejects a non-integer durationMs", () => {

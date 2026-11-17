@@ -6,6 +6,7 @@ import {
   STORY_AUDIENCE_MODES,
   STORY_MAX_BACKGROUND_LENGTH,
   STORY_MAX_CAPTION_LENGTH,
+  STORY_MAX_DURATION_MS,
   STORY_REACTION_KINDS,
 } from "../constants.js";
 
@@ -14,7 +15,7 @@ export const createStorySchema = z.object({
   objectKey: z.string().min(1).max(1024).optional(),
   width: z.number().int().min(0).optional(),
   height: z.number().int().min(0).optional(),
-  durationMs: z.number().int().min(0).optional(),
+  durationMs: z.number().int().min(0).max(STORY_MAX_DURATION_MS).optional(),
   caption: z.string().max(STORY_MAX_CAPTION_LENGTH).optional(),
   background: z.string().max(STORY_MAX_BACKGROUND_LENGTH).optional(),
   allowReplies: z.boolean().optional(),

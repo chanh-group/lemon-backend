@@ -1,6 +1,6 @@
 import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, eq, gt, inArray, lte, sql } from "drizzle-orm";
+import { and, eq, exists, gt, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { Client } from "pg";
 import type { DrizzleDb } from "../../configs/database.js";
 import { get_env } from "../../helpers/index.js";
@@ -11,6 +11,15 @@ import {
 } from "./constants.js";
 import type { AuthSessionRepository } from "./repository.js";
 import { authSessions } from "./schema.js";
+import { users } from "../user/schema.js";
+
+function activeSessionFilter(userId: string, sessionId: string): SQL | undefined {
+  return and(
+    eq(authSessions.userId, userId),
+    eq(authSessions.id, sessionId),
+    gt(authSessions.expiresAt, sql`now()`),
+  );
+}
 
 @Injectable()
 export class AuthSessionPgRepository implements AuthSessionRepository {
@@ -24,15 +33,35 @@ export class AuthSessionPgRepository implements AuthSessionRepository {
     const [row] = await this.db
       .select({ id: authSessions.id })
       .from(authSessions)
-      .where(
-        and(
-          eq(authSessions.userId, userId),
-          eq(authSessions.id, sessionId),
-          gt(authSessions.expiresAt, sql`now()`),
-        ),
-      )
+      .where(activeSessionFilter(userId, sessionId))
       .limit(1);
     return Boolean(row);
+  }
+
+  async findAuthState(
+    userId: string,
+    sessionId: string,
+  ): Promise<{ isActive: boolean; authVersion: number; sessionActive: boolean } | null> {
+    const [row] = await this.db
+      .select({
+        isActive: users.isActive,
+        authVersion: users.authVersion,
+        sessionActive: exists(
+          this.db
+            .select({ id: authSessions.id })
+            .from(authSessions)
+            .where(activeSessionFilter(userId, sessionId)),
+        ),
+      })
+      .from(users)
+      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+      .limit(1);
+    if (!row) return null;
+    return {
+      isActive: row.isActive,
+      authVersion: row.authVersion,
+      sessionActive: Boolean(row.sessionActive),
+    };
   }
 
   async extend(userId: string, sessionId: string, expiresAt: Date): Promise<boolean> {

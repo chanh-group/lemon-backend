@@ -5,8 +5,9 @@ import {
   UpdateUserInput,
   updateUserSchema,
 } from "./dto/request.js";
-import { toPublicUserResponse, toUserResponse } from "./dto/mapper.js";
-import type { PublicUserResponse, UserResponseDto } from "./dto/response.js";
+import { toUserResponse } from "./dto/mapper.js";
+import type { UserResponseDto, UserSummary } from "./dto/response.js";
+import type { CursorPage } from "../shared.js";
 import { USER_PROFILE_CACHE_INVALIDATOR, USER_REPOSITORY } from "./repository.js";
 import type { UserProfileCacheInvalidator, UserRepository } from "./repository.js";
 import type { User } from "./schema.js";
@@ -65,9 +66,8 @@ export class UserService {
     excludeId: string | undefined,
     cursor: string | undefined,
     limit: number,
-  ): Promise<{ items: PublicUserResponse[]; hasMore: boolean; nextCursor?: string }> {
-    const page = await this.userRepo.search(query, field, excludeId, cursor, limit);
-    return { ...page, items: page.items.map(toPublicUserResponse) };
+  ): Promise<CursorPage<UserSummary>> {
+    return this.userRepo.search(query, field, excludeId, cursor, limit);
   }
 
   async create(input: CreateUserInput): Promise<User> {

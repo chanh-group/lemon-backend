@@ -21,8 +21,8 @@ export const STORY_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours — story lifetime
 export const STORY_DEFAULT_BUCKET = "lemon-stories";
 
 // Story media upload limits (single source used by presign AND verify).
-export const STORY_MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
-export const STORY_MAX_VIDEO_BYTES = 50 * 1024 * 1024; // 50MB
+export const STORY_MAX_IMAGE_BYTES = 25 * 1024 * 1024; // 25MB
+export const STORY_MAX_VIDEO_BYTES = 25 * 1024 * 1024; // 25MB
 export const STORY_ALLOWED_IMAGE_MIME = [
   "image/jpeg",
   "image/png",
@@ -112,13 +112,22 @@ export const NOTE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours — note lifetime
 
 // Purge job: leader lock so only one instance sweeps expired stories/notes.
 export const PURGE_LOCK_KEY = "lock:purge-stories-notes";
-export const PURGE_LOCK_TTL_SECS = 60;
+// The TTL comfortably exceeds one sweep (PURGE_BATCH_LIMIT rows incl. chunked
+// S3 deleteObjects of unbounded latency): a lease expiring mid-run would let a
+// second instance sweep the same batch concurrently.
+export const PURGE_LOCK_TTL_SECS = 300;
 export const PURGE_CRON_EXPRESSION = "*/5 * * * *";
 export const PURGE_BATCH_LIMIT = 500;
 
 // Unread counters: rebuilt from the DB on cache miss, cached for 7 days.
 export const UNREAD_TTL_SECONDS = 604_800;
 export const FEED_FILL_LEASE_SECS = 30;
+// Feed fill stampede guard: when another node holds the fill lease, poll for
+// its published value (FEED_FILL_POLL_ATTEMPTS reads spaced
+// FEED_FILL_POLL_INTERVAL_MS apart) before falling back to a local rebuild
+// that does NOT write the cache.
+export const FEED_FILL_POLL_ATTEMPTS = 5;
+export const FEED_FILL_POLL_INTERVAL_MS = 100;
 
 // Realtime presence: per-user state key TTL, disconnect grace window, and the
 // remaining-TTL threshold above which another node is still heartbeating.

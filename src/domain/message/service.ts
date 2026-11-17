@@ -5,8 +5,11 @@ import {
   type ConversationRepository,
 } from "../conversation/repository.js";
 import { RealtimeService } from "../realtime/realtime.service.js";
-import { MESSAGE_REPOSITORY, type MessageRepository } from "./repository.js";
-import type { Message } from "./schema.js";
+import {
+  MESSAGE_REPOSITORY,
+  type MessageRepository,
+  type ReplyTargetMessage,
+} from "./repository.js";
 import type { SendMessageDto } from "./dto/request.js";
 import type {
   MessageReactionSummary,
@@ -60,7 +63,7 @@ export class MessageService {
     @Optional() @Inject(STORAGE_SERVICE) private readonly storage?: StorageService,
   ) {}
 
-  private replyTarget(message: Message): ReplyTargetResponse {
+  private replyTarget(message: ReplyTargetMessage): ReplyTargetResponse {
     return {
       id: message.id,
       senderId: message.senderId,
@@ -83,7 +86,8 @@ export class MessageService {
     dto: SendMessageDto,
     story?: StoryReplyRef,
   ): Promise<MessageResponse> {
-    // 1. Verify that sender is a member of this conversation
+    // 1. Verify that sender is a member of this conversation (NOT_PARTICIPANT)
+    //    and resolve the direct partner for the friendship gate.
     const directPartnerId = await this.assertDirectConversationAllowed(conversationId, senderId);
 
     let sourceMessage: Awaited<ReturnType<MessageRepository["findById"]>> = null;
@@ -143,35 +147,35 @@ export class MessageService {
       }
     }
 
-    if (attachments?.length) {
-      const storage = this.storage;
-      if (!storage) throw new BusinessError("OBJECT_NOT_UPLOADED");
-      await Promise.all(
-        attachments.map(async (attachment) => {
-          if (attachment.sizeBytes > CHAT_MAX_FILE_BYTES) {
-            throw new BusinessError("FILE_TOO_LARGE", {
-              maxMb: String(Math.floor(CHAT_MAX_FILE_BYTES / (1024 * 1024))),
-            });
-          }
-          const isValidKey = sourceMessage
-            ? sourceMessage.attachments?.some(
-                (sourceAttachment) => sourceAttachment.objectKey === attachment.objectKey,
-              )
-            : attachment.objectKey.startsWith(`chat/${conversationId}/${senderId}/`);
-          if (!isValidKey) {
-            throw new BusinessError("INVALID_OBJECT_KEY");
-          }
-          const object = await storage.headObject(attachment.objectKey);
-          if (!object) throw new BusinessError("OBJECT_NOT_UPLOADED");
-          if (object.contentLength !== attachment.sizeBytes) {
-            throw new BusinessError("INVALID_OBJECT_KEY");
-          }
-        }),
-      );
+    const storage = this.storage;
+    if (attachments?.length && !storage) throw new BusinessError("OBJECT_NOT_UPLOADED");
+    for (const attachment of attachments ?? []) {
+      if (attachment.sizeBytes > CHAT_MAX_FILE_BYTES) {
+        throw new BusinessError("FILE_TOO_LARGE", {
+          maxMb: String(Math.floor(CHAT_MAX_FILE_BYTES / (1024 * 1024))),
+        });
+      }
+      const isValidKey = sourceMessage
+        ? sourceMessage.attachments?.some(
+            (sourceAttachment) => sourceAttachment.objectKey === attachment.objectKey,
+          )
+        : attachment.objectKey.startsWith(`chat/${conversationId}/${senderId}/`);
+      if (!isValidKey) throw new BusinessError("INVALID_OBJECT_KEY");
     }
 
+    const replyPromise = dto.replyToId
+      ? this.messageRepo.findById(dto.replyToId, false)
+      : Promise.resolve(null);
+    const attachmentChecks = (attachments ?? []).map(async (attachment) => {
+      const object = await storage!.headObject(attachment.objectKey);
+      if (!object) throw new BusinessError("OBJECT_NOT_UPLOADED");
+      if (object.contentLength !== attachment.sizeBytes) {
+        throw new BusinessError("INVALID_OBJECT_KEY");
+      }
+    });
+    const [reply] = await Promise.all([replyPromise, Promise.all(attachmentChecks)]);
+
     if (dto.replyToId) {
-      const reply = await this.messageRepo.findById(dto.replyToId);
       if (
         !reply ||
         reply.conversationId !== conversationId ||
@@ -224,11 +228,14 @@ export class MessageService {
       storyPreview: story?.storyPreview ?? null,
     });
 
-    const response = await this.attachSender(
-      await toMessageResponseAsync(message, this.storage, senderId),
-    );
+    const [mapped, target] = await Promise.all([
+      toMessageResponseAsync(message, this.storage, senderId),
+      message.replyToId
+        ? this.messageRepo.findById(message.replyToId, false)
+        : Promise.resolve(null),
+    ]);
+    const response = await this.attachSender(mapped);
     if (message.replyToId) {
-      const target = await this.messageRepo.findById(message.replyToId, false);
       if (
         target &&
         target.conversationId === conversationId &&
@@ -278,11 +285,14 @@ export class MessageService {
     limit?: number,
     after?: string,
   ): Promise<MessageTimelineResponse> {
-    await this.assertDirectConversationAllowed(conversationId, userId);
-    if (
-      (cursor && !(await this.convRepo.canAccessMessage(conversationId, userId, cursor))) ||
-      (after && !(await this.convRepo.canAccessMessage(conversationId, userId, after)))
-    ) {
+    const [, cursorInConversation, afterInConversation] = await Promise.all([
+      this.assertDirectConversationAllowed(conversationId, userId),
+      cursor
+        ? this.convRepo.canAccessMessage(conversationId, userId, cursor)
+        : Promise.resolve(true),
+      after ? this.convRepo.canAccessMessage(conversationId, userId, after) : Promise.resolve(true),
+    ]);
+    if (!cursorInConversation || !afterInConversation) {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
 
@@ -294,17 +304,19 @@ export class MessageService {
       userId,
     );
     if (timeline.authorized === false) throw new BusinessError("NOT_PARTICIPANT");
-    const response = await toMessageTimelineAsync(timeline, this.storage, userId);
-    const senderProfiles = await this.messageRepo.findSenderProfiles(
-      response.items.map(({ senderId }) => senderId),
-    );
-    const sendersById = new Map(senderProfiles.map((sender) => [sender.id, sender]));
-    for (const message of response.items) message.sender = sendersById.get(message.senderId);
     const ids = [
       ...new Set(timeline.items.flatMap((item) => (item.replyToId ? [item.replyToId] : []))),
     ];
+    const [response, senderProfiles, targets] = await Promise.all([
+      toMessageTimelineAsync(timeline, this.storage, userId),
+      this.messageRepo.findSenderProfiles(timeline.items.map(({ senderId }) => senderId)),
+      ids.length
+        ? this.messageRepo.findReplyTargets(conversationId, ids, userId)
+        : Promise.resolve([]),
+    ]);
+    const sendersById = new Map(senderProfiles.map((sender) => [sender.id, sender]));
+    for (const message of response.items) message.sender = sendersById.get(message.senderId);
     if (ids.length) {
-      const targets = await this.messageRepo.findReplyTargets(conversationId, ids, userId);
       const byId = new Map(targets.map((target) => [target.id, target]));
       const targetSenders = await this.messageRepo.findSenderProfiles(
         targets.map(({ senderId }) => senderId),
@@ -339,7 +351,7 @@ export class MessageService {
   }
 
   async editMessage(userId: string, messageId: string, body: string): Promise<MessageResponse> {
-    const msg = await this.messageRepo.findById(messageId);
+    const msg = await this.messageRepo.findById(messageId, false);
     if (!msg) {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
@@ -381,7 +393,7 @@ export class MessageService {
   }
 
   async revokeMessage(userId: string, messageId: string): Promise<MessageResponse> {
-    const msg = await this.messageRepo.findById(messageId);
+    const msg = await this.messageRepo.findById(messageId, false);
     if (!msg) {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
@@ -434,12 +446,7 @@ export class MessageService {
     const partnerId = await this.assertDirectConversationAllowed(message.conversationId, userId);
     if (!(await this.convRepo.canAccessMessage(message.conversationId, userId, message.id)))
       throw new BusinessError("MESSAGE_NOT_FOUND");
-    const result = partnerId
-      ? await this.messageRepo.reactMessage(userId, messageId, emoji, {
-          userAId: userId,
-          userBId: partnerId,
-        })
-      : await this.messageRepo.reactMessage(userId, messageId, emoji);
+    const result = await this.messageRepo.reactMessage(userId, messageId, emoji);
     const { reactions, conversationId } = result;
     const recipientUserIds = partnerId
       ? undefined

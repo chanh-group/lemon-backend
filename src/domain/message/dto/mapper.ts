@@ -1,5 +1,8 @@
-import type { MessageTimelineResult, MessageWithAttachments } from "../repository.js";
-import type { MessageAttachment } from "../schema.js";
+import type {
+  AttachmentResponseSource,
+  MessageResponseSource,
+  MessageTimelineResult,
+} from "../repository.js";
 import type { StorageService } from "../../../utils/storage/store.js";
 import type {
   MessageAttachmentResponse,
@@ -9,7 +12,7 @@ import type {
 } from "./response.js";
 
 export async function mapAttachmentsToResponse(
-  attachments: MessageAttachment[] | undefined,
+  attachments: AttachmentResponseSource[] | undefined,
   storage?: StorageService,
 ): Promise<MessageAttachmentResponse[] | undefined> {
   if (!attachments || attachments.length === 0) return undefined;
@@ -98,7 +101,7 @@ export function groupReactions(
 }
 
 export function toMessageResponse(
-  message: MessageWithAttachments,
+  message: MessageResponseSource,
   attachments?: MessageAttachmentResponse[],
   viewerId?: string,
 ): MessageResponse {
@@ -125,7 +128,7 @@ export function toMessageResponse(
 }
 
 export async function toMessageResponseAsync(
-  message: MessageWithAttachments,
+  message: MessageResponseSource,
   storage?: StorageService,
   viewerId?: string,
 ): Promise<MessageResponse> {

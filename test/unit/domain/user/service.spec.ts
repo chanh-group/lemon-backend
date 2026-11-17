@@ -27,6 +27,7 @@ type MockRepo = {
   findByEmail: ReturnType<typeof vi.fn>;
   findByUsername: ReturnType<typeof vi.fn>;
   findByIdentifier: ReturnType<typeof vi.fn>;
+  search: ReturnType<typeof vi.fn>;
   create: ReturnType<typeof vi.fn>;
   updatePasswordHash: ReturnType<typeof vi.fn>;
   updateProfile: ReturnType<typeof vi.fn>;
@@ -63,6 +64,7 @@ describe("UserService", () => {
       findByEmail: vi.fn(),
       findByUsername: vi.fn(),
       findByIdentifier: vi.fn(),
+      search: vi.fn(),
       create: vi.fn(),
       updatePasswordHash: vi.fn(),
       updateProfile: vi.fn(),
@@ -122,6 +124,44 @@ describe("UserService", () => {
       const result = await service.findByIdentifier("lemon@example.com");
       expect(result).toBe(mockUser);
       expect(mockRepo.findByIdentifier).toHaveBeenCalledWith("lemon@example.com");
+    });
+  });
+
+  describe("search", () => {
+    it("returns the repository page of user summaries unchanged", async () => {
+      const page = {
+        items: [
+          {
+            id: mockUser.id,
+            username: mockUser.username,
+            fullName: mockUser.fullName,
+            avatarUrl: mockUser.avatarUrl,
+          },
+        ],
+        hasMore: true,
+        nextCursor: "cursor-token",
+      };
+      mockRepo.search.mockResolvedValueOnce(page);
+
+      const result = await service.search("lemon", "username", "other-id", "prev-cursor", 20);
+
+      expect(mockRepo.search).toHaveBeenCalledWith(
+        "lemon",
+        "username",
+        "other-id",
+        "prev-cursor",
+        20,
+      );
+      expect(result).toEqual(page);
+    });
+
+    it("returns an empty page when nothing matches", async () => {
+      mockRepo.search.mockResolvedValueOnce({ items: [], hasMore: false });
+
+      await expect(service.search("zzz", "email", undefined, undefined, 20)).resolves.toEqual({
+        items: [],
+        hasMore: false,
+      });
     });
   });
 
