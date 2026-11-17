@@ -46,28 +46,41 @@ export class NoteService {
       this.noteRepo.getFriendUserIds(userId),
       this.cacheStore.getBestEffort<UserNoteFeedResponse[]>(key),
     ]);
-    const visibleUserIds = new Set([userId, ...friendIds]);
+    const targetUserIds = [userId, ...friendIds];
+    const visibleUserIds = new Set(targetUserIds);
     this.metrics?.recordLookup("note_feed", cached === null ? "miss" : "hit");
 
     if (cached) {
-      return cached
-        .filter((item) => visibleUserIds.has(item.user.id))
-        .map((item) => ({
-          ...item,
-          note: {
-            ...item.note,
-            createdAt: new Date(item.note.createdAt),
-            updatedAt: new Date(item.note.updatedAt),
-            expiresAt: new Date(item.note.expiresAt),
-          },
-        }));
+      return this.reviveVisibleFeed(cached, visibleUserIds);
     }
 
-    return this.cacheStore.loadFeedBestEffort(key, NOTE_FEED_TTL_SECS, async () => {
-      const currentFriendIds = await this.noteRepo.getFriendUserIds(userId);
-      const rows = await this.noteRepo.findActiveFeedByUserIds([userId, ...currentFriendIds]);
-      return rows.map(({ note, user }) => ({ user, note: toNoteResponse(note) }));
-    });
+    // The revive keeps values polled mid-fill on the same visibility + date
+    // contract as the cache-hit path above.
+    return this.cacheStore.loadFeedBestEffort(
+      key,
+      NOTE_FEED_TTL_SECS,
+      async () => {
+        const rows = await this.noteRepo.findActiveFeedByUserIds(targetUserIds);
+        return rows.map(({ note, user }) => ({ user, note: toNoteResponse(note) }));
+      },
+      (raw) => this.reviveVisibleFeed(raw, visibleUserIds),
+    );
+  }
+
+  /** Shared by the cache-hit and mid-fill paths: visibility filter + date revival. */
+  private reviveVisibleFeed(raw: unknown, visibleUserIds: Set<string>): UserNoteFeedResponse[] {
+    const entries = Array.isArray(raw) ? (raw as UserNoteFeedResponse[]) : [];
+    return entries
+      .filter((item) => visibleUserIds.has(item.user.id))
+      .map((item) => ({
+        ...item,
+        note: {
+          ...item.note,
+          createdAt: new Date(item.note.createdAt),
+          updatedAt: new Date(item.note.updatedAt),
+          expiresAt: new Date(item.note.expiresAt),
+        },
+      }));
   }
 
   async deleteMyNote(userId: string): Promise<void> {

@@ -30,6 +30,14 @@ describe("NoteService", () => {
 
   let getBestEffortMock: Mock<(key: string) => Promise<unknown>>;
   let setBestEffortMock: Mock<(key: string, value: unknown, ttlSeconds?: number) => Promise<void>>;
+  let loadFeedBestEffortMock: Mock<
+    (
+      key: string,
+      ttl: number,
+      load: () => Promise<unknown>,
+      revive: (raw: unknown) => unknown,
+    ) => Promise<unknown>
+  >;
   let deleteManyBestEffortMock: Mock<(keys: string[]) => Promise<void>>;
 
   const mockNote: Note = {
@@ -41,6 +49,20 @@ describe("NoteService", () => {
     updatedAt: new Date("2026-10-15T00:00:00Z"),
     expiresAt: new Date("2026-10-16T00:00:00Z"),
   };
+
+  /** JSON-shaped note feed entry as it comes out of the cache (string dates). */
+  const makeRawNoteEntry = (userId: string): unknown => ({
+    user: { id: userId, username: `u-${userId}`, fullName: `User ${userId}`, avatarUrl: null },
+    note: {
+      id: `note-${userId}`,
+      userId,
+      content: "hello",
+      background: null,
+      createdAt: "2026-11-01T00:00:00.000Z",
+      updatedAt: "2026-11-01T00:00:00.000Z",
+      expiresAt: "2026-11-02T00:00:00.000Z",
+    },
+  });
 
   beforeEach(() => {
     upsertMock = vi
@@ -89,6 +111,20 @@ describe("NoteService", () => {
     deleteManyBestEffortMock = vi
       .fn<(keys: string[]) => Promise<void>>()
       .mockResolvedValue(undefined);
+    loadFeedBestEffortMock = vi
+      .fn<
+        (
+          key: string,
+          ttl: number,
+          load: () => Promise<unknown>,
+          revive: (raw: unknown) => unknown,
+        ) => Promise<unknown>
+      >()
+      .mockImplementation(async (key, ttl, load) => {
+        const value = await load();
+        await setBestEffortMock(key, value, ttl);
+        return value;
+      });
 
     const mockRepo: NoteRepository = {
       upsert: upsertMock,
@@ -104,11 +140,7 @@ describe("NoteService", () => {
       getBestEffort: getBestEffortMock,
       setBestEffort: setBestEffortMock,
       invalidateFeedsBestEffort: deleteManyBestEffortMock,
-      loadFeedBestEffort: async (key: string, ttl: number, load: () => Promise<unknown>) => {
-        const value = await load();
-        await setBestEffortMock(key, value, ttl);
-        return value;
-      },
+      loadFeedBestEffort: loadFeedBestEffortMock,
     } as unknown as CacheStoreExt;
 
     service = new NoteService(mockRepo, mockCache);
@@ -202,6 +234,29 @@ describe("NoteService", () => {
       const result = await service.getFeed("user-1");
       expect(findActiveFeedByUserIdsMock).toHaveBeenCalledWith(["user-1", "friend-1", "friend-2"]);
       expect(result[0].user.username).toBe("user1");
+    });
+
+    it("reuses the friend ids fetched for the cache lookup inside the feed loader", async () => {
+      await service.getFeed("user-1");
+
+      expect(getFriendUserIdsMock).toHaveBeenCalledTimes(1);
+      expect(findActiveFeedByUserIdsMock).toHaveBeenCalledWith(["user-1", "friend-1", "friend-2"]);
+    });
+
+    it("passes a revive to loadFeedBestEffort that applies the same filter and date revival to mid-fill values", async () => {
+      await service.getFeed("user-1");
+
+      expect(loadFeedBestEffortMock).toHaveBeenCalledTimes(1);
+      const revive = loadFeedBestEffortMock.mock.calls[0][3] as (
+        raw: unknown,
+      ) => UserNoteFeedResponse[];
+      expect(typeof revive).toBe("function");
+
+      const revived = revive([makeRawNoteEntry("friend-1"), makeRawNoteEntry("stranger-1")]);
+      expect(revived.map((entry) => entry.user.id)).toEqual(["friend-1"]);
+      expect(revived[0].note.createdAt).toBeInstanceOf(Date);
+      expect(revived[0].note.updatedAt).toBeInstanceOf(Date);
+      expect(revived[0].note.expiresAt).toBeInstanceOf(Date);
     });
   });
 
