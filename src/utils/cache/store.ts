@@ -6,7 +6,11 @@
 // behind the `CACHE_STORE` token.
 import { Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { FEED_FILL_LEASE_SECS } from "./constants.js";
+import {
+  FEED_FILL_LEASE_SECS,
+  FEED_FILL_POLL_ATTEMPTS,
+  FEED_FILL_POLL_INTERVAL_MS,
+} from "./constants.js";
 import { feedFillKey } from "./keys.js";
 import type {
   NewRefreshSession,
@@ -18,6 +22,13 @@ import type {
 
 export const REDIS_CLIENT: unique symbol = Symbol("REDIS_CLIENT");
 export const CACHE_STORE: unique symbol = Symbol("CACHE_STORE");
+
+/** Timer-backed wait for feed-fill polling only (bounded, never unbounded). */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 export interface CacheStore {
   /** Raw string read. Rejects with `CacheError` on infra failure — critical callers fail closed (503). */
@@ -68,6 +79,9 @@ export interface CacheStore {
 export abstract class CacheStoreExt implements CacheStore {
   protected readonly logger = new Logger("Cache");
 
+  /** Per-key in-flight `load` promises — the in-process stampede guard. */
+  private readonly inFlightLoads = new Map<string, Promise<unknown>>();
+
   abstract getRaw(key: string): Promise<string | null>;
   abstract setRaw(key: string, value: string, expirationSecs: number): Promise<void>;
   abstract delete(key: string): Promise<void>;
@@ -93,10 +107,18 @@ export abstract class CacheStoreExt implements CacheStore {
   ): Promise<void>;
   abstract invalidateFeeds(keys: string[]): Promise<void>;
 
+  /**
+   * Best-effort read-through feed fill with stampede protection. Concurrent
+   * callers for one key share a single `load`; a lease miss polls for the lease
+   * owner's published value (revived via `revive`, because JSON round-trips
+   * turn `Date`s into strings) before falling back to a rebuild that does NOT
+   * write the cache — only the lease owner publishes.
+   */
   async loadFeedBestEffort<T>(
     key: string,
     expirationSecs: number,
     load: () => Promise<T>,
+    revive?: (raw: unknown) => T,
   ): Promise<T> {
     const leaseKey = feedFillKey(key);
     const token = randomUUID();
@@ -106,27 +128,86 @@ export abstract class CacheStoreExt implements CacheStore {
     } catch (err) {
       this.logger.warn(`Feed cache lease unavailable: ${String(err)}`);
     }
+
+    if (!acquired) {
+      const filled = await this.awaitFeedFill<T>(key, revive);
+      if (filled !== undefined) return filled;
+      // The lease owner never published: correctness first — rebuild here, but
+      // leave the cache write to the lease owner alone.
+      return this.joinFeedLoad(key, load);
+    }
+
     try {
-      const value = await load();
-      if (acquired) {
-        try {
-          const serialized = JSON.stringify(value);
-          if (serialized !== undefined)
-            await this.publishFeed(key, leaseKey, token, serialized, expirationSecs);
-        } catch (err) {
-          this.logger.warn(`Feed cache write skipped: ${String(err)}`);
-        }
+      const value = await this.startFeedLoad(key, load);
+      try {
+        const serialized = JSON.stringify(value);
+        if (serialized !== undefined)
+          await this.publishFeed(key, leaseKey, token, serialized, expirationSecs);
+      } catch (err) {
+        this.logger.warn(`Feed cache write skipped: ${String(err)}`);
       }
       return value;
     } finally {
-      if (acquired) {
-        try {
-          await this.releaseLock(leaseKey, token);
-        } catch (err) {
-          this.logger.warn(`Feed cache lease release failed: ${String(err)}`);
-        }
+      try {
+        await this.releaseLock(leaseKey, token);
+      } catch (err) {
+        this.logger.warn(`Feed cache lease release failed: ${String(err)}`);
       }
     }
+  }
+
+  /**
+   * Poll for the lease owner's published value. Returns undefined when no
+   * usable value appears within FEED_FILL_POLL_ATTEMPTS reads, so the caller
+   * rebuilds without writing the cache.
+   */
+  private async awaitFeedFill<T>(
+    key: string,
+    revive: ((raw: unknown) => T) | undefined,
+  ): Promise<T | undefined> {
+    for (let attempt = 0; attempt < FEED_FILL_POLL_ATTEMPTS; attempt++) {
+      if (attempt > 0) await sleep(FEED_FILL_POLL_INTERVAL_MS);
+      let raw: string | null;
+      try {
+        raw = await this.getRaw(key);
+      } catch (err) {
+        this.logger.warn(`Feed fill poll read skipped: ${String(err)}`);
+        continue;
+      }
+      if (raw === null) continue;
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        return revive !== undefined ? revive(parsed) : (parsed as T);
+      } catch (err) {
+        this.logger.warn(`Feed fill poll value dropped: ${String(err)}`);
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Start `load` as this key's shared in-flight load, replacing any stale
+   * entry: after an invalidation or lease takeover a newer fill must not join
+   * the abandoned one. The entry is dropped as soon as the load settles.
+   */
+  private startFeedLoad<T>(key: string, load: () => Promise<T>): Promise<T> {
+    const promise: Promise<T> = load().finally(() => {
+      // Only drop our own entry — a stale load must not evict its replacement.
+      if (this.inFlightLoads.get(key) === promise) this.inFlightLoads.delete(key);
+    });
+    this.inFlightLoads.set(key, promise);
+    return promise;
+  }
+
+  /**
+   * Join the in-flight shared load for `key` (single-flight) or start one when
+   * none is running, so concurrent cold misses trigger a single rebuild.
+   */
+  private joinFeedLoad<T>(key: string, load: () => Promise<T>): Promise<T> {
+    const pending = this.inFlightLoads.get(key);
+    // Every key is loaded with one concrete `T`; the map stays heterogeneous.
+    if (pending !== undefined) return pending as Promise<T>;
+    return this.startFeedLoad(key, load);
   }
 
   async invalidateFeedsBestEffort(keys: string[]): Promise<void> {
