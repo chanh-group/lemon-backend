@@ -531,7 +531,10 @@ describe("MessageService", () => {
       };
       const serviceWithStorage = new MessageService(
         { createMessageWithConversationUpdate: createMessageMock, findById: findByIdMock } as any,
-        { getParticipantUserIds: getParticipantUserIdsMock, findById: findConversationByIdMock } as any,
+        {
+          getParticipantUserIds: getParticipantUserIdsMock,
+          findById: findConversationByIdMock,
+        } as any,
         { assertCanChat: assertCanChatMock } as any,
         { emitNewMessage: emitNewMessageMock } as any,
         storage as any,
