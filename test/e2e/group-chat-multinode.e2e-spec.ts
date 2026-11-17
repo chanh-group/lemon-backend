@@ -29,11 +29,11 @@ type MessageEvent = {
   replyTarget?: { body?: string | null } | null;
 };
 
-function once<T>(socket: Socket, event: string, timeoutMs = 15000): Promise<T> {
+function once<T>(socket: Socket, event: string, stage: string, timeoutMs = 15000): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       socket.off(event, handler);
-      reject(new Error(`Timed out waiting for ${event}`));
+      reject(new Error(`Timed out waiting for ${event} (${stage})`));
     }, timeoutMs);
     const handler = (payload: T) => {
       clearTimeout(timer);
@@ -201,7 +201,7 @@ describe("Group chat across two Redis adapter nodes", () => {
       .send({ memberIds: [lateMemberId] })
       .expect(201);
 
-    const lateReply = once<MessageEvent>(lateSocket, "message:new");
+    const lateReply = once<MessageEvent>(lateSocket, "message:new", "late member receives reply");
     await request(nodeA.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .auth(tokens.get(creatorId)!, { type: "bearer" })
@@ -238,6 +238,7 @@ describe("Group chat across two Redis adapter nodes", () => {
       const lateRemoved = once<{ conversationId: string; userId: string }>(
         lateSocket,
         "member:removed",
+        "late member removal",
       );
       await request(nodeA.getHttpServer())
         .delete(`/api/conversations/${conversationId}/members/${lateMemberId}`)
@@ -258,6 +259,7 @@ describe("Group chat across two Redis adapter nodes", () => {
     const removed = once<{ conversationId: string; userId: string }>(
       memberSocket,
       "member:removed",
+      "member removal",
     );
     await request(nodeA.getHttpServer())
       .delete(`/api/conversations/${conversationId}/members/${memberId}`)
@@ -303,7 +305,11 @@ describe("Group chat across two Redis adapter nodes", () => {
     const onRemovedMessage = (message: MessageEvent) => removedMessages.push(message);
     memberSocket.on("message:new", onRemovedMessage);
     try {
-      const creatorMessage = once<MessageEvent>(creatorSocket, "message:new");
+      const creatorMessage = once<MessageEvent>(
+        creatorSocket,
+        "message:new",
+        "creator after removal",
+      );
       await request(nodeA.getHttpServer())
         .post(`/api/conversations/${conversationId}/messages`)
         .auth(tokens.get(creatorId)!, { type: "bearer" })

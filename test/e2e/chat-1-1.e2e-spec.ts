@@ -10,7 +10,7 @@ import { ErrorFilter } from "../../src/middleware/error-filter.js";
 import { standardSchemaPipe } from "../../src/utils/validation.js";
 import cookieParser from "cookie-parser";
 import { v7 as uuidv7 } from "uuid";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { conversations } from "../../src/domain/conversation/schema.js";
 import { getDrizzleToken } from "@nestjs/drizzle";
 import { JWT_CONFIG } from "../../src/domain/auth/constants.js";
@@ -597,5 +597,27 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       .expect(200);
 
     expect(convRes.body.data.lastMessagePreview).toBe("[message-revoked]");
+  });
+
+  it("keeps hide-for-me available after the direct friendship is blocked", async () => {
+    const sent = await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/messages`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ body: "Hide after block" })
+      .expect(201);
+    const [userLow, userHigh] = [userA, userB].sort();
+    await db
+      .update(friendships)
+      .set({ status: "BLOCKED" })
+      .where(and(eq(friendships.userLow, userLow), eq(friendships.userHigh, userHigh)));
+
+    await request(app.getHttpServer())
+      .delete(`/api/messages/${sent.body.data.id}/for-me`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .expect(204);
+    await request(app.getHttpServer())
+      .delete(`/api/messages/${sent.body.data.id}/for-me`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .expect(204);
   });
 });

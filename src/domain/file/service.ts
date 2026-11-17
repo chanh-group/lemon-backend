@@ -218,6 +218,16 @@ export class FileService {
     }
   }
 
+  async deleteGroupAvatarObject(
+    groupId: string,
+    avatarUrl: string | null | undefined,
+  ): Promise<void> {
+    if (!avatarUrl) return;
+    const objectKey = groupAvatarObjectKeyFromUrl(avatarUrl, groupId);
+    if (!objectKey) return;
+    await this.storage.deleteObjects([objectKey]);
+  }
+
   async upload(
     userId: string,
     file: { buffer: Buffer; size: number; mimetype: string; originalname: string },

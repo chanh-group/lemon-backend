@@ -249,30 +249,23 @@ export class MessageService {
     }
 
     if (isNew) {
-      if (directPartnerId) {
-        this.realtimeService.emitNewMessage(conversationId, response);
-      } else {
-        const participantIds = await this.convRepo.getParticipantUserIds(conversationId);
-        const replyVisibleTo = response.replyToId
-          ? new Set(
-              await this.convRepo.getMessageRecipientUserIds(conversationId, response.replyToId),
-            )
-          : null;
-        const recipientPayloads = await Promise.all(
-          participantIds.map(async (participantId) => {
-            if (!response.replyToId || participantId === senderId) {
-              return { userId: participantId, payload: response };
-            }
-            return {
-              userId: participantId,
-              payload: replyVisibleTo?.has(participantId)
-                ? response
-                : { ...response, replyTarget: null },
-            };
-          }),
-        );
-        this.realtimeService.emitNewMessage(conversationId, response, recipientPayloads);
-      }
+      // replyTarget is viewer-dependent: a user can hide a message locally or
+      // be below the group's history boundary. Never broadcast an enriched
+      // payload to a shared conversation room.
+      const participantIds = await this.convRepo.getParticipantUserIds(conversationId);
+      const replyVisibleTo = response.replyToId
+        ? new Set(
+            await this.convRepo.getMessageRecipientUserIds(conversationId, response.replyToId),
+          )
+        : null;
+      const recipientPayloads = participantIds.map((participantId) => ({
+        userId: participantId,
+        payload:
+          !response.replyToId || replyVisibleTo?.has(participantId)
+            ? response
+            : { ...response, replyTarget: null },
+      }));
+      this.realtimeService.emitNewMessage(conversationId, response, recipientPayloads);
     }
 
     return response;
@@ -298,10 +291,10 @@ export class MessageService {
 
     const timeline = await this.messageRepo.findTimeline(
       conversationId,
+      userId,
       cursor,
       limit,
       after,
-      userId,
     );
     if (timeline.authorized === false) throw new BusinessError("NOT_PARTICIPANT");
     const ids = [
@@ -427,13 +420,11 @@ export class MessageService {
   }
 
   async hideMessageForMe(userId: string, messageId: string): Promise<void> {
-    const message = await this.messageRepo.findById(messageId, false);
-    if (!message) throw new BusinessError("MESSAGE_NOT_FOUND");
-    await this.assertDirectConversationAllowed(message.conversationId, userId);
-    if (!(await this.convRepo.canAccessMessage(message.conversationId, userId, message.id)))
-      throw new BusinessError("MESSAGE_NOT_FOUND");
-    await this.messageRepo.hideForUser(messageId, userId);
-    this.realtimeService.emitMessageHidden(userId, message.conversationId, messageId);
+    // The repository checks current membership and history inside the write
+    // transaction. A hidden message must remain eligible for an idempotent retry.
+    const result = await this.messageRepo.hideForUser(messageId, userId);
+    if (result.inserted)
+      this.realtimeService.emitMessageHidden(userId, result.conversationId, messageId);
   }
 
   async reactToMessage(

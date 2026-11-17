@@ -2,7 +2,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import { getDrizzleToken } from "@nestjs/drizzle";
 import cookieParser from "cookie-parser";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import request from "supertest";
 import { v7 as uuidv7 } from "uuid";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -14,6 +14,7 @@ import type { JwtConfig } from "../../src/domain/auth/jwt.js";
 import { authSessions } from "../../src/domain/auth/schema.js";
 import { conversations } from "../../src/domain/conversation/schema.js";
 import { friendships } from "../../src/domain/friend/schema.js";
+import { messageHiddenForUsers } from "../../src/domain/message/schema.js";
 import { users } from "../../src/domain/user/schema.js";
 import { ErrorFilter } from "../../src/middleware/error-filter.js";
 import { standardSchemaPipe } from "../../src/utils/validation.js";
@@ -107,7 +108,7 @@ describe("Group conversations with PostgreSQL and Redis", () => {
       .expect(201);
     expect(retry.body.data.id).toBe(conversationId);
 
-    await request(app.getHttpServer())
+    const beforeJoin = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .auth(tokens.get(creatorId)!, { type: "bearer" })
       .send({ body: "Before joining" })
@@ -125,6 +126,11 @@ describe("Group conversations with PostgreSQL and Redis", () => {
     expect(hiddenHistory.body.data.items).toHaveLength(0);
 
     await request(app.getHttpServer())
+      .delete(`/api/messages/${beforeJoin.body.data.id}/for-me`)
+      .auth(tokens.get(lateMemberId)!, { type: "bearer" })
+      .expect(404);
+
+    const afterJoin = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .auth(tokens.get(memberId)!, { type: "bearer" })
       .send({ body: "After joining" })
@@ -136,11 +142,48 @@ describe("Group conversations with PostgreSQL and Redis", () => {
     expect(visibleHistory.body.data.items.map((message: { body: string }) => message.body)).toEqual(
       ["After joining"],
     );
+    const [beforeHide] = await db
+      .select({ unreadRevision: conversations.unreadRevision })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId));
+    await Promise.all(
+      [1, 2].map(() =>
+        request(app.getHttpServer())
+          .delete(`/api/messages/${afterJoin.body.data.id}/for-me`)
+          .auth(tokens.get(lateMemberId)!, { type: "bearer" })
+          .expect(204),
+      ),
+    );
+    const [afterHide] = await db
+      .select({ unreadRevision: conversations.unreadRevision })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId));
+    expect(afterHide.unreadRevision).toBe(beforeHide.unreadRevision + 1n);
+    const hiddenRows = await db
+      .select({ messageId: messageHiddenForUsers.messageId })
+      .from(messageHiddenForUsers)
+      .where(
+        and(
+          eq(messageHiddenForUsers.messageId, afterJoin.body.data.id),
+          eq(messageHiddenForUsers.userId, lateMemberId),
+        ),
+      );
+    expect(hiddenRows).toHaveLength(1);
+    const hiddenForLateMember = await request(app.getHttpServer())
+      .get(`/api/conversations/${conversationId}/messages`)
+      .auth(tokens.get(lateMemberId)!, { type: "bearer" })
+      .expect(200);
+    expect(hiddenForLateMember.body.data.items).toHaveLength(0);
 
     await db
       .update(friendships)
       .set({ status: "BLOCKED" })
-      .where(eq(friendships.userLow, [creatorId, memberId].sort()[0]));
+      .where(
+        and(
+          eq(friendships.userLow, [creatorId, memberId].sort()[0]),
+          eq(friendships.userHigh, [creatorId, memberId].sort()[1]),
+        ),
+      );
     await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .auth(tokens.get(memberId)!, { type: "bearer" })
@@ -168,9 +211,26 @@ describe("Group conversations with PostgreSQL and Redis", () => {
       .auth(tokens.get(memberId)!, { type: "bearer" })
       .expect(204);
     await request(app.getHttpServer())
+      .delete(`/api/messages/${afterJoin.body.data.id}/for-me`)
+      .auth(tokens.get(lateMemberId)!, { type: "bearer" })
+      .expect(404);
+    await request(app.getHttpServer())
       .get(`/api/conversations/${conversationId}`)
       .auth(tokens.get(lateMemberId)!, { type: "bearer" })
       .expect(403);
+    await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/members`)
+      .auth(tokens.get(creatorId)!, { type: "bearer" })
+      .send({ memberIds: [lateMemberId] })
+      .expect(201);
+    await request(app.getHttpServer())
+      .delete(`/api/messages/${afterJoin.body.data.id}/for-me`)
+      .auth(tokens.get(lateMemberId)!, { type: "bearer" })
+      .expect(404);
+    await request(app.getHttpServer())
+      .delete(`/api/conversations/${conversationId}/members/${lateMemberId}`)
+      .auth(tokens.get(memberId)!, { type: "bearer" })
+      .expect(204);
 
     await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/leave`)

@@ -431,12 +431,15 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
 describe("MessagePgRepository.findTimeline", () => {
   it("orders and paginates by createdAt, using the UUID only as a tie-breaker", async () => {
     const { db, dbSelect } = makeDb();
+    dbSelect.limitMock.mockResolvedValueOnce([
+      { historyBoundaryMessageId: null, joinedAt: new Date(0) },
+    ]);
     dbSelect.limitMock.mockResolvedValueOnce([]);
     const repo = new MessagePgRepository(db);
 
-    await repo.findTimeline(conversationId, messageId);
+    await repo.findTimeline(conversationId, senderId, messageId);
 
-    const where = render(dbSelect.whereMock.mock.calls[0][0]);
+    const where = render(dbSelect.whereMock.mock.calls[2][0]);
     expect(where.sql).toContain("m.created_at FROM messages m");
     expect(where.sql).toContain('"messages"."created_at" <');
     expect(dbSelect.orderByMock).toHaveBeenCalledWith(desc(messages.createdAt), desc(messages.id));
@@ -614,9 +617,12 @@ describe("MessagePgRepository.reactMessage", () => {
 describe("MessagePgRepository.findReplyTargets", () => {
   it("projects only the reply target fields consumed by responses", async () => {
     const { db, dbSelect } = makeDb();
+    dbSelect.limitMock.mockResolvedValueOnce([
+      { historyBoundaryMessageId: null, joinedAt: new Date(0) },
+    ]);
     const repo = new MessagePgRepository(db);
 
-    await repo.findReplyTargets(conversationId, [messageId]);
+    await repo.findReplyTargets(conversationId, [messageId], senderId);
 
     expect(dbSelect.selectMock).toHaveBeenCalledWith({
       id: messages.id,
@@ -632,7 +638,7 @@ describe("MessagePgRepository.findReplyTargets", () => {
     const { db, dbSelect } = makeDb();
     const repo = new MessagePgRepository(db);
 
-    await expect(repo.findReplyTargets(conversationId, [])).resolves.toEqual([]);
+    await expect(repo.findReplyTargets(conversationId, [], senderId)).resolves.toEqual([]);
     expect(dbSelect.selectMock).not.toHaveBeenCalled();
   });
 });

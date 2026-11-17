@@ -64,7 +64,7 @@ describe("MessageService", () => {
     findReplyTargetsMock = vi.fn();
     updateBodyMock = vi.fn();
     softDeleteMock = vi.fn();
-    hideForUserMock = vi.fn().mockResolvedValue(convId);
+    hideForUserMock = vi.fn().mockResolvedValue({ conversationId: convId, inserted: true });
     resolveWriteMissMock = vi.fn();
     reactMessageMock = vi.fn();
     findSenderProfilesMock = vi.fn().mockResolvedValue([]);
@@ -177,6 +177,33 @@ describe("MessageService", () => {
       expect(res.body).toBe("Hello");
       expect(res).not.toHaveProperty("clientMsgId");
       expect(emitNewMessageMock).toHaveBeenCalledWith(convId, res, expect.any(Array));
+    });
+
+    it("redacts a reply target per recipient instead of broadcasting the sender view", async () => {
+      const replyTargetId = "0193a2b1-0000-7000-8000-000000000021";
+      const message = { ...mockMessage, replyToId: replyTargetId };
+      createMessageMock.mockResolvedValue({ message, isNew: true });
+      canAccessMessageMock.mockResolvedValue(true);
+      getMessageRecipientUserIdsMock.mockResolvedValue([userA]);
+      findByIdMock.mockResolvedValue({ ...mockMessage, id: replyTargetId });
+
+      await service.sendMessage(userA, convId, {
+        body: "Reply",
+        kind: "TEXT",
+        replyToId: replyTargetId,
+      });
+
+      const [, , payloads] = emitNewMessageMock.mock.calls[0];
+      expect(payloads).toEqual([
+        expect.objectContaining({
+          userId: userA,
+          payload: expect.objectContaining({ replyTarget: expect.anything() }),
+        }),
+        expect.objectContaining({
+          userId: userB,
+          payload: expect.objectContaining({ replyTarget: null }),
+        }),
+      ]);
     });
 
     it("stores a story message with the server decided kind and snapshot", async () => {
@@ -390,7 +417,7 @@ describe("MessageService", () => {
       expect(res.items[0].id).toBe(msgId);
       expect(res.items[0]).not.toHaveProperty("clientMsgId");
       expect(res.hasMore).toBe(false);
-      expect(findTimelineMock).toHaveBeenCalledWith(convId, undefined, undefined, undefined, userA);
+      expect(findTimelineMock).toHaveBeenCalledWith(convId, userA, undefined, undefined, undefined);
       expect(getParticipantUserIdsMock).not.toHaveBeenCalled();
       expect(findConversationByIdMock).toHaveBeenCalledWith(convId, userA);
     });
@@ -786,8 +813,6 @@ describe("MessageService", () => {
 
   describe("hideMessageForMe", () => {
     it("hides an incoming message for only the current participant", async () => {
-      findByIdMock.mockResolvedValue(mockMessage);
-
       await service.hideMessageForMe(userB, msgId);
 
       expect(hideForUserMock).toHaveBeenCalledWith(msgId, userB);
@@ -795,14 +820,18 @@ describe("MessageService", () => {
       expect(emitMessageRevokedMock).not.toHaveBeenCalled();
     });
 
-    it("rejects a non-participant without hiding anything", async () => {
-      findByIdMock.mockResolvedValue(mockMessage);
-      findConversationByIdMock.mockResolvedValue(null);
+    it("does not emit or invalidate for an already hidden message", async () => {
+      hideForUserMock.mockResolvedValue({ conversationId: convId, inserted: false });
+      await service.hideMessageForMe(userB, msgId);
+      expect(emitMessageHiddenMock).not.toHaveBeenCalled();
+    });
 
+    it("propagates a not-found result from the transactional permission check", async () => {
+      hideForUserMock.mockRejectedValue(new BusinessError("MESSAGE_NOT_FOUND"));
       await expect(service.hideMessageForMe(outsider, msgId)).rejects.toThrow(
-        expect.objectContaining({ code: "NOT_PARTICIPANT" }),
+        expect.objectContaining({ code: "MESSAGE_NOT_FOUND" }),
       );
-      expect(hideForUserMock).not.toHaveBeenCalled();
+      expect(emitMessageHiddenMock).not.toHaveBeenCalled();
     });
   });
 

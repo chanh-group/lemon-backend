@@ -75,7 +75,9 @@ export const conversationParticipants = pgTable(
     joinedAt: timestamp("joined_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
     leftAt: timestamp("left_at", { withTimezone: true, mode: "date" }),
     historyBoundaryMessageId: uuid("history_boundary_message_id").references(() => messages.id, {
-      onDelete: "set null",
+      // A deleted boundary must fail the operation instead of silently
+      // turning a late member into a full-history viewer.
+      onDelete: "restrict",
     }),
   },
   (table) => [
@@ -83,6 +85,7 @@ export const conversationParticipants = pgTable(
     index("participants_user_idx")
       .on(table.userId)
       .where(sql`${table.leftAt} IS NULL`),
+    index("participants_history_boundary_idx").on(table.historyBoundaryMessageId),
   ],
 );
 

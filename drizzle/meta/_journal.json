@@ -169,6 +169,13 @@
       "when": 1794834008281,
       "tag": "0023_majestic_darkstar",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794924171714,
+      "tag": "0024_fine_jasper_sitwell",
+      "breakpoints": true
     }
   ]
 }

@@ -85,18 +85,22 @@ describe("FileController", () => {
     };
     const avatarUrl = "https://api.example.com/api/files/group-avatars/photo.png";
     const uploadGroupAvatar = vi.fn().mockResolvedValue(avatarUrl);
+    const deleteGroupAvatarObject = vi.fn().mockResolvedValue(undefined);
     const updateGroupAvatar = vi.fn().mockResolvedValue({ id: groupId, avatarUrl });
+    const getById = vi.fn().mockResolvedValue({ avatarUrl: null });
     const c = new FileController(
-      { uploadGroupAvatar } as unknown as FileService,
+      { uploadGroupAvatar, deleteGroupAvatarObject } as unknown as FileService,
       new MemoryRateLimiter(),
       { findById: vi.fn() } as unknown as UserService,
-      { updateGroupAvatar } as unknown as ConversationService,
+      { getById, updateGroupAvatar } as unknown as ConversationService,
     );
 
     const result = await c.uploadGroupAvatar({ user: { id: "user-1" } }, groupId, file);
 
     expect(uploadGroupAvatar).toHaveBeenCalledWith("user-1", groupId, file);
+    expect(getById).toHaveBeenCalledWith(groupId, "user-1");
     expect(updateGroupAvatar).toHaveBeenCalledWith(groupId, "user-1", avatarUrl);
+    expect(deleteGroupAvatarObject).toHaveBeenCalledWith(groupId, null);
     expect(result.data).toEqual({ id: groupId, avatarUrl });
   });
 

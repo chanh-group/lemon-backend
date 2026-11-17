@@ -266,7 +266,7 @@ describe("ConversationService", () => {
       expect(emitGroupEventMock).toHaveBeenCalledWith(
         [userA, userB],
         "conversation:created",
-        expect.objectContaining({ id: convId }),
+        expect.objectContaining({ conversationId: group.id }),
       );
       expect(response.kind).toBe("GROUP");
     });

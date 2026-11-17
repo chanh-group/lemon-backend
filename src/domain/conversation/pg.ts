@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, asc, desc, eq, inArray, isNull, lt, ne, notExists, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, notExists, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
@@ -22,10 +22,15 @@ const lastSender = alias(users, "last_message_sender");
 
 function visiblePreview(userId: string) {
   const boundaryId = sql`(SELECT cp.history_boundary_message_id FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
+  const joinedAt = sql`(SELECT cp.joined_at FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
   return sql<string | null>`CASE WHEN ${boundaryId} IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM messages boundary_msg
       WHERE boundary_msg.id = ${boundaryId}
+        AND boundary_msg.conversation_id = ${conversations.id}
         AND ROW(${conversations.lastMessageAt}, ${conversations.lastMessageId}) > ROW(boundary_msg.created_at, boundary_msg.id))
+    OR ${boundaryId} IS NULL
+      AND ${conversations.lastMessageAt} IS NOT NULL
+      AND ${conversations.lastMessageAt} <= ${joinedAt}
     THEN NULL ELSE CASE WHEN EXISTS (
     SELECT 1 FROM message_hidden_for_users h
     WHERE h.message_id = ${conversations.lastMessageId} AND h.user_id = ${userId}::uuid
@@ -37,8 +42,12 @@ function visiblePreview(userId: string) {
       ELSE '[attachment]'
     END FROM messages m
     WHERE m.conversation_id = ${conversations.id}
-      AND (${boundaryId} IS NULL OR ROW(m.created_at, m.id) >
-        (SELECT bm.created_at, bm.id FROM messages bm WHERE bm.id = ${boundaryId}))
+      AND (
+        (${boundaryId} IS NOT NULL AND ROW(m.created_at, m.id) >
+          (SELECT bm.created_at, bm.id FROM messages bm
+            WHERE bm.id = ${boundaryId} AND bm.conversation_id = ${conversations.id}))
+        OR (${boundaryId} IS NULL AND m.created_at > ${joinedAt})
+      )
       AND NOT EXISTS (SELECT 1 FROM message_hidden_for_users h
         WHERE h.message_id = m.id AND h.user_id = ${userId}::uuid)
     ORDER BY m.created_at DESC, m.id DESC LIMIT 1
@@ -47,18 +56,27 @@ function visiblePreview(userId: string) {
 
 function visibleSenderId(userId: string) {
   const boundaryId = sql`(SELECT cp.history_boundary_message_id FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
+  const joinedAt = sql`(SELECT cp.joined_at FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
   return sql<string | null>`CASE WHEN ${boundaryId} IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM messages boundary_msg
       WHERE boundary_msg.id = ${boundaryId}
+        AND boundary_msg.conversation_id = ${conversations.id}
         AND ROW(${conversations.lastMessageAt}, ${conversations.lastMessageId}) > ROW(boundary_msg.created_at, boundary_msg.id))
+    OR ${boundaryId} IS NULL
+      AND ${conversations.lastMessageAt} IS NOT NULL
+      AND ${conversations.lastMessageAt} <= ${joinedAt}
     THEN NULL ELSE CASE WHEN EXISTS (
     SELECT 1 FROM message_hidden_for_users h
     WHERE h.message_id = ${conversations.lastMessageId} AND h.user_id = ${userId}::uuid
   ) THEN (
     SELECT m.sender_id FROM messages m
     WHERE m.conversation_id = ${conversations.id}
-      AND (${boundaryId} IS NULL OR ROW(m.created_at, m.id) >
-        (SELECT bm.created_at, bm.id FROM messages bm WHERE bm.id = ${boundaryId}))
+      AND (
+        (${boundaryId} IS NOT NULL AND ROW(m.created_at, m.id) >
+          (SELECT bm.created_at, bm.id FROM messages bm
+            WHERE bm.id = ${boundaryId} AND bm.conversation_id = ${conversations.id}))
+        OR (${boundaryId} IS NULL AND m.created_at > ${joinedAt})
+      )
       AND NOT EXISTS (SELECT 1 FROM message_hidden_for_users h
         WHERE h.message_id = m.id AND h.user_id = ${userId}::uuid)
     ORDER BY m.created_at DESC, m.id DESC LIMIT 1
@@ -67,18 +85,27 @@ function visibleSenderId(userId: string) {
 
 function visibleMessageAt(userId: string) {
   const boundaryId = sql`(SELECT cp.history_boundary_message_id FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
+  const joinedAt = sql`(SELECT cp.joined_at FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
   return sql<Date | null>`CASE WHEN ${boundaryId} IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM messages boundary_msg
       WHERE boundary_msg.id = ${boundaryId}
+        AND boundary_msg.conversation_id = ${conversations.id}
         AND ROW(${conversations.lastMessageAt}, ${conversations.lastMessageId}) > ROW(boundary_msg.created_at, boundary_msg.id))
+    OR ${boundaryId} IS NULL
+      AND ${conversations.lastMessageAt} IS NOT NULL
+      AND ${conversations.lastMessageAt} <= ${joinedAt}
     THEN NULL ELSE CASE WHEN EXISTS (
     SELECT 1 FROM message_hidden_for_users h
     WHERE h.message_id = ${conversations.lastMessageId} AND h.user_id = ${userId}::uuid
   ) THEN (
     SELECT m.created_at FROM messages m
     WHERE m.conversation_id = ${conversations.id}
-      AND (${boundaryId} IS NULL OR ROW(m.created_at, m.id) >
-        (SELECT bm.created_at, bm.id FROM messages bm WHERE bm.id = ${boundaryId}))
+      AND (
+        (${boundaryId} IS NOT NULL AND ROW(m.created_at, m.id) >
+          (SELECT bm.created_at, bm.id FROM messages bm
+            WHERE bm.id = ${boundaryId} AND bm.conversation_id = ${conversations.id}))
+        OR (${boundaryId} IS NULL AND m.created_at > ${joinedAt})
+      )
       AND NOT EXISTS (SELECT 1 FROM message_hidden_for_users h
         WHERE h.message_id = m.id AND h.user_id = ${userId}::uuid)
     ORDER BY m.created_at DESC, m.id DESC LIMIT 1
@@ -108,6 +135,7 @@ export class ConversationPgRepository implements ConversationRepository {
         and(
           eq(conversations.creatorId, input.creatorId),
           eq(conversations.createRequestId, input.clientRequestId),
+          eq(conversations.kind, "GROUP"),
         ),
       )
       .limit(1);
@@ -246,6 +274,13 @@ export class ConversationPgRepository implements ConversationRepository {
       if (memberIds.some((id) => activeSet.has(id))) throw new BusinessError("CONFLICT");
       if (active.length + memberIds.length > GROUP_MAX_MEMBERS) {
         throw new BusinessError("GROUP_FULL");
+      }
+      const usersToAdd = await tx
+        .select({ id: users.id, isActive: users.isActive })
+        .from(users)
+        .where(inArray(users.id, memberIds));
+      if (usersToAdd.length !== memberIds.length || usersToAdd.some((user) => !user.isActive)) {
+        throw new BusinessError("USER_NOT_FOUND");
       }
       await tx
         .insert(conversationParticipants)
@@ -595,7 +630,25 @@ export class ConversationPgRepository implements ConversationRepository {
         and(
           eq(messages.id, messageId),
           eq(messages.conversationId, conversationId),
-          sql`(${conversationParticipants.historyBoundaryMessageId} IS NULL OR ROW(${messages.createdAt}, ${messages.id}) > (SELECT m.created_at, m.id FROM messages m WHERE m.id = ${conversationParticipants.historyBoundaryMessageId}))`,
+          notExists(
+            this.db
+              .select({ messageId: messageHiddenForUsers.messageId })
+              .from(messageHiddenForUsers)
+              .where(
+                and(
+                  eq(messageHiddenForUsers.messageId, messages.id),
+                  eq(messageHiddenForUsers.userId, userId),
+                ),
+              ),
+          ),
+          sql`(
+            (${conversationParticipants.historyBoundaryMessageId} IS NOT NULL AND ROW(${messages.createdAt}, ${messages.id}) > (
+              SELECT m.created_at, m.id FROM messages m
+              WHERE m.id = ${conversationParticipants.historyBoundaryMessageId}
+                AND m.conversation_id = ${conversationParticipants.conversationId}
+            ))
+            OR (${conversationParticipants.historyBoundaryMessageId} IS NULL AND ${messages.createdAt} > ${conversationParticipants.joinedAt})
+          )`,
         ),
       )
       .limit(1);
@@ -604,12 +657,18 @@ export class ConversationPgRepository implements ConversationRepository {
 
   async getMessageRecipientUserIds(conversationId: string, messageId: string): Promise<string[]> {
     const boundaryVisible = sql`(
-      ${conversationParticipants.historyBoundaryMessageId} IS NULL
-      OR ROW(${messages.createdAt}, ${messages.id}) > (
-        SELECT boundary_message.created_at, boundary_message.id
-        FROM messages boundary_message
-        WHERE boundary_message.id = ${conversationParticipants.historyBoundaryMessageId}
-          AND boundary_message.conversation_id = ${conversationId}
+      (
+        ${conversationParticipants.historyBoundaryMessageId} IS NOT NULL
+        AND ROW(${messages.createdAt}, ${messages.id}) > (
+          SELECT boundary_message.created_at, boundary_message.id
+          FROM messages boundary_message
+          WHERE boundary_message.id = ${conversationParticipants.historyBoundaryMessageId}
+            AND boundary_message.conversation_id = ${conversationId}
+        )
+      )
+      OR (
+        ${conversationParticipants.historyBoundaryMessageId} IS NULL
+        AND ${messages.createdAt} > ${conversationParticipants.joinedAt}
       )
     )`;
     const hiddenForUser = notExists(
@@ -781,26 +840,21 @@ export class ConversationPgRepository implements ConversationRepository {
   async findUserConversations(userId: string, limit: number, cursor?: string) {
     // Apply pagination before loading participant details so users with many
     // conversations do not create an unbounded IN list.
-    const activityOrder = sql`COALESCE(${conversations.lastMessageAt}, ${conversations.createdAt})`;
-    const cursorActivity = cursor
-      ? sql`(SELECT COALESCE(c.last_message_at, c.created_at)
-          FROM conversations c
-          INNER JOIN conversation_participants cp ON cp.conversation_id = c.id
-          WHERE c.id = ${cursor} AND cp.user_id = ${userId}
-            AND cp.left_at IS NULL AND c.deleted_at IS NULL)`
-      : undefined;
+    const activityOrder = sql`COALESCE(${visibleMessageAt(userId)}, ${conversations.createdAt})`;
+    const cursorConversation = cursor ? await this.findById(cursor, userId) : null;
     const conditions = [
       eq(conversationParticipants.userId, userId),
       isNull(conversationParticipants.leftAt),
       isNull(conversations.deletedAt),
     ];
-    if (cursor && cursorActivity) {
+    if (cursor && cursorConversation) {
+      const cursorActivity = cursorConversation.lastMessageAt ?? cursorConversation.createdAt;
       conditions.push(
-        or(
-          lt(activityOrder, cursorActivity),
-          and(eq(activityOrder, cursorActivity), lt(conversations.id, cursor)),
-        )!,
+        sql`(${activityOrder} < ${cursorActivity}
+          OR (${activityOrder} = ${cursorActivity} AND ${conversations.id} < ${cursor}))`,
       );
+    } else if (cursor) {
+      return { items: [], hasMore: false };
     }
     const convRows = await this.db
       .select({
@@ -1031,6 +1085,7 @@ export class ConversationPgRepository implements ConversationRepository {
         .select({
           lastReadMessageId: conversationParticipants.lastReadMessageId,
           historyBoundaryMessageId: conversationParticipants.historyBoundaryMessageId,
+          joinedAt: conversationParticipants.joinedAt,
         })
         .from(conversationParticipants)
         .where(
@@ -1047,7 +1102,23 @@ export class ConversationPgRepository implements ConversationRepository {
       const [message] = await tx
         .select({ id: messages.id, createdAt: messages.createdAt })
         .from(messages)
-        .where(and(eq(messages.id, messageId), eq(messages.conversationId, conversationId)))
+        .where(
+          and(
+            eq(messages.id, messageId),
+            eq(messages.conversationId, conversationId),
+            notExists(
+              tx
+                .select({ messageId: messageHiddenForUsers.messageId })
+                .from(messageHiddenForUsers)
+                .where(
+                  and(
+                    eq(messageHiddenForUsers.messageId, messages.id),
+                    eq(messageHiddenForUsers.userId, userId),
+                  ),
+                ),
+            ),
+          ),
+        )
         .limit(1);
       const [boundary] = participant.historyBoundaryMessageId
         ? await tx
@@ -1072,7 +1143,9 @@ export class ConversationPgRepository implements ConversationRepository {
       ) {
         throw new BusinessError("BAD_REQUEST");
       }
-
+      if (!boundary && message.createdAt <= participant.joinedAt) {
+        throw new BusinessError("BAD_REQUEST");
+      }
       const [lastRead] = participant.lastReadMessageId
         ? await tx
             .select({ id: messages.id, createdAt: messages.createdAt })
@@ -1125,7 +1198,14 @@ export class ConversationPgRepository implements ConversationRepository {
           isNull(messages.deletedAt),
           ne(messages.senderId, userId),
           sql`NOT EXISTS (SELECT 1 FROM message_hidden_for_users h WHERE h.message_id = ${messages.id} AND h.user_id = ${userId}::uuid)`,
-          sql`(${conversationParticipants.historyBoundaryMessageId} IS NULL OR ROW(${messages.createdAt}, ${messages.id}) > (SELECT m.created_at, m.id FROM messages m WHERE m.id = ${conversationParticipants.historyBoundaryMessageId}))`,
+          sql`(
+            (${conversationParticipants.historyBoundaryMessageId} IS NOT NULL AND ROW(${messages.createdAt}, ${messages.id}) > (
+              SELECT m.created_at, m.id FROM messages m
+              WHERE m.id = ${conversationParticipants.historyBoundaryMessageId}
+                AND m.conversation_id = ${conversationParticipants.conversationId}
+            ))
+            OR (${conversationParticipants.historyBoundaryMessageId} IS NULL AND ${messages.createdAt} > ${conversationParticipants.joinedAt})
+          )`,
           or(
             isNull(conversationParticipants.lastReadMessageId),
             and(
@@ -1170,7 +1250,14 @@ export class ConversationPgRepository implements ConversationRepository {
           isNull(messages.deletedAt),
           ne(messages.senderId, userId),
           sql`NOT EXISTS (SELECT 1 FROM message_hidden_for_users h WHERE h.message_id = ${messages.id} AND h.user_id = ${userId}::uuid)`,
-          sql`(${conversationParticipants.historyBoundaryMessageId} IS NULL OR ROW(${messages.createdAt}, ${messages.id}) > (SELECT m.created_at, m.id FROM messages m WHERE m.id = ${conversationParticipants.historyBoundaryMessageId}))`,
+          sql`(
+            (${conversationParticipants.historyBoundaryMessageId} IS NOT NULL AND ROW(${messages.createdAt}, ${messages.id}) > (
+              SELECT m.created_at, m.id FROM messages m
+              WHERE m.id = ${conversationParticipants.historyBoundaryMessageId}
+                AND m.conversation_id = ${conversationParticipants.conversationId}
+            ))
+            OR (${conversationParticipants.historyBoundaryMessageId} IS NULL AND ${messages.createdAt} > ${conversationParticipants.joinedAt})
+          )`,
           or(
             isNull(conversationParticipants.lastReadMessageId),
             and(

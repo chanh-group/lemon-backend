@@ -95,7 +95,10 @@ export const messageHiddenForUsers = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     hiddenAt: created("hidden_at"),
   },
-  (table) => [primaryKey({ columns: [table.messageId, table.userId] })],
+  (table) => [
+    primaryKey({ columns: [table.messageId, table.userId] }),
+    index("message_hidden_user_idx").on(table.userId),
+  ],
 );
 
 export const messageAttachments = pgTable(

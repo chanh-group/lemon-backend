@@ -98,8 +98,16 @@ export class FileController {
   ) {
     if (!file) throw new BusinessError("BAD_REQUEST");
     const actorId = getAuthUser(req).id;
+    const current = await this.conversationService.getById(groupId, actorId);
     const avatarUrl = await this.fileService.uploadGroupAvatar(actorId, groupId, file);
-    return ok(await this.conversationService.updateGroupAvatar(groupId, actorId, avatarUrl));
+    try {
+      const updated = await this.conversationService.updateGroupAvatar(groupId, actorId, avatarUrl);
+      await this.fileService.deleteGroupAvatarObject(groupId, current.avatarUrl);
+      return ok(updated);
+    } catch (error) {
+      await this.fileService.deleteGroupAvatarObject(groupId, avatarUrl).catch(() => undefined);
+      throw error;
+    }
   }
 
   @Post("presign")

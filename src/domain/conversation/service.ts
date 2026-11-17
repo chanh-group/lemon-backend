@@ -215,11 +215,9 @@ export class ConversationService {
     });
     if (result.created) {
       const participantIds = await this.convRepo.getParticipantUserIds(result.conversation.id);
-      this.realtimeService.emitGroupEvent(
-        participantIds,
-        "conversation:created",
-        toConversationResponse(result.conversation),
-      );
+      this.realtimeService.emitGroupEvent(participantIds, "conversation:created", {
+        conversationId: result.conversation.id,
+      });
     }
     return toConversationResponse(result.conversation);
   }
@@ -252,11 +250,15 @@ export class ConversationService {
     if (new Set(memberIds).size !== memberIds.length) throw new BusinessError("BAD_REQUEST");
     const accepted = await this.friendService.findAcceptedFriendIds(actorId, memberIds);
     if (accepted.size !== memberIds.length) throw new BusinessError("FRIENDSHIP_REQUIRED");
-    const added = await this.convRepo.addGroupMembers(conversationId, actorId, memberIds);
+    const users = await this.userRepo.findByIds(memberIds);
+    if (users.length !== memberIds.length || users.some((user) => !user.isActive)) {
+      throw new BusinessError("USER_NOT_FOUND");
+    }
+    await this.convRepo.addGroupMembers(conversationId, actorId, memberIds);
     const userIds = await this.convRepo.getParticipantUserIds(conversationId);
     this.realtimeService.emitGroupEvent(userIds, "conversation:updated", { conversationId });
     this.realtimeService.emitGroupEvent(userIds, "member:added", { conversationId, memberIds });
-    return added;
+    return this.getById(conversationId, actorId);
   }
 
   async removeGroupMember(

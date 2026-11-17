@@ -82,17 +82,20 @@ export interface MessageRepository {
   }): Promise<CreatedMessageResult>;
   findTimeline(
     conversationId: string,
+    viewerId: string,
     cursor?: string,
     limit?: number,
     after?: string,
-    viewerId?: string,
   ): Promise<MessageTimelineResult>;
-  hideForUser(messageId: string, userId: string): Promise<string>;
+  hideForUser(
+    messageId: string,
+    userId: string,
+  ): Promise<{ conversationId: string; inserted: boolean }>;
   findById(messageId: string, includeDetails?: boolean): Promise<MessageWithAttachments | null>;
   findReplyTargets(
     conversationId: string,
     messageIds: string[],
-    viewerId?: string,
+    viewerId: string,
   ): Promise<ReplyTargetMessage[]>;
   resolveWriteMiss(
     messageId: string,
