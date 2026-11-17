@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../utils/errors/pg.js";
@@ -14,22 +14,27 @@ import {
 } from "./constants.js";
 import type {
   AttachmentInsertData,
+  AttachmentResponseSource,
   CreatedMessageResult,
   MessageRepository,
   MessageTimelineResult,
   MessageWithAttachments,
+  ReactionResponseSource,
+  ReplyTargetMessage,
 } from "./repository.js";
 import type { StoryPreview } from "../story/types.js";
 import {
   type Message,
   type MessageAttachment,
-  type MessageReaction,
   messageAttachments,
   messageReactions,
   messages,
 } from "./schema.js";
 import { groupReactions } from "./dto/mapper.js";
 import type { MessageReactionSummary } from "./dto/response.js";
+
+/** Transaction handle handed to `db.transaction` callbacks. */
+type DbTx = Parameters<Parameters<DrizzleDb["transaction"]>[0]>[0];
 
 /**
  * Conversation inbox preview. A story reaction carries the emoji as its body,
@@ -266,23 +271,38 @@ export class MessagePgRepository implements MessageRepository {
     const messageIds = items.map((m) => m.id);
     const [attachmentRows, reactionRows] = await Promise.all([
       this.db
-        .select()
+        .select({
+          id: messageAttachments.id,
+          messageId: messageAttachments.messageId,
+          kind: messageAttachments.kind,
+          objectKey: messageAttachments.objectKey,
+          fileName: messageAttachments.fileName,
+          mimeType: messageAttachments.mimeType,
+          sizeBytes: messageAttachments.sizeBytes,
+          width: messageAttachments.width,
+          height: messageAttachments.height,
+          durationMs: messageAttachments.durationMs,
+        })
         .from(messageAttachments)
         .where(inArray(messageAttachments.messageId, messageIds)),
       this.db
-        .select()
+        .select({
+          messageId: messageReactions.messageId,
+          userId: messageReactions.userId,
+          emoji: messageReactions.emoji,
+        })
         .from(messageReactions)
         .where(inArray(messageReactions.messageId, messageIds)),
     ]);
 
-    const attachmentsByMessageId = new Map<string, MessageAttachment[]>();
+    const attachmentsByMessageId = new Map<string, AttachmentResponseSource[]>();
     for (const att of attachmentRows) {
       const list = attachmentsByMessageId.get(att.messageId) ?? [];
       list.push(att);
       attachmentsByMessageId.set(att.messageId, list);
     }
 
-    const reactionsByMessageId = new Map<string, MessageReaction[]>();
+    const reactionsByMessageId = new Map<string, ReactionResponseSource[]>();
     for (const r of reactionRows) {
       const list = reactionsByMessageId.get(r.messageId) ?? [];
       list.push(r);
@@ -302,10 +322,20 @@ export class MessagePgRepository implements MessageRepository {
     };
   }
 
-  async findReplyTargets(conversationId: string, messageIds: string[]): Promise<Message[]> {
+  async findReplyTargets(
+    conversationId: string,
+    messageIds: string[],
+  ): Promise<ReplyTargetMessage[]> {
     if (messageIds.length === 0) return [];
     return this.db
-      .select()
+      .select({
+        id: messages.id,
+        senderId: messages.senderId,
+        kind: messages.kind,
+        body: messages.body,
+        deletedAt: messages.deletedAt,
+        storyPreview: messages.storyPreview,
+      })
       .from(messages)
       .where(and(eq(messages.conversationId, conversationId), inArray(messages.id, messageIds)));
   }
@@ -414,21 +444,8 @@ export class MessagePgRepository implements MessageRepository {
     userId: string,
     messageId: string,
     emoji: string,
-    requiredFriendship?: { userAId: string; userBId: string },
   ): Promise<{ reactions: MessageReactionSummary[]; conversationId: string }> {
     return this.db.transaction(async (tx) => {
-      if (requiredFriendship) {
-        const [userLow, userHigh] = [requiredFriendship.userAId, requiredFriendship.userBId].sort();
-        const [relation] = await tx
-          .select({ status: friendships.status })
-          .from(friendships)
-          .where(and(eq(friendships.userLow, userLow), eq(friendships.userHigh, userHigh)))
-          .for("share")
-          .limit(1);
-        if (relation?.status === "BLOCKED") throw new BusinessError("USER_BLOCKED");
-        if (relation?.status !== "ACCEPTED") throw new BusinessError("FRIENDSHIP_REQUIRED");
-      }
-
       const [msg] = await tx
         .select({
           id: messages.id,
@@ -456,6 +473,8 @@ export class MessagePgRepository implements MessageRepository {
         .limit(1);
 
       if (!participant) throw new BusinessError("NOT_PARTICIPANT");
+
+      await this.assertDirectReactionAllowed(tx, msg.conversationId, userId);
 
       const [existing] = await tx
         .select()
@@ -489,5 +508,46 @@ export class MessagePgRepository implements MessageRepository {
         conversationId: msg.conversationId,
       };
     });
+  }
+
+  /**
+   * Direct conversations gate reactions on the accepted friendship, checked
+   * under the transaction lock. The pair is derived from the conversation so
+   * the locked message select stays the single source of truth.
+   */
+  private async assertDirectReactionAllowed(
+    tx: DbTx,
+    conversationId: string,
+    userId: string,
+  ): Promise<void> {
+    const [conversation] = await tx
+      .select({ kind: conversations.kind })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .limit(1);
+    if (conversation?.kind !== "DIRECT") return;
+
+    const [partner] = await tx
+      .select({ userId: conversationParticipants.userId })
+      .from(conversationParticipants)
+      .where(
+        and(
+          eq(conversationParticipants.conversationId, conversationId),
+          ne(conversationParticipants.userId, userId),
+          isNull(conversationParticipants.leftAt),
+        ),
+      )
+      .limit(1);
+    if (!partner) return;
+
+    const [userLow, userHigh] = [userId, partner.userId].sort();
+    const [relation] = await tx
+      .select({ status: friendships.status })
+      .from(friendships)
+      .where(and(eq(friendships.userLow, userLow), eq(friendships.userHigh, userHigh)))
+      .for("share")
+      .limit(1);
+    if (relation?.status === "BLOCKED") throw new BusinessError("USER_BLOCKED");
+    if (relation?.status !== "ACCEPTED") throw new BusinessError("FRIENDSHIP_REQUIRED");
   }
 }
