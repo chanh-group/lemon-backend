@@ -157,12 +157,50 @@ describe("ConversationService", () => {
 
     it("does not create a direct conversation before friendship is accepted", async () => {
       findUserByIdMock.mockResolvedValue({ id: userB });
+      const friendshipError = new BusinessError("FRIENDSHIP_REQUIRED");
+      assertCanChatMock.mockRejectedValue(friendshipError);
+
+      await expect(service.getOrCreateDirect(userA, userB)).rejects.toBe(friendshipError);
+      expect(createDirectConversationMock).not.toHaveBeenCalled();
+    });
+
+    it("runs the target lookup, friendship check and conversation lookup concurrently", async () => {
+      findUserByIdMock.mockResolvedValue(null);
+
+      await expect(service.getOrCreateDirect(userA, userB)).rejects.toThrow(
+        expect.objectContaining({ code: "USER_NOT_FOUND" }),
+      );
+      expect(assertCanChatMock).toHaveBeenCalledWith(userA, userB);
+      expect(findDirectByParticipantsMock).toHaveBeenCalledWith(userA, userB);
+      expect(createDirectConversationMock).not.toHaveBeenCalled();
+    });
+
+    it("surfaces USER_NOT_FOUND before a friendship failure when both checks fail", async () => {
+      findUserByIdMock.mockResolvedValue(null);
       assertCanChatMock.mockRejectedValue(new BusinessError("FRIENDSHIP_REQUIRED"));
 
-      await expect(service.getOrCreateDirect(userA, userB)).rejects.toMatchObject({
-        code: "FRIENDSHIP_REQUIRED",
-      });
-      expect(findDirectByParticipantsMock).not.toHaveBeenCalled();
+      await expect(service.getOrCreateDirect(userA, userB)).rejects.toThrow(
+        expect.objectContaining({ code: "USER_NOT_FOUND" }),
+      );
+      expect(createDirectConversationMock).not.toHaveBeenCalled();
+    });
+
+    it("surfaces the friendship error before a conversation lookup failure", async () => {
+      findUserByIdMock.mockResolvedValue({ id: userB });
+      const friendshipError = new BusinessError("FRIENDSHIP_REQUIRED");
+      assertCanChatMock.mockRejectedValue(friendshipError);
+      findDirectByParticipantsMock.mockRejectedValue(new Error("db down"));
+
+      await expect(service.getOrCreateDirect(userA, userB)).rejects.toBe(friendshipError);
+      expect(createDirectConversationMock).not.toHaveBeenCalled();
+    });
+
+    it("rethrows the conversation lookup failure unchanged when the earlier checks pass", async () => {
+      findUserByIdMock.mockResolvedValue({ id: userB });
+      const lookupError = new Error("db down");
+      findDirectByParticipantsMock.mockRejectedValue(lookupError);
+
+      await expect(service.getOrCreateDirect(userA, userB)).rejects.toBe(lookupError);
       expect(createDirectConversationMock).not.toHaveBeenCalled();
     });
 
@@ -330,6 +368,82 @@ describe("ConversationService", () => {
       await expect(service.listConversations(userA)).rejects.toMatchObject({ kind: "database" });
       expect(warn).toHaveBeenCalled();
       warn.mockRestore();
+    });
+
+    it("coalesces concurrent cache-miss rebuilds into a single database query", async () => {
+      findUserConversationsMock.mockResolvedValue({
+        items: [{ ...mockConvWithPartner }],
+        hasMore: false,
+      });
+      redisPipelineExecMock
+        .mockResolvedValueOnce([[null, null], presenceOnline])
+        .mockResolvedValueOnce([[null, null], presenceOnline])
+        .mockResolvedValueOnce([[null, "OK"]])
+        .mockResolvedValueOnce([[null, "OK"]]);
+      let releaseRebuild!: (counts: Map<string, number>) => void;
+      countUnreadBatchMock.mockImplementation(
+        () =>
+          new Promise<Map<string, number>>((resolve) => {
+            releaseRebuild = resolve;
+          }),
+      );
+
+      const first = service.listConversations(userA);
+      const second = service.listConversations(userA);
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      expect(countUnreadBatchMock).toHaveBeenCalledOnce();
+
+      releaseRebuild(new Map([[convId, 3]]));
+      const [firstPage, secondPage] = await Promise.all([first, second]);
+
+      expect(countUnreadBatchMock).toHaveBeenCalledOnce();
+      expect(firstPage.items[0].unreadCount).toBe(3);
+      expect(secondPage.items[0].unreadCount).toBe(3);
+    });
+
+    it("rejects every coalesced caller when the shared rebuild fails and retries afterwards", async () => {
+      findUserConversationsMock.mockResolvedValue({
+        items: [{ ...mockConvWithPartner }],
+        hasMore: false,
+      });
+      redisPipelineExecMock
+        .mockResolvedValueOnce([[null, null], presenceOnline])
+        .mockResolvedValueOnce([[null, null], presenceOnline]);
+      let failRebuild!: (err: Error) => void;
+      countUnreadBatchMock.mockImplementation(
+        () =>
+          new Promise<Map<string, number>>((_, reject) => {
+            failRebuild = reject;
+          }),
+      );
+      const warn = vi.spyOn(Logger.prototype, "warn").mockReturnValue(undefined);
+
+      try {
+        const first = service.listConversations(userA);
+        const second = service.listConversations(userA);
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 0);
+        });
+        expect(countUnreadBatchMock).toHaveBeenCalledOnce();
+
+        const firstRejection = expect(first).rejects.toMatchObject({ kind: "database" });
+        const secondRejection = expect(second).rejects.toMatchObject({ kind: "database" });
+        failRebuild(new Error("db down"));
+        await Promise.all([firstRejection, secondRejection]);
+
+        countUnreadBatchMock.mockResolvedValue(new Map([[convId, 3]]));
+        redisPipelineExecMock
+          .mockResolvedValueOnce([[null, null], presenceOnline])
+          .mockResolvedValueOnce([[null, "OK"]]);
+        const third = await service.listConversations(userA);
+
+        expect(third.items[0].unreadCount).toBe(3);
+        expect(countUnreadBatchMock).toHaveBeenCalledTimes(2);
+      } finally {
+        warn.mockRestore();
+      }
     });
   });
 

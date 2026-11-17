@@ -263,6 +263,7 @@ describe("ConversationPgRepository.countUnread", () => {
     expect(where.sql).toContain('"messages"."deleted_at" is null');
     expect(where.sql).toContain('"messages"."sender_id" <>');
     expect(where.sql).toContain('"conversation_participants"."last_read_message_id" is null');
+    expect(where.sql).toContain('"messages"."created_at" >=');
     expect(where.sql).toContain('ROW("messages"."created_at", "messages"."id") > ROW(');
     expect(where.sql).toContain("SELECT m.created_at FROM messages m");
     expect(where.sql).not.toContain("SELECT m.created_at, m.id");
@@ -286,6 +287,41 @@ describe("ConversationPgRepository.countUnread", () => {
     const repo = new ConversationPgRepository(db);
 
     await expect(repo.countUnread(convRow.id, userAId)).resolves.toBe(0);
+  });
+});
+
+describe("ConversationPgRepository.countUnreadByConversationIds", () => {
+  it("groups counts per conversation behind the same sargable created-at pre-filter", async () => {
+    const groupByMock = vi
+      .fn<(condition: unknown) => Promise<unknown[]>>()
+      .mockResolvedValue([{ conversationId: convRow.id, count: 2 }]);
+    const whereMock = vi.fn<(condition: SQL) => unknown>(() => ({ groupBy: groupByMock }));
+    const innerJoinMock = vi.fn<(table: unknown, condition: SQL) => unknown>(() => ({
+      where: whereMock,
+    }));
+    const fromMock = vi.fn(() => ({ innerJoin: innerJoinMock }));
+    const selectMock = vi.fn<(columns: unknown) => unknown>(() => ({ from: fromMock }));
+    const db = { select: selectMock } as unknown as DrizzleDb;
+    const repo = new ConversationPgRepository(db);
+
+    const result = await repo.countUnreadByConversationIds([convRow.id], userAId);
+
+    expect(result).toEqual(new Map([[convRow.id, 2]]));
+    expect(fromMock).toHaveBeenCalledWith(messages);
+    const where = render(whereMock.mock.calls[0][0]);
+    expect(where.sql).toContain('"messages"."conversation_id" in');
+    expect(where.sql).toContain('"messages"."created_at" >=');
+    expect(where.sql).toContain('ROW("messages"."created_at", "messages"."id") > ROW(');
+    expect(where.params).toEqual([convRow.id, userAId]);
+  });
+
+  it("returns an empty map without querying when given no conversation ids", async () => {
+    const selectMock = vi.fn();
+    const db = { select: selectMock } as unknown as DrizzleDb;
+    const repo = new ConversationPgRepository(db);
+
+    await expect(repo.countUnreadByConversationIds([], userAId)).resolves.toEqual(new Map());
+    expect(selectMock).not.toHaveBeenCalled();
   });
 });
 
