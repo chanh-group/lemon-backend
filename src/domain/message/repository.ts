@@ -62,11 +62,6 @@ export interface CreatedMessageResult {
 }
 
 export interface MessageRepository {
-  findByClientMsgId(
-    conversationId: string,
-    senderId: string,
-    clientMsgId: string,
-  ): Promise<MessageWithAttachments | null>;
   createMessageWithConversationUpdate(messageData: {
     conversationId: string;
     senderId: string;

@@ -50,23 +50,35 @@ function toConversationPreview(kind: Message["kind"], body: string | null): stri
 export class MessagePgRepository implements MessageRepository {
   constructor(@InjectDrizzle() private readonly db: DrizzleDb) {}
 
-  async findByClientMsgId(
-    conversationId: string,
-    senderId: string,
-    clientMsgId: string,
-  ): Promise<MessageWithAttachments | null> {
-    const [msg] = await this.db
+  private async findExistingByClientMsgId(
+    db: Pick<DrizzleDb, "select">,
+    messageData: {
+      conversationId: string;
+      senderId: string;
+      clientMsgId: string;
+      attachments?: AttachmentInsertData[];
+    },
+  ): Promise<CreatedMessageResult | null> {
+    const [existing] = await db
       .select()
       .from(messages)
       .where(
         and(
-          eq(messages.conversationId, conversationId),
-          eq(messages.senderId, senderId),
-          eq(messages.clientMsgId, clientMsgId),
+          eq(messages.conversationId, messageData.conversationId),
+          eq(messages.senderId, messageData.senderId),
+          eq(messages.clientMsgId, messageData.clientMsgId),
         ),
       )
       .limit(1);
-    return msg ?? null;
+    if (!existing) return null;
+    if (messageData.attachments && messageData.attachments.length > 0) {
+      const existingAttachments = await db
+        .select()
+        .from(messageAttachments)
+        .where(eq(messageAttachments.messageId, existing.id));
+      return { message: { ...existing, attachments: existingAttachments }, isNew: false };
+    }
+    return { message: existing, isNew: false };
   }
 
   async createMessageWithConversationUpdate(messageData: {
@@ -108,32 +120,9 @@ export class MessagePgRepository implements MessageRepository {
           if (relation?.status !== "ACCEPTED") throw new BusinessError("FRIENDSHIP_REQUIRED");
         }
 
-        // 1. Idempotency check with clientMsgId
-        if (messageData.clientMsgId) {
-          const [existing] = await tx
-            .select()
-            .from(messages)
-            .where(
-              and(
-                eq(messages.conversationId, messageData.conversationId),
-                eq(messages.senderId, messageData.senderId),
-                eq(messages.clientMsgId, messageData.clientMsgId),
-              ),
-            )
-            .limit(1);
-          if (existing) {
-            if (messageData.attachments && messageData.attachments.length > 0) {
-              const existingAttachments = await tx
-                .select()
-                .from(messageAttachments)
-                .where(eq(messageAttachments.messageId, existing.id));
-              return { message: { ...existing, attachments: existingAttachments }, isNew: false };
-            }
-            return { message: existing, isNew: false };
-          }
-        }
-
-        // 2. Insert new message
+        // 1. Insert the message. The partial unique index on clientMsgId
+        // swallows duplicate retries, so the happy path skips a pre-check
+        // round trip; a swallowed insert resolves the existing row below.
         const [newMsg] = await tx
           .insert(messages)
           .values({
@@ -147,7 +136,24 @@ export class MessagePgRepository implements MessageRepository {
             storyPreview: messageData.storyPreview ?? null,
             isForwarded: messageData.isForwarded ?? false,
           })
+          .onConflictDoNothing({
+            target: [messages.conversationId, messages.senderId, messages.clientMsgId],
+            where: sql`${messages.clientMsgId} IS NOT NULL`,
+          })
           .returning();
+
+        if (!newMsg) {
+          if (messageData.clientMsgId) {
+            const existing = await this.findExistingByClientMsgId(tx, {
+              conversationId: messageData.conversationId,
+              senderId: messageData.senderId,
+              clientMsgId: messageData.clientMsgId,
+              attachments: messageData.attachments,
+            });
+            if (existing) return existing;
+          }
+          throw new BusinessError("CONFLICT");
+        }
 
         let insertedAttachments: MessageAttachment[] | undefined;
         if (messageData.attachments && messageData.attachments.length > 0) {
@@ -171,7 +177,7 @@ export class MessagePgRepository implements MessageRepository {
             .returning();
         }
 
-        // 3. Atomically update parent conversation inbox fields
+        // 2. Atomically update parent conversation inbox fields
         const preview = toConversationPreview(newMsg.kind, newMsg.body);
         const isLatest = sql`(${conversations.lastMessageAt} IS NULL
           OR ${conversations.lastMessageAt} < ${newMsg.createdAt}
@@ -195,12 +201,13 @@ export class MessagePgRepository implements MessageRepository {
       });
     } catch (err: unknown) {
       if (messageData.clientMsgId && isUniqueViolation(err, "messages_client_msg_uq")) {
-        const existing = await this.findByClientMsgId(
-          messageData.conversationId,
-          messageData.senderId,
-          messageData.clientMsgId,
-        );
-        if (existing) return { message: existing, isNew: false };
+        const existing = await this.findExistingByClientMsgId(this.db, {
+          conversationId: messageData.conversationId,
+          senderId: messageData.senderId,
+          clientMsgId: messageData.clientMsgId,
+          attachments: messageData.attachments,
+        });
+        if (existing) return existing;
         throw new BusinessError("CONFLICT");
       }
       if (isForeignKeyViolation(err)) {
