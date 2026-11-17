@@ -248,17 +248,18 @@ export class AuthService {
 
     const payload = await this.jwt.verifyRefreshToken(rawRefreshToken);
 
-    let user: Awaited<ReturnType<UserRepository["findById"]>>;
-    let active: boolean;
+    let state: Awaited<ReturnType<AuthSessionRepository["findAuthState"]>>;
     try {
-      [user, active] = await Promise.all([
-        this.userRepo.findById(payload.sub),
-        this.sessions.isActive(payload.sub, payload.sid),
-      ]);
+      state = await this.sessions.findAuthState(payload.sub, payload.sid);
     } catch (err) {
       throw new SystemError("database", "Session verification failed", { cause: err });
     }
-    if (!user || !user.isActive || !active || user.authVersion !== payload.authVersion) {
+    if (
+      !state ||
+      !state.isActive ||
+      !state.sessionActive ||
+      state.authVersion !== payload.authVersion
+    ) {
       throw new BusinessError("INVALID_SESSION");
     }
 
