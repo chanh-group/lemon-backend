@@ -149,31 +149,62 @@ export class ConversationService {
     ) {
       throw new BusinessError("BAD_REQUEST");
     }
+    const createRequestHash = createHash("sha256")
+      .update(JSON.stringify({ title: input.title.trim(), memberIds: [...input.memberIds].sort() }))
+      .digest("hex");
+    const existing = await this.convRepo.findGroupCreateRequest(userId, input.clientRequestId);
+    const replayExisting = async (match: typeof existing) => {
+      if (!match) return null;
+      if (match.deletedAt || match.createRequestHash !== createRequestHash) {
+        throw new BusinessError("CONFLICT");
+      }
+      const conversation = await this.convRepo.findById(match.id, userId);
+      if (!conversation) throw new BusinessError("NOT_PARTICIPANT");
+      return toConversationResponse(conversation);
+    };
+    const replay = await replayExisting(existing);
+    if (replay) return replay;
+
+    const replayAfterValidationRace = async () => {
+      const raced = await this.convRepo.findGroupCreateRequest(userId, input.clientRequestId);
+      return replayExisting(raced);
+    };
+
     const [creator, users, accepted] = await Promise.all([
       this.userRepo.findById(userId),
       this.userRepo.findByIds(input.memberIds),
       this.friendService.findAcceptedFriendIds(userId, input.memberIds),
     ]);
-    if (!creator) throw new BusinessError("USER_NOT_FOUND");
-    if (users.length !== input.memberIds.length || users.some((user) => !user.isActive))
+    if (!creator) {
+      const raced = await replayAfterValidationRace();
+      if (raced) return raced;
       throw new BusinessError("USER_NOT_FOUND");
-    if (accepted.size !== input.memberIds.length) throw new BusinessError("FRIENDSHIP_REQUIRED");
-    const createRequestHash = createHash("sha256")
-      .update(JSON.stringify({ title: input.title.trim(), memberIds: [...input.memberIds].sort() }))
-      .digest("hex");
-    const group = await this.convRepo.createGroup({
+    }
+    if (users.length !== input.memberIds.length || users.some((user) => !user.isActive)) {
+      const raced = await replayAfterValidationRace();
+      if (raced) return raced;
+      throw new BusinessError("USER_NOT_FOUND");
+    }
+    if (accepted.size !== input.memberIds.length) {
+      const raced = await replayAfterValidationRace();
+      if (raced) return raced;
+      throw new BusinessError("FRIENDSHIP_REQUIRED");
+    }
+    const result = await this.convRepo.createGroup({
       creatorId: userId,
       ...input,
       title: input.title.trim(),
       createRequestHash,
     });
-    this.realtimeService.joinConversation([userId, ...input.memberIds], group.id);
-    this.realtimeService.emitGroupEvent(
-      [userId, ...input.memberIds],
-      "conversation:created",
-      toConversationResponse(group),
-    );
-    return toConversationResponse(group);
+    if (result.created) {
+      const participantIds = await this.convRepo.getParticipantUserIds(result.conversation.id);
+      this.realtimeService.emitGroupEvent(
+        participantIds,
+        "conversation:created",
+        toConversationResponse(result.conversation),
+      );
+    }
+    return toConversationResponse(result.conversation);
   }
 
   async listGroupMembers(
@@ -206,7 +237,6 @@ export class ConversationService {
     if (accepted.size !== memberIds.length) throw new BusinessError("FRIENDSHIP_REQUIRED");
     const added = await this.convRepo.addGroupMembers(conversationId, actorId, memberIds);
     const userIds = await this.convRepo.getParticipantUserIds(conversationId);
-    this.realtimeService.joinConversation(memberIds, conversationId);
     this.realtimeService.emitGroupEvent(userIds, "conversation:updated", { conversationId });
     this.realtimeService.emitGroupEvent(userIds, "member:added", { conversationId, memberIds });
     return added;
@@ -585,10 +615,14 @@ export class ConversationService {
     await this.convRepo.updateLastRead(conversationId, userId, lastReadMessageId);
 
     // Broadcast to room
-    this.realtimeService.emitReadUpdated(conversationId, {
-      userId,
-      lastReadMessageId,
-      readAt: new Date(),
-    });
+    const recipientUserIds =
+      conversation.kind === "GROUP"
+        ? await this.convRepo.getMessageRecipientUserIds(conversationId, lastReadMessageId)
+        : undefined;
+    this.realtimeService.emitReadUpdated(
+      conversationId,
+      { userId, lastReadMessageId, readAt: new Date() },
+      recipientUserIds,
+    );
   }
 }

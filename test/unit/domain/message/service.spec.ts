@@ -26,6 +26,7 @@ describe("MessageService", () => {
   let emitMessageReactionMock: Mock;
 
   let getParticipantUserIdsMock: Mock;
+  let getMessageRecipientUserIdsMock: Mock;
   let findConversationByIdMock: Mock;
   let assertCanChatMock: Mock;
   let emitNewMessageMock: Mock;
@@ -70,6 +71,7 @@ describe("MessageService", () => {
     getGroupMembershipMock = vi.fn().mockResolvedValue(null);
 
     getParticipantUserIdsMock = vi.fn().mockResolvedValue([userA, userB]);
+    getMessageRecipientUserIdsMock = vi.fn().mockResolvedValue([userA, userB]);
     findConversationByIdMock = vi
       .fn()
       .mockImplementation((_conversationId: string, userId: string) =>
@@ -97,6 +99,7 @@ describe("MessageService", () => {
 
     const mockConvRepo = {
       getParticipantUserIds: getParticipantUserIdsMock,
+      getMessageRecipientUserIds: getMessageRecipientUserIdsMock,
       findById: findConversationByIdMock,
       canAccessMessage: canAccessMessageMock,
       getGroupMembership: getGroupMembershipMock,
@@ -168,7 +171,7 @@ describe("MessageService", () => {
       expect(res.id).toBe(msgId);
       expect(res.body).toBe("Hello");
       expect(res).not.toHaveProperty("clientMsgId");
-      expect(emitNewMessageMock).toHaveBeenCalledWith(convId, res);
+      expect(emitNewMessageMock).toHaveBeenCalledWith(convId, res, expect.any(Array));
     });
 
     it("stores a story message with the server decided kind and snapshot", async () => {
@@ -282,7 +285,7 @@ describe("MessageService", () => {
       findTimelineMock.mockResolvedValue({ items: [reply], hasMore: false });
       findReplyTargetsMock.mockResolvedValue([target]);
       const result = await service.getTimeline(userA, convId);
-      expect(findReplyTargetsMock).toHaveBeenCalledWith(convId, [msgId], userA, undefined);
+      expect(findReplyTargetsMock).toHaveBeenCalledWith(convId, [msgId], userA);
       expect(result.items[0].replyTarget).toMatchObject({
         id: msgId,
         body: null,
@@ -305,14 +308,7 @@ describe("MessageService", () => {
       expect(res.items[0].id).toBe(msgId);
       expect(res.items[0]).not.toHaveProperty("clientMsgId");
       expect(res.hasMore).toBe(false);
-      expect(findTimelineMock).toHaveBeenCalledWith(
-        convId,
-        undefined,
-        undefined,
-        undefined,
-        userA,
-        undefined,
-      );
+      expect(findTimelineMock).toHaveBeenCalledWith(convId, undefined, undefined, undefined, userA);
       expect(getParticipantUserIdsMock).not.toHaveBeenCalled();
       expect(findConversationByIdMock).toHaveBeenCalledWith(convId, userA);
     });
@@ -360,7 +356,7 @@ describe("MessageService", () => {
 
       expect(res.body).toBe("Updated");
       expect(res).not.toHaveProperty("clientMsgId");
-      expect(emitMessageUpdatedMock).toHaveBeenCalledWith(convId, res);
+      expect(emitMessageUpdatedMock).toHaveBeenCalledWith(convId, res, expect.any(Array));
       expect(resolveWriteMissMock).not.toHaveBeenCalled();
     });
 
@@ -432,7 +428,11 @@ describe("MessageService", () => {
       expect(res.deletedAt).toBe(deletedAt);
       expect(res.body).toBeNull();
       expect(res).not.toHaveProperty("clientMsgId");
-      expect(emitMessageRevokedMock).toHaveBeenCalledWith(convId, { id: msgId, deletedAt });
+      expect(emitMessageRevokedMock).toHaveBeenCalledWith(
+        convId,
+        { id: msgId, deletedAt },
+        expect.any(Array),
+      );
       expect(resolveWriteMissMock).not.toHaveBeenCalled();
     });
 
@@ -692,12 +692,16 @@ describe("MessageService", () => {
       const result = await service.reactToMessage(userA, msgId, "❤️");
 
       expect(reactMessageMock).toHaveBeenCalledWith(userA, msgId, "❤️");
-      expect(emitMessageReactionMock).toHaveBeenCalledWith(convId, {
-        messageId: msgId,
-        userId: userA,
-        emoji: "❤️",
-        reactions: [{ emoji: "❤️", count: 1, userIds: [userA] }],
-      });
+      expect(emitMessageReactionMock).toHaveBeenCalledWith(
+        convId,
+        {
+          messageId: msgId,
+          userId: userA,
+          emoji: "❤️",
+          reactions: [{ emoji: "❤️", count: 1, userIds: [userA] }],
+        },
+        expect.any(Array),
+      );
       expect(result).toEqual({
         messageId: msgId,
         reactions: [{ emoji: "❤️", count: 1, userIds: [userA] }],

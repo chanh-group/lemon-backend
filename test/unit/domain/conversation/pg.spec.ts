@@ -68,12 +68,24 @@ function makeCountUnreadChain() {
 }
 
 function makeUpdateChain() {
+  const txSelect = makeSelectChain();
+  const forMock = vi.fn(() => ({ limit: txSelect.limitMock }));
+  txSelect.whereMock.mockReturnValue({ limit: txSelect.limitMock, for: forMock });
   const whereMock = vi.fn<(condition: SQL) => Promise<unknown>>().mockResolvedValue([]);
   const setMock = vi.fn<(values: unknown) => unknown>(() => ({ where: whereMock }));
   const updateMock = vi.fn<(table: unknown) => unknown>(() => ({ set: setMock }));
-  const db = { update: updateMock } as unknown as DrizzleDb;
+  txSelect.limitMock
+    .mockResolvedValueOnce([{ id: convRow.id }])
+    .mockResolvedValueOnce([{ lastReadMessageId: null, historyBoundaryMessageId: null }])
+    .mockResolvedValueOnce([
+      { id: "0193a2b1-0000-7000-8000-000000000099", createdAt: new Date("2026-10-19T02:00:00Z") },
+    ]);
+  const transactionMock = vi.fn((cb: (tx: unknown) => Promise<unknown>) =>
+    cb({ select: txSelect.selectMock, update: updateMock }),
+  );
+  const db = { transaction: transactionMock } as unknown as DrizzleDb;
 
-  return { db, updateMock, setMock, whereMock };
+  return { db, updateMock, setMock, whereMock, transactionMock, txSelect };
 }
 
 const dialect = new PgDialect();
@@ -434,11 +446,9 @@ describe("ConversationPgRepository.updateLastRead", () => {
     const values = chain.setMock.mock.calls[0][0] as { lastReadAt: SQL };
     expect(render(values.lastReadAt).sql).toBe("now()");
     const where = render(chain.whereMock.mock.calls[0][0]);
-    expect(where.sql).toContain('"conversation_participants"."last_read_message_id" IS NULL');
-    expect(where.sql).toContain("ROW(");
-    expect(where.sql).toContain("SELECT m.created_at FROM messages m");
-    expect(where.sql).not.toContain("SELECT m.created_at, m.id");
-    expect(where.sql).toContain('"conversation_participants"."last_read_message_id"');
+    expect(where.sql).toContain('"conversation_participants"."conversation_id" =');
+    expect(where.sql).toContain('"conversation_participants"."user_id" =');
+    expect(where.sql).toContain('"conversation_participants"."left_at" is null');
   });
 });
 

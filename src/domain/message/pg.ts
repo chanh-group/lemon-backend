@@ -245,12 +245,27 @@ export class MessagePgRepository implements MessageRepository {
     limit = DEFAULT_MESSAGE_PAGE_SIZE,
     after?: string,
     viewerId?: string,
-    historyBoundaryMessageId?: string | null,
   ): Promise<MessageTimelineResult> {
     const queryLimit = Math.min(Math.max(limit, 1), MAX_MESSAGE_PAGE_SIZE);
 
     const conditions = [eq(messages.conversationId, conversationId)];
+    let authorized = true;
     if (viewerId) {
+      const [membership] = await this.db
+        .select({ historyBoundaryMessageId: conversationParticipants.historyBoundaryMessageId })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.userId, viewerId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        )
+        .limit(1);
+      if (!membership) {
+        return { items: [], hasMore: false, authorized: false };
+      }
+
       conditions.push(
         notExists(
           this.db
@@ -264,8 +279,8 @@ export class MessagePgRepository implements MessageRepository {
             ),
         ),
       );
-      if (historyBoundaryMessageId) {
-        const boundary = sql`(SELECT m.created_at, m.id FROM messages m WHERE m.id = ${historyBoundaryMessageId} AND m.conversation_id = ${conversationId})`;
+      if (membership.historyBoundaryMessageId) {
+        const boundary = sql`(SELECT m.created_at, m.id FROM messages m WHERE m.id = ${membership.historyBoundaryMessageId} AND m.conversation_id = ${conversationId})`;
         conditions.push(sql`ROW(${messages.createdAt}, ${messages.id}) > ${boundary}`);
       }
     }
@@ -315,11 +330,12 @@ export class MessagePgRepository implements MessageRepository {
         items: [],
         nextCursor,
         hasMore,
+        authorized,
       };
     }
 
     const messageIds = items.filter((m) => !m.deletedAt).map((m) => m.id);
-    if (messageIds.length === 0) return { items, nextCursor, hasMore };
+    if (messageIds.length === 0) return { items, nextCursor, hasMore, authorized };
     const [attachmentRows, reactionRows] = await Promise.all([
       this.db
         .select()
@@ -355,6 +371,7 @@ export class MessagePgRepository implements MessageRepository {
       items: itemsWithAttachments,
       nextCursor,
       hasMore,
+      authorized,
     };
   }
 
@@ -366,6 +383,27 @@ export class MessagePgRepository implements MessageRepository {
         .where(eq(messages.id, messageId))
         .limit(1);
       if (!message) throw new BusinessError("MESSAGE_NOT_FOUND");
+
+      await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(eq(conversations.id, message.conversationId))
+        .for("update")
+        .limit(1);
+      const [participant] = await tx
+        .select({ userId: conversationParticipants.userId })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, message.conversationId),
+            eq(conversationParticipants.userId, userId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        )
+        .for("share")
+        .limit(1);
+      if (!participant) throw new BusinessError("NOT_PARTICIPANT");
+
       const [inserted] = await tx
         .insert(messageHiddenForUsers)
         .values({ messageId, userId })
@@ -385,9 +423,24 @@ export class MessagePgRepository implements MessageRepository {
     conversationId: string,
     messageIds: string[],
     viewerId?: string,
-    historyBoundaryMessageId?: string | null,
   ): Promise<Message[]> {
     if (messageIds.length === 0) return [];
+    let historyBoundaryMessageId: string | null | undefined;
+    if (viewerId) {
+      const [membership] = await this.db
+        .select({ historyBoundaryMessageId: conversationParticipants.historyBoundaryMessageId })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.userId, viewerId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        )
+        .limit(1);
+      if (!membership) return [];
+      historyBoundaryMessageId = membership.historyBoundaryMessageId;
+    }
     return this.db
       .select()
       .from(messages)
@@ -459,8 +512,24 @@ export class MessagePgRepository implements MessageRepository {
     conversationId: string,
   ): Promise<Message | null> {
     const [msg] = await this.db
-      .select()
+      .select({ message: messages })
       .from(messages)
+      .innerJoin(
+        conversationParticipants,
+        and(
+          eq(conversationParticipants.conversationId, messages.conversationId),
+          eq(conversationParticipants.userId, userId),
+          isNull(conversationParticipants.leftAt),
+          sql`(
+            ${conversationParticipants.historyBoundaryMessageId} IS NULL
+            OR ROW(${messages.createdAt}, ${messages.id}) > (
+              SELECT m.created_at, m.id
+              FROM messages m
+              WHERE m.id = ${conversationParticipants.historyBoundaryMessageId}
+            )
+          )`,
+        ),
+      )
       .where(
         and(
           eq(messages.id, messageId),
@@ -469,11 +538,37 @@ export class MessagePgRepository implements MessageRepository {
         ),
       )
       .limit(1);
-    return msg ?? null;
+    return msg?.message ?? null;
   }
 
   async updateBody(messageId: string, senderId: string, body: string): Promise<Message | null> {
     return await this.db.transaction(async (tx) => {
+      const [message] = await tx
+        .select({ conversationId: messages.conversationId })
+        .from(messages)
+        .where(eq(messages.id, messageId))
+        .limit(1);
+      if (!message) return null;
+      await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(eq(conversations.id, message.conversationId))
+        .for("update")
+        .limit(1);
+      const [participant] = await tx
+        .select({ userId: conversationParticipants.userId })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, message.conversationId),
+            eq(conversationParticipants.userId, senderId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        )
+        .for("share")
+        .limit(1);
+      if (!participant) return null;
+
       const [updated] = await tx
         .update(messages)
         .set({
@@ -512,6 +607,32 @@ export class MessagePgRepository implements MessageRepository {
 
   async softDelete(messageId: string, senderId: string): Promise<Message | null> {
     return await this.db.transaction(async (tx) => {
+      const [message] = await tx
+        .select({ conversationId: messages.conversationId })
+        .from(messages)
+        .where(eq(messages.id, messageId))
+        .limit(1);
+      if (!message) return null;
+      await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(eq(conversations.id, message.conversationId))
+        .for("update")
+        .limit(1);
+      const [participant] = await tx
+        .select({ userId: conversationParticipants.userId })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, message.conversationId),
+            eq(conversationParticipants.userId, senderId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        )
+        .for("share")
+        .limit(1);
+      if (!participant) return null;
+
       const [deleted] = await tx
         .update(messages)
         .set({

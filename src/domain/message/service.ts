@@ -242,8 +242,30 @@ export class MessageService {
     }
 
     if (isNew) {
-      // Emit realtime event to the conversation room
-      this.realtimeService.emitNewMessage(conversationId, response);
+      if (directPartnerId) {
+        this.realtimeService.emitNewMessage(conversationId, response);
+      } else {
+        const participantIds = await this.convRepo.getParticipantUserIds(conversationId);
+        const replyVisibleTo = response.replyToId
+          ? new Set(
+              await this.convRepo.getMessageRecipientUserIds(conversationId, response.replyToId),
+            )
+          : null;
+        const recipientPayloads = await Promise.all(
+          participantIds.map(async (participantId) => {
+            if (!response.replyToId || participantId === senderId) {
+              return { userId: participantId, payload: response };
+            }
+            return {
+              userId: participantId,
+              payload: replyVisibleTo?.has(participantId)
+                ? response
+                : { ...response, replyTarget: null },
+            };
+          }),
+        );
+        this.realtimeService.emitNewMessage(conversationId, response, recipientPayloads);
+      }
     }
 
     return response;
@@ -270,8 +292,8 @@ export class MessageService {
       limit,
       after,
       userId,
-      (await this.convRepo.getGroupMembership(conversationId, userId))?.historyBoundaryMessageId,
     );
+    if (timeline.authorized === false) throw new BusinessError("NOT_PARTICIPANT");
     const response = await toMessageTimelineAsync(timeline, this.storage, userId);
     const senderProfiles = await this.messageRepo.findSenderProfiles(
       response.items.map(({ senderId }) => senderId),
@@ -282,12 +304,7 @@ export class MessageService {
       ...new Set(timeline.items.flatMap((item) => (item.replyToId ? [item.replyToId] : []))),
     ];
     if (ids.length) {
-      const targets = await this.messageRepo.findReplyTargets(
-        conversationId,
-        ids,
-        userId,
-        (await this.convRepo.getGroupMembership(conversationId, userId))?.historyBoundaryMessageId,
-      );
+      const targets = await this.messageRepo.findReplyTargets(conversationId, ids, userId);
       const byId = new Map(targets.map((target) => [target.id, target]));
       const targetSenders = await this.messageRepo.findSenderProfiles(
         targets.map(({ senderId }) => senderId),
@@ -326,7 +343,7 @@ export class MessageService {
     if (!msg) {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
-    await this.assertDirectConversationAllowed(msg.conversationId, userId);
+    const directPartnerId = await this.assertDirectConversationAllowed(msg.conversationId, userId);
     if (!(await this.convRepo.canAccessMessage(msg.conversationId, userId, msg.id)))
       throw new BusinessError("MESSAGE_NOT_FOUND");
 
@@ -356,7 +373,10 @@ export class MessageService {
     }
 
     const response = await this.attachSender(await toMessageResponseAsync(updated, this.storage));
-    this.realtimeService.emitMessageUpdated(response.conversationId, response);
+    const recipientUserIds = directPartnerId
+      ? undefined
+      : await this.getVisibleGroupRecipients(response.conversationId, response.id);
+    this.realtimeService.emitMessageUpdated(response.conversationId, response, recipientUserIds);
     return response;
   }
 
@@ -365,7 +385,7 @@ export class MessageService {
     if (!msg) {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
-    await this.assertDirectConversationAllowed(msg.conversationId, userId);
+    const directPartnerId = await this.assertDirectConversationAllowed(msg.conversationId, userId);
     if (!(await this.convRepo.canAccessMessage(msg.conversationId, userId, msg.id)))
       throw new BusinessError("MESSAGE_NOT_FOUND");
 
@@ -383,10 +403,14 @@ export class MessageService {
     }
 
     const response = await this.attachSender(await toMessageResponseAsync(revoked, this.storage));
-    this.realtimeService.emitMessageRevoked(response.conversationId, {
-      id: response.id,
-      deletedAt: response.deletedAt!,
-    });
+    const recipientUserIds = directPartnerId
+      ? undefined
+      : await this.getVisibleGroupRecipients(response.conversationId, response.id);
+    this.realtimeService.emitMessageRevoked(
+      response.conversationId,
+      { id: response.id, deletedAt: response.deletedAt! },
+      recipientUserIds,
+    );
     return response;
   }
 
@@ -417,12 +441,14 @@ export class MessageService {
         })
       : await this.messageRepo.reactMessage(userId, messageId, emoji);
     const { reactions, conversationId } = result;
-    this.realtimeService.emitMessageReaction(conversationId, {
-      messageId,
-      userId,
-      emoji,
-      reactions,
-    });
+    const recipientUserIds = partnerId
+      ? undefined
+      : await this.getVisibleGroupRecipients(conversationId, messageId);
+    this.realtimeService.emitMessageReaction(
+      conversationId,
+      { messageId, userId, emoji, reactions },
+      recipientUserIds,
+    );
     return { messageId, reactions };
   }
 
@@ -436,5 +462,12 @@ export class MessageService {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
     return await toMessageResponseAsync(missed, this.storage);
+  }
+
+  private async getVisibleGroupRecipients(
+    conversationId: string,
+    messageId: string,
+  ): Promise<string[]> {
+    return this.convRepo.getMessageRecipientUserIds(conversationId, messageId);
   }
 }

@@ -24,6 +24,8 @@ export interface MessageTimelineResult {
   items: MessageWithAttachments[];
   nextCursor?: string;
   hasMore: boolean;
+  /** False when viewer had no active membership at the query snapshot. */
+  authorized?: boolean;
 }
 
 export interface CreatedMessageResult {
@@ -59,7 +61,6 @@ export interface MessageRepository {
     limit?: number,
     after?: string,
     viewerId?: string,
-    historyBoundaryMessageId?: string | null,
   ): Promise<MessageTimelineResult>;
   hideForUser(messageId: string, userId: string): Promise<string>;
   findById(messageId: string, includeDetails?: boolean): Promise<MessageWithAttachments | null>;
@@ -67,7 +68,6 @@ export interface MessageRepository {
     conversationId: string,
     messageIds: string[],
     viewerId?: string,
-    historyBoundaryMessageId?: string | null,
   ): Promise<Message[]>;
   resolveWriteMiss(
     messageId: string,

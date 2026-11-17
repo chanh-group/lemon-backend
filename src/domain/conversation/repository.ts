@@ -30,6 +30,17 @@ export interface ConversationWithPartner {
   createdAt: Date;
 }
 
+export interface GroupCreateRequestMatch {
+  id: string;
+  createRequestHash: string | null;
+  deletedAt: Date | null;
+}
+
+export interface CreatedGroupResult {
+  conversation: ConversationWithPartner;
+  created: boolean;
+}
+
 export interface ConversationRepository {
   createGroup(input: {
     creatorId: string;
@@ -37,7 +48,11 @@ export interface ConversationRepository {
     memberIds: string[];
     clientRequestId: string;
     createRequestHash: string;
-  }): Promise<ConversationWithPartner>;
+  }): Promise<CreatedGroupResult>;
+  findGroupCreateRequest(
+    creatorId: string,
+    clientRequestId: string,
+  ): Promise<GroupCreateRequestMatch | null>;
   addGroupMembers(
     conversationId: string,
     actorId: string,
@@ -80,6 +95,7 @@ export interface ConversationRepository {
   isParticipant(conversationId: string, userId: string): Promise<boolean>;
   isMessageInConversation(conversationId: string, messageId: string): Promise<boolean>;
   canAccessMessage(conversationId: string, userId: string, messageId: string): Promise<boolean>;
+  getMessageRecipientUserIds(conversationId: string, messageId: string): Promise<string[]>;
   getParticipantUserIds(conversationId: string): Promise<string[]>;
   updateLastRead(conversationId: string, userId: string, messageId: string): Promise<void>;
   countUnread(conversationId: string, userId: string): Promise<number>;

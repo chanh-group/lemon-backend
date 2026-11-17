@@ -394,7 +394,7 @@ describe("MessagePgRepository.resolveWriteMiss", () => {
       body: null,
       deletedAt: new Date("2026-10-19T01:00:00Z"),
     };
-    dbSelect.limitMock.mockResolvedValueOnce([revokedRow]);
+    dbSelect.limitMock.mockResolvedValueOnce([{ message: revokedRow }]);
     const repo = new MessagePgRepository(db);
 
     const result = await repo.resolveWriteMiss(messageId, senderId, conversationId);

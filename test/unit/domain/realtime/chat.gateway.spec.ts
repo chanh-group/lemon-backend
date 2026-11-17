@@ -23,6 +23,7 @@ describe("ChatGateway", () => {
   let mockRedis: Redis;
   let activeConversationIdsMock: Mock;
   let isParticipantMock: Mock;
+  let getParticipantUserIdsMock: Mock;
   let updateLastSeenMock: Mock;
   let findAuthUserMock: Mock;
   let sessionActiveMock: Mock;
@@ -60,6 +61,7 @@ describe("ChatGateway", () => {
     dbSelectMock = vi.fn().mockImplementation(() => makeDb());
     activeConversationIdsMock = vi.fn().mockResolvedValue([mockConvId, mockConvId2]);
     isParticipantMock = vi.fn().mockResolvedValue(true);
+    getParticipantUserIdsMock = vi.fn().mockResolvedValue([mockUserId, "other-user"]);
     updateLastSeenMock = vi.fn().mockResolvedValue(undefined);
     findAuthUserMock = vi.fn().mockResolvedValue({ authVersion: 0, isActive: true });
     sessionActiveMock = vi.fn().mockResolvedValue(true);
@@ -95,6 +97,7 @@ describe("ChatGateway", () => {
       {
         getActiveConversationIds: activeConversationIdsMock,
         isParticipant: isParticipantMock,
+        getParticipantUserIds: getParticipantUserIdsMock,
       } as unknown as import("../../../../src/domain/conversation/pg.js").ConversationPgRepository,
       {
         updateLastSeen: updateLastSeenMock,
@@ -599,6 +602,25 @@ describe("ChatGateway", () => {
       );
       expect(res).toEqual({ success: false, conversationId: mockConvId });
     });
+
+    it("leaves the room when membership is revoked while join is pending", async () => {
+      let finishJoin!: () => void;
+      const joinPending = new Promise<void>((resolve) => {
+        finishJoin = resolve;
+      });
+      const { client, joinMock, leaveMock, emitMock } = createMockSocket({});
+      client.data = { userId: mockUserId };
+      joinMock.mockImplementationOnce(() => joinPending);
+      isParticipantMock.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+      const result = gateway.handleJoinConversation(client, { conversationId: mockConvId });
+      await vi.waitFor(() => expect(joinMock).toHaveBeenCalledWith(`conv:${mockConvId}`));
+      finishJoin();
+
+      await expect(result).resolves.toEqual({ success: false, conversationId: mockConvId });
+      expect(leaveMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
+      expect(emitMock).toHaveBeenCalledWith("error", { code: "NOT_PARTICIPANT" });
+    });
   });
 
   describe("typing:start and typing:stop", () => {
@@ -608,7 +630,7 @@ describe("ChatGateway", () => {
 
       await gateway.handleTypingStart(client, { conversationId: mockConvId });
 
-      expect(toMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
+      expect(toMock).toHaveBeenCalledWith("user:other-user");
       expect(redisSetMock).toHaveBeenCalledWith(
         `typing:${mockConvId}:${mockUserId}`,
         "1",
@@ -628,7 +650,7 @@ describe("ChatGateway", () => {
 
       await gateway.handleTypingStop(client, { conversationId: mockConvId });
 
-      expect(toMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
+      expect(toMock).toHaveBeenCalledWith("user:other-user");
       expect(redisDelMock).toHaveBeenCalledWith(`typing:${mockConvId}:${mockUserId}`);
       expect(roomEmitMock).toHaveBeenCalledWith("typing", {
         conversationId: mockConvId,

@@ -6,6 +6,11 @@ import { convRoom, userRoom } from "./rooms.js";
 
 const logger = new Logger("RealtimeService");
 
+export interface UserMessagePayload {
+  userId: string;
+  payload: MessageResponse;
+}
+
 export interface StoryReactionEvent {
   storyId: string;
   user: UserSummary;
@@ -25,7 +30,11 @@ export class RealtimeService {
   /**
    * Broadcast a newly created message to the conversation room
    */
-  emitNewMessage(conversationId: string, message: MessageResponse): void {
+  emitNewMessage(
+    conversationId: string,
+    message: MessageResponse,
+    recipientPayloads?: UserMessagePayload[],
+  ): void {
     if (!this.gateway?.server) return;
     const { clientMsgId, ...publicMessage } = message;
     if (clientMsgId) {
@@ -41,6 +50,17 @@ export class RealtimeService {
         );
       }
     }
+    if (recipientPayloads) {
+      for (const { userId, payload } of recipientPayloads) {
+        try {
+          const { clientMsgId: _recipientClientMsgId, ...recipientMessage } = payload;
+          this.gateway.server.to(userRoom(userId)).emit("message:new", recipientMessage);
+        } catch (err) {
+          logger.warn(`Failed to emit message:new for user ${userId}: ${String(err)}`);
+        }
+      }
+      return;
+    }
     try {
       this.gateway.server.to(convRoom(conversationId)).emit("message:new", publicMessage);
     } catch (err) {
@@ -51,10 +71,17 @@ export class RealtimeService {
   /**
    * Broadcast message update (edit)
    */
-  emitMessageUpdated(conversationId: string, updated: MessageResponse): void {
+  emitMessageUpdated(
+    conversationId: string,
+    updated: MessageResponse,
+    recipientUserIds?: string[],
+  ): void {
     if (!this.gateway?.server) return;
     try {
-      this.gateway.server.to(convRoom(conversationId)).emit("message:updated", updated);
+      if (recipientUserIds) {
+        for (const userId of recipientUserIds)
+          this.gateway.server.to(userRoom(userId)).emit("message:updated", updated);
+      } else this.gateway.server.to(convRoom(conversationId)).emit("message:updated", updated);
     } catch (err) {
       logger.warn(`Failed to emit message:updated: ${String(err)}`);
     }
@@ -63,13 +90,21 @@ export class RealtimeService {
   /**
    * Broadcast message revocation (soft delete)
    */
-  emitMessageRevoked(conversationId: string, payload: { id: string; deletedAt: Date }): void {
+  emitMessageRevoked(
+    conversationId: string,
+    payload: { id: string; deletedAt: Date },
+    recipientUserIds?: string[],
+  ): void {
     if (!this.gateway?.server) return;
     try {
-      this.gateway.server.to(convRoom(conversationId)).emit("message:revoked", {
+      const event = {
         ...payload,
         conversationId,
-      });
+      };
+      if (recipientUserIds) {
+        for (const userId of recipientUserIds)
+          this.gateway.server.to(userRoom(userId)).emit("message:revoked", event);
+      } else this.gateway.server.to(convRoom(conversationId)).emit("message:revoked", event);
     } catch (err) {
       logger.warn(`Failed to emit message:revoked: ${String(err)}`);
     }
@@ -111,13 +146,18 @@ export class RealtimeService {
   emitReadUpdated(
     conversationId: string,
     payload: { userId: string; lastReadMessageId: string; readAt: Date },
+    recipientUserIds?: string[],
   ): void {
     if (!this.gateway?.server) return;
     try {
-      this.gateway.server.to(convRoom(conversationId)).emit("read:updated", {
+      const event = {
         ...payload,
         conversationId,
-      });
+      };
+      if (recipientUserIds) {
+        for (const userId of recipientUserIds)
+          this.gateway.server.to(userRoom(userId)).emit("read:updated", event);
+      } else this.gateway.server.to(convRoom(conversationId)).emit("read:updated", event);
     } catch (err) {
       logger.warn(`Failed to emit read:updated: ${String(err)}`);
     }
@@ -134,13 +174,18 @@ export class RealtimeService {
       emoji: string;
       reactions: MessageReactionSummary[];
     },
+    recipientUserIds?: string[],
   ): void {
     if (!this.gateway?.server) return;
     try {
-      this.gateway.server.to(convRoom(conversationId)).emit("message:reaction", {
+      const event = {
         ...payload,
         conversationId,
-      });
+      };
+      if (recipientUserIds) {
+        for (const userId of recipientUserIds)
+          this.gateway.server.to(userRoom(userId)).emit("message:reaction", event);
+      } else this.gateway.server.to(convRoom(conversationId)).emit("message:reaction", event);
     } catch (err) {
       logger.warn(`Failed to emit message:reaction for conv ${conversationId}: ${String(err)}`);
     }

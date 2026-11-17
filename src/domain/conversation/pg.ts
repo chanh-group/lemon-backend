@@ -1,13 +1,18 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, asc, desc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, ne, notExists, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { isUniqueViolation } from "../../utils/errors/pg.js";
-import { messages } from "../message/schema.js";
+import { messageHiddenForUsers, messages } from "../message/schema.js";
 import { users } from "../user/schema.js";
-import type { ConversationRepository, ConversationWithPartner } from "./repository.js";
+import type {
+  ConversationRepository,
+  ConversationWithPartner,
+  CreatedGroupResult,
+  GroupCreateRequestMatch,
+} from "./repository.js";
 import { conversationParticipants, conversations } from "./schema.js";
 import { canonicalPair, toCursorPage } from "../shared.js";
 import { GROUP_MAX_MEMBERS } from "./constants.js";
@@ -95,7 +100,7 @@ export class ConversationPgRepository implements ConversationRepository {
     memberIds: string[];
     clientRequestId: string;
     createRequestHash: string;
-  }): Promise<ConversationWithPartner> {
+  }): Promise<CreatedGroupResult> {
     const [existing] = await this.db
       .select()
       .from(conversations)
@@ -107,14 +112,12 @@ export class ConversationPgRepository implements ConversationRepository {
       )
       .limit(1);
     if (existing) {
-      if (
-        existing.deletedAt ||
-        existing.title !== input.title ||
-        existing.createRequestHash !== input.createRequestHash
-      ) {
+      if (existing.deletedAt || existing.createRequestHash !== input.createRequestHash) {
         throw new BusinessError("CONFLICT");
       }
-      return (await this.findById(existing.id, input.creatorId))!;
+      const conversation = await this.findById(existing.id, input.creatorId);
+      if (!conversation) throw new BusinessError("NOT_PARTICIPANT");
+      return { conversation, created: false };
     }
 
     try {
@@ -138,16 +141,19 @@ export class ConversationPgRepository implements ConversationRepository {
           })),
         ]);
         return {
-          id: group.id,
-          kind: "GROUP",
-          directKey: null,
-          title: group.title,
-          avatarUrl: group.avatarUrl,
-          memberCount: input.memberIds.length + 1,
-          myRole: "ADMIN",
-          lastMessagePreview: null,
-          lastMessageAt: null,
-          createdAt: group.createdAt,
+          conversation: {
+            id: group.id,
+            kind: "GROUP" as const,
+            directKey: null,
+            title: group.title,
+            avatarUrl: group.avatarUrl,
+            memberCount: input.memberIds.length + 1,
+            myRole: "ADMIN" as const,
+            lastMessagePreview: null,
+            lastMessageAt: null,
+            createdAt: group.createdAt,
+          },
+          created: true,
         };
       });
     } catch (err: unknown) {
@@ -167,17 +173,37 @@ export class ConversationPgRepository implements ConversationRepository {
             ),
           )
           .limit(1);
-        if (
-          retry &&
-          !retry.deletedAt &&
-          retry.title === input.title &&
-          retry.createRequestHash === input.createRequestHash
-        )
-          return (await this.findById(retry.id, input.creatorId))!;
+        if (retry && !retry.deletedAt && retry.createRequestHash === input.createRequestHash) {
+          const conversation = await this.findById(retry.id, input.creatorId);
+          if (!conversation) throw new BusinessError("NOT_PARTICIPANT");
+          return { conversation, created: false };
+        }
         throw new BusinessError("CONFLICT");
       }
       throw err;
     }
+  }
+
+  async findGroupCreateRequest(
+    creatorId: string,
+    clientRequestId: string,
+  ): Promise<GroupCreateRequestMatch | null> {
+    const [row] = await this.db
+      .select({
+        id: conversations.id,
+        createRequestHash: conversations.createRequestHash,
+        deletedAt: conversations.deletedAt,
+      })
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.creatorId, creatorId),
+          eq(conversations.createRequestId, clientRequestId),
+          eq(conversations.kind, "GROUP"),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
   }
 
   async addGroupMembers(
@@ -576,6 +602,45 @@ export class ConversationPgRepository implements ConversationRepository {
     return Boolean(row);
   }
 
+  async getMessageRecipientUserIds(conversationId: string, messageId: string): Promise<string[]> {
+    const boundaryVisible = sql`(
+      ${conversationParticipants.historyBoundaryMessageId} IS NULL
+      OR ROW(${messages.createdAt}, ${messages.id}) > (
+        SELECT boundary_message.created_at, boundary_message.id
+        FROM messages boundary_message
+        WHERE boundary_message.id = ${conversationParticipants.historyBoundaryMessageId}
+          AND boundary_message.conversation_id = ${conversationId}
+      )
+    )`;
+    const hiddenForUser = notExists(
+      this.db
+        .select({ messageId: messageHiddenForUsers.messageId })
+        .from(messageHiddenForUsers)
+        .where(
+          and(
+            eq(messageHiddenForUsers.messageId, messages.id),
+            eq(messageHiddenForUsers.userId, conversationParticipants.userId),
+          ),
+        ),
+    );
+    const rows = await this.db
+      .select({ userId: conversationParticipants.userId })
+      .from(conversationParticipants)
+      .innerJoin(
+        messages,
+        and(eq(messages.id, messageId), eq(messages.conversationId, conversationId)),
+      )
+      .where(
+        and(
+          eq(conversationParticipants.conversationId, conversationId),
+          isNull(conversationParticipants.leftAt),
+          boundaryVisible,
+          hiddenForUser,
+        ),
+      );
+    return rows.map(({ userId }) => userId);
+  }
+
   async findDirectByParticipants(
     userAId: string,
     userBId: string,
@@ -955,28 +1020,91 @@ export class ConversationPgRepository implements ConversationRepository {
   }
 
   async updateLastRead(conversationId: string, userId: string, messageId: string): Promise<void> {
-    await this.db
-      .update(conversationParticipants)
-      .set({
-        lastReadMessageId: messageId,
-        lastReadAt: sql`now()`,
-      })
-      .where(
-        and(
-          eq(conversationParticipants.conversationId, conversationId),
-          eq(conversationParticipants.userId, userId),
-          sql`(
-            ${conversationParticipants.lastReadMessageId} IS NULL
-            OR ROW(
-              (SELECT m.created_at FROM messages m WHERE m.id = ${messageId}),
-              ${messageId}::uuid
-            ) > ROW(
-              (SELECT m.created_at FROM messages m WHERE m.id = ${conversationParticipants.lastReadMessageId}),
-              ${conversationParticipants.lastReadMessageId}
+    await this.db.transaction(async (tx) => {
+      await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(eq(conversations.id, conversationId))
+        .for("update")
+        .limit(1);
+      const [participant] = await tx
+        .select({
+          lastReadMessageId: conversationParticipants.lastReadMessageId,
+          historyBoundaryMessageId: conversationParticipants.historyBoundaryMessageId,
+        })
+        .from(conversationParticipants)
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.userId, userId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      if (!participant) throw new BusinessError("NOT_PARTICIPANT");
+
+      const [message] = await tx
+        .select({ id: messages.id, createdAt: messages.createdAt })
+        .from(messages)
+        .where(and(eq(messages.id, messageId), eq(messages.conversationId, conversationId)))
+        .limit(1);
+      const [boundary] = participant.historyBoundaryMessageId
+        ? await tx
+            .select({ id: messages.id, createdAt: messages.createdAt })
+            .from(messages)
+            .where(
+              and(
+                eq(messages.id, participant.historyBoundaryMessageId),
+                eq(messages.conversationId, conversationId),
+              ),
             )
-          )`,
-        ),
-      );
+            .limit(1)
+        : [];
+      if (!message || (participant.historyBoundaryMessageId && !boundary)) {
+        throw new BusinessError("BAD_REQUEST");
+      }
+      if (
+        boundary &&
+        (message.createdAt < boundary.createdAt ||
+          (message.createdAt.getTime() === boundary.createdAt.getTime() &&
+            message.id <= boundary.id))
+      ) {
+        throw new BusinessError("BAD_REQUEST");
+      }
+
+      const [lastRead] = participant.lastReadMessageId
+        ? await tx
+            .select({ id: messages.id, createdAt: messages.createdAt })
+            .from(messages)
+            .where(
+              and(
+                eq(messages.id, participant.lastReadMessageId),
+                eq(messages.conversationId, conversationId),
+              ),
+            )
+            .limit(1)
+        : [];
+      if (
+        lastRead &&
+        (message.createdAt < lastRead.createdAt ||
+          (message.createdAt.getTime() === lastRead.createdAt.getTime() &&
+            message.id <= lastRead.id))
+      ) {
+        return;
+      }
+
+      await tx
+        .update(conversationParticipants)
+        .set({ lastReadMessageId: messageId, lastReadAt: sql`now()` })
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.userId, userId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        );
+    });
   }
 
   async countUnread(conversationId: string, userId: string): Promise<number> {

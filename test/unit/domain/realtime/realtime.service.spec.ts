@@ -39,21 +39,20 @@ describe("RealtimeService", () => {
       expect(emit).toHaveBeenCalledWith("message:new", { id: "m1" });
     });
 
-    it("does not emit to individual user rooms", () => {
+    it("emits recipient-specific payloads to individual user rooms", () => {
       const emit = vi.fn();
       const to = vi.fn().mockReturnValue({ emit });
       const service = createService(to);
 
-      const legacyCall = service.emitNewMessage.bind(service) as (
-        conversationId: string,
-        message: unknown,
-        recipientUserIds?: string[],
-      ) => void;
-      legacyCall("c1", message, ["u2", "u3"]);
+      service.emitNewMessage("c1", message, [
+        { userId: "u2", payload: message },
+        { userId: "u3", payload: message },
+      ]);
 
-      expect(to).toHaveBeenCalledTimes(1);
-      expect(to).not.toHaveBeenCalledWith("user:u2");
-      expect(to).not.toHaveBeenCalledWith("user:u3");
+      expect(to).toHaveBeenCalledTimes(2);
+      expect(to).toHaveBeenNthCalledWith(1, userRoom("u2"));
+      expect(to).toHaveBeenNthCalledWith(2, userRoom("u3"));
+      expect(emit).toHaveBeenCalledWith("message:new", { id: "m1" });
     });
 
     it("does nothing when the gateway server is not initialized", () => {

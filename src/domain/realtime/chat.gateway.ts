@@ -139,7 +139,17 @@ export class ChatGateway
         this.untrack(client);
         return;
       }
-      if (conversationIds.length > 0) await client.join(conversationIds.map(convRoom));
+      if (conversationIds.length > 0) {
+        await client.join(conversationIds.map(convRoom));
+        const activeAfterJoin = new Set(
+          await this.conversationRepo.getActiveConversationIds(userId),
+        );
+        await Promise.all(
+          conversationIds
+            .filter((conversationId) => !activeAfterJoin.has(conversationId))
+            .map((conversationId) => Promise.resolve(client.leave(convRoom(conversationId)))),
+        );
+      }
       if (client.disconnected) {
         this.untrack(client);
         return;
@@ -248,6 +258,11 @@ export class ChatGateway
 
     const room = convRoom(data.conversationId);
     await client.join(room);
+    if (!(await this.conversationRepo.isParticipant(data.conversationId, userId))) {
+      await client.leave(room);
+      client.emit("error", { code: "NOT_PARTICIPANT" });
+      return { success: false, conversationId: data.conversationId };
+    }
     logger.debug(`Socket ${client.id} (user ${userId}) joined ${room}`);
     return { success: true, conversationId: data.conversationId };
   }
@@ -275,10 +290,7 @@ export class ChatGateway
     if (!userId || !data?.conversationId) return;
 
     const room = convRoom(data.conversationId);
-    if (
-      !client.rooms.has(room) ||
-      !(await this.conversationRepo.isParticipant(data.conversationId, userId))
-    ) {
+    if (!(await this.conversationRepo.isParticipant(data.conversationId, userId))) {
       if (client.rooms.has(room)) await client.leave(room);
       return;
     }
@@ -292,12 +304,15 @@ export class ChatGateway
       }
     }
 
-    // Broadcast to room excluding the sender
-    client.to(room).emit("typing", {
-      conversationId: data.conversationId,
-      userId,
-      isTyping: true,
-    });
+    const participantIds = await this.conversationRepo.getParticipantUserIds(data.conversationId);
+    for (const participantId of participantIds) {
+      if (participantId === userId) continue;
+      client.to(userRoom(participantId)).emit("typing", {
+        conversationId: data.conversationId,
+        userId,
+        isTyping: true,
+      });
+    }
   }
 
   @SubscribeMessage("typing:stop")
@@ -310,10 +325,7 @@ export class ChatGateway
     if (!userId || !data?.conversationId) return;
 
     const room = convRoom(data.conversationId);
-    if (
-      !client.rooms.has(room) ||
-      !(await this.conversationRepo.isParticipant(data.conversationId, userId))
-    ) {
+    if (!(await this.conversationRepo.isParticipant(data.conversationId, userId))) {
       if (client.rooms.has(room)) await client.leave(room);
       return;
     }
@@ -326,11 +338,15 @@ export class ChatGateway
       }
     }
 
-    client.to(room).emit("typing", {
-      conversationId: data.conversationId,
-      userId,
-      isTyping: false,
-    });
+    const participantIds = await this.conversationRepo.getParticipantUserIds(data.conversationId);
+    for (const participantId of participantIds) {
+      if (participantId === userId) continue;
+      client.to(userRoom(participantId)).emit("typing", {
+        conversationId: data.conversationId,
+        userId,
+        isTyping: false,
+      });
+    }
   }
 
   @SubscribeMessage("presence:ping")
