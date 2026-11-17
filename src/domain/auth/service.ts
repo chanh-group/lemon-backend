@@ -130,18 +130,17 @@ export class AuthService {
       throw new BusinessError("USERNAME_TAKEN");
     }
 
-    const passwordHash = await this.hashPassword(input.password);
-
-    try {
-      await otp.check(this.cacheStore, otpKey, input.otp, true);
-    } catch (err: unknown) {
-      if (err instanceof BusinessError) throw err;
-      this.logger.error("Redis error consuming signup OTP", {
-        action: "auth.signup_consume_error",
-        err: String(err),
+    const consumeSignupOtp = otp
+      .check(this.cacheStore, otpKey, input.otp, true)
+      .catch((err: unknown): never => {
+        if (err instanceof BusinessError) throw err;
+        this.logger.error("Redis error consuming signup OTP", {
+          action: "auth.signup_consume_error",
+          err: String(err),
+        });
+        throw new SystemError("unavailable", "cache CHECK_OTP failed", { cause: err });
       });
-      throw new SystemError("unavailable", "cache CHECK_OTP failed", { cause: err });
-    }
+    const [passwordHash] = await Promise.all([this.hashPassword(input.password), consumeSignupOtp]);
 
     try {
       const createdUser = await this.userRepo.create({
@@ -417,17 +416,17 @@ export class AuthService {
       throw new BusinessError("USER_NOT_FOUND");
     }
 
-    const newHash = await this.hashPassword(input.newPassword);
-    try {
-      await otp.check(this.cacheStore, key, input.otp, true);
-    } catch (err: unknown) {
-      if (err instanceof BusinessError) throw err;
-      this.logger.error("Redis error consuming forgot password OTP", {
-        action: "auth.forgot_reset_consume_error",
-        err: String(err),
+    const consumeResetOtp = otp
+      .check(this.cacheStore, key, input.otp, true)
+      .catch((err: unknown): never => {
+        if (err instanceof BusinessError) throw err;
+        this.logger.error("Redis error consuming forgot password OTP", {
+          action: "auth.forgot_reset_consume_error",
+          err: String(err),
+        });
+        throw new SystemError("unavailable", "cache CHECK_OTP failed", { cause: err });
       });
-      throw new SystemError("unavailable", "cache CHECK_OTP failed", { cause: err });
-    }
+    const [newHash] = await Promise.all([this.hashPassword(input.newPassword), consumeResetOtp]);
     await this.userRepo.updatePasswordHash(user.id, newHash);
     await this.revokeFamily(user.id);
 

@@ -23,7 +23,7 @@ function decodeSearchCursor(cursor: string): { rank: number; id: string } | null
   }
 }
 
-function searchRank(user: User, query: string): number {
+function searchRank(user: Pick<User, "username" | "fullName">, query: string): number {
   if (user.username === query) return 0;
   if (user.username.startsWith(query)) return 1;
   if (user.fullName.toLowerCase().startsWith(query)) return 2;
@@ -104,7 +104,12 @@ export class UserPgRepository implements UserRepository {
     }
     const pageSize = Math.min(limit, MAX_PAGE_SIZE);
     const rows = await this.db
-      .select()
+      .select({
+        id: users.id,
+        username: users.username,
+        fullName: users.fullName,
+        avatarUrl: users.avatarUrl,
+      })
       .from(users)
       .where(and(...filters))
       .orderBy(field === "email" ? asc(users.id) : asc(usernameRank), asc(users.id))
