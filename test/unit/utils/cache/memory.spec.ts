@@ -3,6 +3,10 @@ import { MemoryCacheService } from "../../../../src/utils/cache/memory.js";
 import { OtpCheckOutcome, RotationOutcome } from "../../../../src/utils/cache/types.js";
 import { CacheError } from "../../../../src/utils/cache/error.js";
 import { feedFillKey } from "../../../../src/utils/cache/keys.js";
+import {
+  FEED_FILL_POLL_ATTEMPTS,
+  FEED_FILL_POLL_INTERVAL_MS,
+} from "../../../../src/utils/cache/constants.js";
 
 describe("MemoryCacheService", () => {
   beforeEach(() => vi.useFakeTimers());
@@ -64,9 +68,10 @@ describe("MemoryCacheService", () => {
   it("still loads the feed when acquiring the cache lease fails", async () => {
     const cache = new MemoryCacheService();
     vi.spyOn(cache, "tryAcquireLock").mockRejectedValueOnce(new CacheError("lock"));
-    await expect(cache.loadFeedBestEffort("feed", 60, async () => ["database"])).resolves.toEqual([
-      "database",
-    ]);
+    const pending = cache.loadFeedBestEffort("feed", 60, async () => ["database"]);
+    // Lease failed: the fill polls for the owner's value before rebuilding.
+    await vi.advanceTimersByTimeAsync(FEED_FILL_POLL_INTERVAL_MS * FEED_FILL_POLL_ATTEMPTS);
+    await expect(pending).resolves.toEqual(["database"]);
     expect(await cache.get("feed")).toBeNull();
   });
 

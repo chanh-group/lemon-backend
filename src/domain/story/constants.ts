@@ -31,3 +31,10 @@ export type StoryReactionKind = (typeof STORY_REACTION_KINDS)[number];
 
 /** Viewer names disappear after 24h (Instagram model), aggregate view count remains (WhatsApp model). */
 export const STORY_VIEWER_NAMES_EXPIRY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Upper bound of stories kept per author in the feed payload — bounds both the
+ * SQL result and the cached feed so one prolific author cannot grow the
+ * per-viewer feed cache entry without limit.
+ */
+export const STORY_FEED_MAX_PER_AUTHOR = 30;

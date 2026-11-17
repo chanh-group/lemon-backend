@@ -8,8 +8,19 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { S3_DELETE_BATCH_SIZE } from "../cache/constants.js";
+import {
+  PRESIGN_CACHE_MARGIN_SECS,
+  PRESIGN_CACHE_MAX_ENTRIES,
+  PRESIGN_CACHE_TTL_SECS,
+} from "./constants.js";
 import { StorageError } from "./error.js";
 import type { PresignGetParams, StorageService } from "./store.js";
+
+/** Cached presigned GET URL plus its reuse deadline (epoch millis). */
+interface CachedPresign {
+  downloadUrl: string;
+  expiresAt: number;
+}
 
 export type PresignerFn = (
   client: S3Client,
@@ -29,6 +40,7 @@ export class S3StorageService implements StorageService {
   private readonly bucket: string;
   private readonly presignTtlSecs: number;
   private readonly presigner: PresignerFn;
+  private readonly presignCache = new Map<string, CachedPresign>();
 
   constructor(options: S3StorageOptions) {
     this.client = options.client;
@@ -86,8 +98,16 @@ export class S3StorageService implements StorageService {
   }
 
   async presignGet(params: PresignGetParams): Promise<{ downloadUrl: string }> {
+    const disposition = params.disposition ?? "inline";
+    const expiresInSecs = params.expiresInSecs ?? this.presignTtlSecs;
+    const cacheKey = this.presignGetCacheKey(params, disposition, expiresInSecs);
+    const cached = this.presignCache.get(cacheKey);
+    if (cached) {
+      if (cached.expiresAt > Date.now()) return { downloadUrl: cached.downloadUrl };
+      this.presignCache.delete(cacheKey);
+    }
+
     try {
-      const disposition = params.disposition ?? "inline";
       let contentDisposition: string | undefined;
 
       if (params.fileName) {
@@ -113,13 +133,46 @@ export class S3StorageService implements StorageService {
           ...(contentType && { ResponseContentType: contentType }),
         }),
         {
-          expiresIn: params.expiresInSecs ?? this.presignTtlSecs,
+          expiresIn: expiresInSecs,
         },
       );
+      this.rememberPresignGet(cacheKey, downloadUrl, expiresInSecs);
       return { downloadUrl };
     } catch (err) {
       throw new StorageError("Failed to presign download", err);
     }
+  }
+
+  /** Stable cache key over the effective presign parameters. */
+  private presignGetCacheKey(
+    params: PresignGetParams,
+    disposition: "inline" | "attachment",
+    expiresInSecs: number,
+  ): string {
+    return JSON.stringify([
+      params.objectKey,
+      params.fileName ?? null,
+      disposition,
+      params.mimeType ?? null,
+      expiresInSecs,
+    ]);
+  }
+
+  /**
+   * A cached URL stays valid until its own expiry even if credentials rotate,
+   * so the cache is purely an optimization: only URLs that keep at least
+   * PRESIGN_CACHE_MARGIN_SECS of remaining validity are retained, and entries
+   * past PRESIGN_CACHE_MAX_ENTRIES are evicted oldest-first.
+   */
+  private rememberPresignGet(cacheKey: string, downloadUrl: string, expiresInSecs: number): void {
+    const ttlSecs = Math.min(PRESIGN_CACHE_TTL_SECS, expiresInSecs - PRESIGN_CACHE_MARGIN_SECS);
+    if (ttlSecs <= 0) return;
+    while (this.presignCache.size >= PRESIGN_CACHE_MAX_ENTRIES) {
+      const oldestKey = this.presignCache.keys().next().value;
+      if (oldestKey === undefined) break;
+      this.presignCache.delete(oldestKey);
+    }
+    this.presignCache.set(cacheKey, { downloadUrl, expiresAt: Date.now() + ttlSecs * 1000 });
   }
 
   async headObject(

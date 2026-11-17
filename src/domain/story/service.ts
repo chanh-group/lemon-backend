@@ -67,9 +67,6 @@ export class StoryService {
   async createStory(userId: string, dto: CreateStoryDto): Promise<StoryItemResponse> {
     const isMedia = dto.kind === "IMAGE" || dto.kind === "VIDEO";
 
-    let bucket: string | null = null;
-    let head: { contentLength: number; contentType: string } | null = null;
-
     if (isMedia) {
       if (!dto.objectKey) {
         throw new BusinessError("INVALID_MEDIA_TYPE");
@@ -77,8 +74,22 @@ export class StoryService {
       if (!dto.objectKey.startsWith(`stories/${userId}/`)) {
         throw new BusinessError("INVALID_OBJECT_KEY");
       }
+    }
 
-      head = await this.storage.headObject(dto.objectKey);
+    const caption = dto.caption?.trim() || null;
+    const background = dto.background?.trim() || null;
+    if (dto.kind === "TEXT" && !caption && !background) {
+      throw new BusinessError("TEXT_STORY_REQUIRES_CONTENT");
+    }
+
+    // The storage head and the friend lookup are independent — batch them.
+    const [head, friendIds] = await Promise.all([
+      isMedia && dto.objectKey ? this.storage.headObject(dto.objectKey) : Promise.resolve(null),
+      this.storyRepo.getFriendUserIds(userId),
+    ]);
+
+    let bucket: string | null = null;
+    if (isMedia) {
       if (!head) {
         throw new BusinessError("OBJECT_NOT_UPLOADED");
       }
@@ -96,16 +107,8 @@ export class StoryService {
       bucket = this.storage.getBucket();
     }
 
-    const caption = dto.caption?.trim() || null;
-    const background = dto.background?.trim() || null;
-    if (dto.kind === "TEXT" && !caption && !background) {
-      throw new BusinessError("TEXT_STORY_REQUIRES_CONTENT");
-    }
-
     const audienceMode = dto.audienceMode ?? "ALL_FRIENDS";
     let audienceUserIds: string[] | undefined = undefined;
-
-    const friendIds = await this.storyRepo.getFriendUserIds(userId);
 
     if (audienceMode !== "ALL_FRIENDS" && dto.audienceUserIds) {
       // Validate that all audience IDs are accepted friends and not self
@@ -155,25 +158,38 @@ export class StoryService {
       this.storyRepo.getFriendUserIds(userId),
       this.cache.getBestEffort<UserStoryFeedResponse[]>(cacheKey),
     ]);
-    const visibleUserIds = new Set([userId, ...friendIds]);
+    const targetUserIds = [userId, ...friendIds];
+    const visibleUserIds = new Set(targetUserIds);
     this.metrics?.recordLookup("story_feed", cached === null ? "miss" : "hit");
     if (cached) {
-      return reviveUserStoryFeed(cached.filter((entry) => visibleUserIds.has(entry.user.id)));
+      return this.reviveVisibleFeed(cached, visibleUserIds);
     }
 
-    return this.cache.loadFeedBestEffort(cacheKey, STORY_FEED_TTL_SECS, async () => {
-      const targetUserIds = [userId, ...(await this.storyRepo.getFriendUserIds(userId))];
-      const [stories, usersMap] = await Promise.all([
-        this.storyRepo.findActiveByUserIds(targetUserIds, userId),
-        this.storyRepo.findUsersByIds(targetUserIds),
-      ]);
-      const storyIds = stories.map((s) => s.id);
-      const [viewedStoryIds, userReactionsMap] = await Promise.all([
-        this.storyRepo.findViewedStoryIds(userId, storyIds),
-        this.storyRepo.findUserReactions(userId, storyIds),
-      ]);
-      return groupStoriesByUser(usersMap, stories, viewedStoryIds, userReactionsMap);
-    });
+    // The revive keeps values polled mid-fill on the same visibility + date
+    // contract as the cache-hit path above.
+    return this.cache.loadFeedBestEffort(
+      cacheKey,
+      STORY_FEED_TTL_SECS,
+      async () => {
+        const [stories, usersMap] = await Promise.all([
+          this.storyRepo.findActiveByUserIds(targetUserIds, userId),
+          this.storyRepo.findUsersByIds(targetUserIds),
+        ]);
+        const storyIds = stories.map((s) => s.id);
+        const [viewedStoryIds, userReactionsMap] = await Promise.all([
+          this.storyRepo.findViewedStoryIds(userId, storyIds),
+          this.storyRepo.findUserReactions(userId, storyIds),
+        ]);
+        return groupStoriesByUser(usersMap, stories, viewedStoryIds, userReactionsMap);
+      },
+      (raw) => this.reviveVisibleFeed(raw, visibleUserIds),
+    );
+  }
+
+  /** Shared by the cache-hit and mid-fill paths: visibility filter + date revival. */
+  private reviveVisibleFeed(raw: unknown, visibleUserIds: Set<string>): UserStoryFeedResponse[] {
+    const entries = Array.isArray(raw) ? (raw as UserStoryFeedResponse[]) : [];
+    return reviveUserStoryFeed(entries.filter((entry) => visibleUserIds.has(entry.user.id)));
   }
 
   async getStoryById(userId: string, storyId: string): Promise<StoryItemResponse> {
@@ -345,9 +361,10 @@ export class StoryService {
       anonymous,
     );
 
-    await this.cache.invalidateFeedsBestEffort([storyFeedKey(userId), storyFeedKey(story.userId)]);
-
-    const usersMap = await this.storyRepo.findUsersByIds([userId]);
+    const [, usersMap] = await Promise.all([
+      this.cache.invalidateFeedsBestEffort([storyFeedKey(userId), storyFeedKey(story.userId)]),
+      this.storyRepo.findUsersByIds([userId]),
+    ]);
     const userSummary = usersMap.get(userId);
     if (userSummary) {
       const payload = {
@@ -418,9 +435,10 @@ export class StoryService {
       return;
     }
 
-    await this.cache.invalidateFeedsBestEffort([storyFeedKey(userId), storyFeedKey(story.userId)]);
-
-    const usersMap = await this.storyRepo.findUsersByIds([userId]);
+    const [, usersMap] = await Promise.all([
+      this.cache.invalidateFeedsBestEffort([storyFeedKey(userId), storyFeedKey(story.userId)]),
+      this.storyRepo.findUsersByIds([userId]),
+    ]);
     const userSummary = usersMap.get(userId);
     if (userSummary) {
       const payload = { storyId, user: userSummary };
@@ -575,12 +593,11 @@ export class StoryService {
     }
 
     if (story.audienceMode === "EXCLUDE") {
-      const isFriend = await this.storyRepo.isAcceptedFriend(story.userId, viewerId);
-      if (!isFriend) {
-        throw new BusinessError(forbiddenCode);
-      }
-      const isExcluded = await this.storyRepo.isStoryAudience(story.id, viewerId);
-      if (isExcluded) {
+      const [isFriend, isExcluded] = await Promise.all([
+        this.storyRepo.isAcceptedFriend(story.userId, viewerId),
+        this.storyRepo.isStoryAudience(story.id, viewerId),
+      ]);
+      if (!isFriend || isExcluded) {
         throw new BusinessError(forbiddenCode);
       }
       return;

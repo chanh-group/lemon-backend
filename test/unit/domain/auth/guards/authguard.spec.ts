@@ -6,7 +6,6 @@ import { AuthGuard } from "../../../../../src/domain/auth/guards/authguard.js";
 import { JwtConfig } from "../../../../../src/domain/auth/jwt.js";
 import { BusinessError } from "../../../../../src/utils/errors/business.js";
 import { SystemError } from "../../../../../src/utils/errors/system.js";
-import type { UserRepository } from "../../../../../src/domain/user/repository.js";
 import type { AuthSessionRepository } from "../../../../../src/domain/auth/repository.js";
 
 async function expectUnauthorized(promise: Promise<unknown>): Promise<void> {
@@ -23,21 +22,18 @@ describe("AuthGuard", () => {
   const mockSecret = "super_secret_jwt_key_at_least_32_bytes_long_12345";
   let guard: AuthGuard;
   let reflector: { getAllAndOverride: ReturnType<typeof vi.fn> };
-  let findById: ReturnType<typeof vi.fn>;
-  let isActive: ReturnType<typeof vi.fn>;
+  let findAuthState: ReturnType<typeof vi.fn>;
   const sid = "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b";
 
   beforeEach(() => {
     process.env = { ...originalEnv, JWT_SECRET: mockSecret };
     reflector = { getAllAndOverride: vi.fn().mockReturnValue(false) };
-    findById = vi.fn().mockResolvedValue({ authVersion: 0, isActive: true });
-    isActive = vi.fn().mockResolvedValue(true);
-    guard = new AuthGuard(
-      reflector as unknown as Reflector,
-      JwtConfig.from_env(),
-      { findById } as unknown as UserRepository,
-      { isActive } as unknown as AuthSessionRepository,
-    );
+    findAuthState = vi
+      .fn()
+      .mockResolvedValue({ isActive: true, authVersion: 0, sessionActive: true });
+    guard = new AuthGuard(reflector as unknown as Reflector, JwtConfig.from_env(), {
+      findAuthState,
+    } as unknown as AuthSessionRepository);
   });
 
   afterEach(() => {
@@ -130,9 +126,18 @@ describe("AuthGuard", () => {
     expect(request.user).toEqual({ id: "user-456" });
   });
 
+  it("resolves the token state with a single repository query", async () => {
+    const token = await JwtConfig.from_env().signAccessToken("user-456", 0, sid);
+
+    await guard.canActivate(createMockContext({ authorization: `Bearer ${token}` }).context);
+
+    expect(findAuthState).toHaveBeenCalledOnce();
+    expect(findAuthState).toHaveBeenCalledWith("user-456", sid);
+  });
+
   it("rejects an access token after the database auth version changes", async () => {
     const token = await JwtConfig.from_env().signAccessToken("user-456", 0, sid);
-    findById.mockResolvedValue({ authVersion: 1, isActive: true });
+    findAuthState.mockResolvedValue({ isActive: true, authVersion: 1, sessionActive: true });
     await expectUnauthorized(
       guard.canActivate(createMockContext({ authorization: `Bearer ${token}` }).context),
     );
@@ -140,7 +145,23 @@ describe("AuthGuard", () => {
 
   it("rejects an access token after its session is revoked", async () => {
     const token = await JwtConfig.from_env().signAccessToken("user-456", 0, sid);
-    isActive.mockResolvedValue(false);
+    findAuthState.mockResolvedValue({ isActive: true, authVersion: 0, sessionActive: false });
+    await expectUnauthorized(
+      guard.canActivate(createMockContext({ authorization: `Bearer ${token}` }).context),
+    );
+  });
+
+  it("rejects an access token when the user no longer exists", async () => {
+    const token = await JwtConfig.from_env().signAccessToken("user-456", 0, sid);
+    findAuthState.mockResolvedValue(null);
+    await expectUnauthorized(
+      guard.canActivate(createMockContext({ authorization: `Bearer ${token}` }).context),
+    );
+  });
+
+  it("rejects an access token when the account is deactivated", async () => {
+    const token = await JwtConfig.from_env().signAccessToken("user-456", 0, sid);
+    findAuthState.mockResolvedValue({ isActive: false, authVersion: 0, sessionActive: true });
     await expectUnauthorized(
       guard.canActivate(createMockContext({ authorization: `Bearer ${token}` }).context),
     );
@@ -148,7 +169,7 @@ describe("AuthGuard", () => {
 
   it("reports a database failure instead of invalid credentials", async () => {
     const token = await JwtConfig.from_env().signAccessToken("user-456", 0, sid);
-    findById.mockRejectedValue(new Error("database down"));
+    findAuthState.mockRejectedValue(new Error("database down"));
     await expect(
       guard.canActivate(createMockContext({ authorization: `Bearer ${token}` }).context),
     ).rejects.toBeInstanceOf(SystemError);

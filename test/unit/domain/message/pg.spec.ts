@@ -37,8 +37,12 @@ function makeDb() {
 
   const returningMock = vi.fn<(cols?: unknown) => Promise<unknown[]>>().mockResolvedValue([]);
   const dbOnConflictMock = vi.fn().mockResolvedValue([]);
+  const onConflictDoNothingMock = vi
+    .fn<(config: { target: unknown[]; where: SQL }) => { returning: typeof returningMock }>()
+    .mockReturnValue({ returning: returningMock });
   const valuesMock = vi.fn<(values: unknown) => unknown>(() => ({
     returning: returningMock,
+    onConflictDoNothing: onConflictDoNothingMock,
     onConflictDoUpdate: dbOnConflictMock,
   }));
   const insertMock = vi.fn<(table: unknown) => unknown>(() => ({ values: valuesMock }));
@@ -78,6 +82,7 @@ function makeDb() {
     dbSelect,
     insertMock,
     valuesMock,
+    onConflictDoNothingMock,
     returningMock,
     updateMock,
     setMock,
@@ -115,6 +120,7 @@ const existingRow: Message = {
 };
 
 const messageId = existingRow.id;
+const partnerId = "0193a2b1-0000-7000-8000-000000000002";
 
 const uniqueViolation = { code: "23505", constraint: "messages_client_msg_uq" };
 
@@ -215,9 +221,16 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
   });
 
   it("inserts the message and refreshes the conversation preview on the happy path", async () => {
-    const { db, txSelect, dbSelect, returningMock, updateMock, setMock, updateWhereMock } =
-      makeDb();
-    txSelect.limitMock.mockResolvedValueOnce([]);
+    const {
+      db,
+      txSelect,
+      dbSelect,
+      returningMock,
+      updateMock,
+      setMock,
+      updateWhereMock,
+      onConflictDoNothingMock,
+    } = makeDb();
     returningMock.mockResolvedValueOnce([existingRow]);
     const repo = new MessagePgRepository(db);
 
@@ -229,10 +242,11 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
     });
 
     expect(result).toEqual({ message: existingRow, isNew: true });
-    expect(txSelect.selectMock).toHaveBeenCalledTimes(1);
-    const preCheck = render(txSelect.whereMock.mock.calls[0][0]);
-    expect(preCheck.sql).toContain('"messages"."client_msg_id" =');
-    expect(preCheck.params).toEqual([conversationId, senderId, clientMsgId]);
+    expect(txSelect.selectMock).not.toHaveBeenCalled();
+    expect(onConflictDoNothingMock).toHaveBeenCalledTimes(1);
+    const conflictTarget = onConflictDoNothingMock.mock.calls[0][0];
+    expect(conflictTarget.target).toHaveLength(3);
+    expect(render(conflictTarget.where).sql).toContain('"messages"."client_msg_id" IS NOT NULL');
     expect(dbSelect.selectMock).not.toHaveBeenCalled();
     expect(updateMock).toHaveBeenCalledWith(conversations);
     const values = setMock.mock.calls[0][0] as { unreadRevision: SQL; lastMessagePreview: SQL };
@@ -244,8 +258,7 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
   });
 
   it("uses the attachment preview when the message has no body", async () => {
-    const { db, txSelect, returningMock, setMock } = makeDb();
-    txSelect.limitMock.mockResolvedValueOnce([]);
+    const { db, returningMock, setMock } = makeDb();
     const attachmentRow: Message = { ...existingRow, body: null, kind: "IMAGE" };
     returningMock.mockResolvedValueOnce([attachmentRow]);
     const repo = new MessagePgRepository(db);
@@ -263,8 +276,7 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
   });
 
   it("uses the story reaction marker as the conversation preview", async () => {
-    const { db, txSelect, returningMock, setMock } = makeDb();
-    txSelect.limitMock.mockResolvedValueOnce([]);
+    const { db, returningMock, setMock } = makeDb();
     const reactionRow: Message = { ...existingRow, body: "🔥", kind: "STORY_REACTION" };
     returningMock.mockResolvedValueOnce([reactionRow]);
     const repo = new MessagePgRepository(db);
@@ -283,7 +295,7 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
 
   it("locks the accepted friendship until a direct message transaction commits", async () => {
     const { db, txSelect, returningMock } = makeDb();
-    txSelect.limitMock.mockResolvedValueOnce([{ status: "ACCEPTED" }]).mockResolvedValueOnce([]);
+    txSelect.limitMock.mockResolvedValueOnce([{ status: "ACCEPTED" }]);
     returningMock.mockResolvedValueOnce([existingRow]);
     const repo = new MessagePgRepository(db);
 
@@ -318,8 +330,7 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
   });
 
   it("inserts message with storyId and storyPreview", async () => {
-    const { db, txSelect, valuesMock, returningMock } = makeDb();
-    txSelect.limitMock.mockResolvedValueOnce([]);
+    const { db, valuesMock, returningMock } = makeDb();
     const storyId = "0193a2b1-0000-7000-8000-000000000099";
     const storyPreview = {
       id: storyId,
@@ -352,6 +363,46 @@ describe("MessagePgRepository.createMessageWithConversationUpdate", () => {
         storyPreview,
       }),
     );
+  });
+
+  it("returns the existing row when the insert is swallowed by the clientMsgId unique index", async () => {
+    const { db, txSelect, returningMock, onConflictDoNothingMock } = makeDb();
+    returningMock.mockResolvedValueOnce([]);
+    txSelect.limitMock.mockResolvedValueOnce([existingRow]);
+    const repo = new MessagePgRepository(db);
+
+    const result = await repo.createMessageWithConversationUpdate({
+      conversationId,
+      senderId,
+      body: "Hello from the first attempt",
+      clientMsgId,
+    });
+
+    expect(result).toEqual({ message: existingRow, isNew: false });
+    expect(onConflictDoNothingMock).toHaveBeenCalledTimes(1);
+    const lookup = render(txSelect.whereMock.mock.calls[0][0]);
+    expect(lookup.sql).toContain('"messages"."client_msg_id" =');
+    expect(lookup.params).toEqual([conversationId, senderId, clientMsgId]);
+  });
+
+  it("rejects with CONFLICT when the swallowed insert has no readable row", async () => {
+    const { db, txSelect, returningMock } = makeDb();
+    returningMock.mockResolvedValueOnce([]);
+    txSelect.limitMock.mockResolvedValueOnce([]);
+    const repo = new MessagePgRepository(db);
+
+    const error = await repo
+      .createMessageWithConversationUpdate({
+        conversationId,
+        senderId,
+        body: "Hello from the first attempt",
+        clientMsgId,
+      })
+      .catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(BusinessError);
+    expect((error as BusinessError).code).toBe("CONFLICT");
+    expect(txSelect.selectMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -445,6 +496,7 @@ describe("MessagePgRepository.reactMessage", () => {
     const { db, txSelect, deleteMock, deleteWhereMock } = makeDb();
     txSelect.limitMock.mockResolvedValueOnce([{ conversationId, deletedAt: null }]); // msg exists
     txSelect.limitMock.mockResolvedValueOnce([{ userId: senderId }]); // participant exists
+    txSelect.limitMock.mockResolvedValueOnce([{ kind: "GROUP" }]); // conversation kind
     txSelect.limitMock.mockResolvedValueOnce([{ emoji: "❤️", userId: senderId }]); // existing reaction
     txSelect.limitMock.mockResolvedValueOnce([]); // allReactions after removal
     const repo = new MessagePgRepository(db);
@@ -461,6 +513,7 @@ describe("MessagePgRepository.reactMessage", () => {
     const { db, txSelect, insertMock, valuesMock, dbOnConflictMock } = makeDb();
     txSelect.limitMock.mockResolvedValueOnce([{ conversationId, deletedAt: null }]); // msg exists
     txSelect.limitMock.mockResolvedValueOnce([{ userId: senderId }]); // participant exists
+    txSelect.limitMock.mockResolvedValueOnce([{ kind: "GROUP" }]); // conversation kind
     txSelect.limitMock.mockResolvedValueOnce([{ emoji: "👍", userId: senderId }]); // existing reaction differs
     txSelect.limitMock.mockResolvedValueOnce([
       { emoji: "❤️", userId: senderId },
@@ -485,16 +538,79 @@ describe("MessagePgRepository.reactMessage", () => {
 
   it("rejects a direct reaction if the friendship is blocked under the transaction lock", async () => {
     const { db, txSelect, transactionMock } = makeDb();
-    txSelect.limitMock.mockResolvedValueOnce([{ status: "BLOCKED" }]);
+    txSelect.limitMock.mockResolvedValueOnce([{ conversationId, deletedAt: null }]); // msg exists
+    txSelect.limitMock.mockResolvedValueOnce([{ userId: senderId }]); // participant exists
+    txSelect.limitMock.mockResolvedValueOnce([{ kind: "DIRECT" }]); // conversation kind
+    txSelect.limitMock.mockResolvedValueOnce([{ userId: partnerId }]); // direct partner
+    txSelect.limitMock.mockResolvedValueOnce([{ status: "BLOCKED" }]); // friendship under share lock
     const repo = new MessagePgRepository(db);
 
-    await expect(
-      repo.reactMessage(senderId, messageId, "❤️", {
-        userAId: senderId,
-        userBId: "0193a2b1-0000-7000-8000-000000000002",
-      }),
-    ).rejects.toMatchObject({ code: "USER_BLOCKED" });
+    await expect(repo.reactMessage(senderId, messageId, "❤️")).rejects.toMatchObject({
+      code: "USER_BLOCKED",
+    });
     expect(transactionMock).toHaveBeenCalledOnce();
     expect(txSelect.forMock).toHaveBeenCalledWith("share");
+  });
+
+  it("allows a direct reaction when the friendship is accepted under the lock", async () => {
+    const { db, txSelect, insertMock } = makeDb();
+    txSelect.limitMock.mockResolvedValueOnce([{ conversationId, deletedAt: null }]); // msg exists
+    txSelect.limitMock.mockResolvedValueOnce([{ userId: senderId }]); // participant exists
+    txSelect.limitMock.mockResolvedValueOnce([{ kind: "DIRECT" }]); // conversation kind
+    txSelect.limitMock.mockResolvedValueOnce([{ userId: partnerId }]); // direct partner
+    txSelect.limitMock.mockResolvedValueOnce([{ status: "ACCEPTED" }]); // friendship under share lock
+    txSelect.limitMock.mockResolvedValueOnce([]); // no existing reaction
+    txSelect.limitMock.mockResolvedValueOnce([{ emoji: "❤️", userId: senderId }]); // allReactions
+    const repo = new MessagePgRepository(db);
+
+    const result = await repo.reactMessage(senderId, messageId, "❤️");
+
+    expect(insertMock).toHaveBeenCalledWith(messageReactions);
+    expect(result).toEqual({
+      reactions: [{ emoji: "❤️", count: 1, userIds: [senderId] }],
+      conversationId,
+    });
+  });
+
+  it("skips the friendship gate when the direct partner has left the conversation", async () => {
+    const { db, txSelect, insertMock } = makeDb();
+    txSelect.limitMock.mockResolvedValueOnce([{ conversationId, deletedAt: null }]); // msg exists
+    txSelect.limitMock.mockResolvedValueOnce([{ userId: senderId }]); // participant exists
+    txSelect.limitMock.mockResolvedValueOnce([{ kind: "DIRECT" }]); // conversation kind
+    txSelect.limitMock.mockResolvedValueOnce([]); // no active partner
+    txSelect.limitMock.mockResolvedValueOnce([]); // no existing reaction
+    txSelect.limitMock.mockResolvedValueOnce([]); // allReactions
+    const repo = new MessagePgRepository(db);
+
+    const result = await repo.reactMessage(senderId, messageId, "❤️");
+
+    expect(insertMock).toHaveBeenCalledWith(messageReactions);
+    expect(result).toEqual({ reactions: [], conversationId });
+  });
+});
+
+describe("MessagePgRepository.findReplyTargets", () => {
+  it("projects only the reply target fields consumed by responses", async () => {
+    const { db, dbSelect } = makeDb();
+    const repo = new MessagePgRepository(db);
+
+    await repo.findReplyTargets(conversationId, [messageId]);
+
+    expect(dbSelect.selectMock).toHaveBeenCalledWith({
+      id: messages.id,
+      senderId: messages.senderId,
+      kind: messages.kind,
+      body: messages.body,
+      deletedAt: messages.deletedAt,
+      storyPreview: messages.storyPreview,
+    });
+  });
+
+  it("returns an empty list without querying when no ids are given", async () => {
+    const { db, dbSelect } = makeDb();
+    const repo = new MessagePgRepository(db);
+
+    await expect(repo.findReplyTargets(conversationId, [])).resolves.toEqual([]);
+    expect(dbSelect.selectMock).not.toHaveBeenCalled();
   });
 });

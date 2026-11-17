@@ -6,8 +6,13 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
-import { describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import { S3_DELETE_BATCH_SIZE } from "../../../../src/utils/cache/constants.js";
+import {
+  PRESIGN_CACHE_MARGIN_SECS,
+  PRESIGN_CACHE_MAX_ENTRIES,
+  PRESIGN_CACHE_TTL_SECS,
+} from "../../../../src/utils/storage/constants.js";
 import { StorageError } from "../../../../src/utils/storage/error.js";
 import { S3StorageService, type PresignerFn } from "../../../../src/utils/storage/s3.js";
 
@@ -296,5 +301,101 @@ describe("S3StorageService", () => {
     );
     expect(downloadCmd.input.ResponseContentType).toBe("application/pdf");
     expect(options.expiresIn).toBe(3600);
+  });
+
+  describe("presigned GET cache", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    function getParams(objectKey: string, expiresInSecs = 86400) {
+      return {
+        objectKey,
+        fileName: "report.pdf",
+        disposition: "attachment" as const,
+        mimeType: "application/pdf",
+        expiresInSecs,
+      };
+    }
+
+    it("skips re-signing when the same request is served from the cache", async () => {
+      const signer = vi.fn<PresignerFn>().mockResolvedValue("https://s3.example/get-signed");
+      const { service } = createStorage(vi.fn(), signer);
+
+      const first = await service.presignGet(getParams("chat/c1/a.pdf"));
+      const second = await service.presignGet(getParams("chat/c1/a.pdf"));
+
+      expect(second).toEqual(first);
+      expect(signer).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps inline and attachment URLs in separate cache entries", async () => {
+      const signer = vi.fn<PresignerFn>().mockResolvedValue("https://s3.example/get-signed");
+      const { service } = createStorage(vi.fn(), signer);
+
+      await service.presignGet({ ...getParams("chat/c1/a.pdf"), disposition: "inline" });
+      await service.presignGet({ ...getParams("chat/c1/a.pdf"), disposition: "attachment" });
+      await service.presignGet({ ...getParams("chat/c1/a.pdf"), disposition: "inline" });
+
+      expect(signer).toHaveBeenCalledTimes(2);
+    });
+
+    it("re-signs once the cached entry has expired", async () => {
+      const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+      const signer = vi.fn<PresignerFn>().mockResolvedValue("https://s3.example/get-signed");
+      const { service } = createStorage(vi.fn(), signer);
+
+      await service.presignGet(getParams("chat/c1/a.pdf"));
+      // TTL = min(PRESIGN_CACHE_TTL_SECS, 86400 - PRESIGN_CACHE_MARGIN_SECS) = the cap.
+      nowSpy.mockReturnValue(1_700_000_000_000 + PRESIGN_CACHE_TTL_SECS * 1000 + 1);
+      await service.presignGet(getParams("chat/c1/a.pdf"));
+
+      expect(signer).toHaveBeenCalledTimes(2);
+    });
+
+    it("serves a cached URL only while the validity margin remains", async () => {
+      const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+      const signer = vi.fn<PresignerFn>().mockResolvedValue("https://s3.example/get-signed");
+      const { service } = createStorage(vi.fn(), signer);
+
+      // TTL = min(PRESIGN_CACHE_TTL_SECS, 400 - PRESIGN_CACHE_MARGIN_SECS) = 100s,
+      // so a URL served near expiry keeps at least PRESIGN_CACHE_MARGIN_SECS validity.
+      const ttlSecs = Math.min(PRESIGN_CACHE_TTL_SECS, 400 - PRESIGN_CACHE_MARGIN_SECS);
+      await service.presignGet(getParams("chat/c1/a.pdf", 400));
+      nowSpy.mockReturnValue(1_700_000_000_000 + (ttlSecs - 1) * 1000);
+      await service.presignGet(getParams("chat/c1/a.pdf", 400));
+      expect(signer).toHaveBeenCalledTimes(1);
+
+      nowSpy.mockReturnValue(1_700_000_000_000 + (ttlSecs + 1) * 1000);
+      await service.presignGet(getParams("chat/c1/a.pdf", 400));
+      expect(signer).toHaveBeenCalledTimes(2);
+    });
+
+    it("never caches a URL whose lifetime leaves no validity margin", async () => {
+      const signer = vi.fn<PresignerFn>().mockResolvedValue("https://s3.example/get-signed");
+      const { service } = createStorage(vi.fn(), signer);
+
+      // expiresInSecs <= PRESIGN_CACHE_MARGIN_SECS leaves nothing to serve safely.
+      await service.presignGet(getParams("chat/c1/a.pdf", PRESIGN_CACHE_MARGIN_SECS - 100));
+      await service.presignGet(getParams("chat/c1/a.pdf", PRESIGN_CACHE_MARGIN_SECS - 100));
+
+      expect(signer).toHaveBeenCalledTimes(2);
+    });
+
+    it("evicts the oldest entries beyond PRESIGN_CACHE_MAX_ENTRIES", async () => {
+      const signer = vi.fn<PresignerFn>().mockResolvedValue("https://s3.example/get-signed");
+      const { service } = createStorage(vi.fn(), signer);
+
+      for (let i = 0; i <= PRESIGN_CACHE_MAX_ENTRIES; i += 1) {
+        await service.presignGet(getParams(`chat/c1/file-${i}.pdf`));
+      }
+      expect(signer).toHaveBeenCalledTimes(PRESIGN_CACHE_MAX_ENTRIES + 1);
+
+      await service.presignGet(getParams("chat/c1/file-0.pdf"));
+      expect(signer).toHaveBeenCalledTimes(PRESIGN_CACHE_MAX_ENTRIES + 2);
+
+      await service.presignGet(getParams(`chat/c1/file-${PRESIGN_CACHE_MAX_ENTRIES}.pdf`));
+      expect(signer).toHaveBeenCalledTimes(PRESIGN_CACHE_MAX_ENTRIES + 2);
+    });
   });
 });

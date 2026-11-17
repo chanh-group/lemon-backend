@@ -80,7 +80,7 @@ export class MailService implements OnModuleDestroy {
       html,
     };
 
-    void this.queue.add(() => this.deliverWithRetry(job));
+    void this.queue.add(() => this.deliverOnce(job, 0));
   }
 
   async sendRaw(job: MailJob): Promise<void> {
@@ -91,7 +91,7 @@ export class MailService implements OnModuleDestroy {
       return;
     }
 
-    void this.queue.add(() => this.deliverWithRetry(job));
+    void this.queue.add(() => this.deliverOnce(job, 0));
   }
 
   getQueueSize(): number {
@@ -113,7 +113,8 @@ export class MailService implements OnModuleDestroy {
     }
   }
 
-  private async deliverWithRetry(job: MailJob): Promise<void> {
+  /** One delivery attempt; retryable failures re-enqueue instead of sleeping here. */
+  private async deliverOnce(job: MailJob, attempt: number): Promise<void> {
     if (!this.transporter) {
       this.logger.log("Email delivered (log-only mode)", {
         action: "mail.send_dev",
@@ -121,38 +122,46 @@ export class MailService implements OnModuleDestroy {
       return;
     }
 
-    let attempt = 0;
-    while (attempt <= MAIL_RETRY_COUNT) {
-      try {
-        await this.transporter.sendMail({
-          from: this.fromAddress,
-          to: job.to,
-          subject: job.subject,
-          text: job.text,
-          html: job.html,
-        });
+    try {
+      await this.transporter.sendMail({
+        from: this.fromAddress,
+        to: job.to,
+        subject: job.subject,
+        text: job.text,
+        html: job.html,
+      });
 
-        this.logger.log("Mail sent successfully", {
-          action: "mail.sent",
-          attempt: attempt + 1,
-        });
-        return;
-      } catch {
-        attempt++;
-        this.logger.warn("Mail delivery failed", {
-          action: "mail.delivery_failed",
-          attempt,
-        });
+      this.logger.log("Mail sent successfully", {
+        action: "mail.sent",
+        attempt: attempt + 1,
+      });
+    } catch {
+      this.retryOrFail(job, attempt);
+    }
+  }
 
-        if (attempt <= MAIL_RETRY_COUNT) {
-          const delay = MAIL_RETRY_BACKOFFS_MS[attempt - 1] ?? MAIL_RETRY_BACKOFFS_MS.at(-1)!;
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-      }
+  /**
+   * Re-enqueue the send after its backoff delay (p-queue has no per-task
+   * `delay`, so the wait happens outside the queue) — the worker slot stays
+   * free for other mail while this one backs off. Exhausted retries are dropped.
+   */
+  private retryOrFail(job: MailJob, attempt: number): void {
+    const attemptsMade = attempt + 1;
+    this.logger.warn("Mail delivery failed", {
+      action: "mail.delivery_failed",
+      attempt: attemptsMade,
+    });
+
+    if (attemptsMade > MAIL_RETRY_COUNT) {
+      this.logger.warn("Mail permanently failed after all retries", {
+        action: "mail.send_failed",
+      });
+      return;
     }
 
-    this.logger.warn("Mail permanently failed after all retries", {
-      action: "mail.send_failed",
-    });
+    const delay = MAIL_RETRY_BACKOFFS_MS[attemptsMade - 1] ?? MAIL_RETRY_BACKOFFS_MS.at(-1)!;
+    setTimeout(() => {
+      void this.queue.add(() => this.deliverOnce(job, attemptsMade));
+    }, delay);
   }
 }

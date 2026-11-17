@@ -138,19 +138,26 @@ describe("RealtimeService", () => {
   });
 
   describe("joinConversation", () => {
-    it("makes every socket of each participant join the conversation room", () => {
+    it("makes every socket of each participant join the conversation room in one adapter call", () => {
       const socketsJoin = vi.fn();
       const inRoom = vi.fn().mockReturnValue({ socketsJoin });
       const service = new RealtimeService({ server: { in: inRoom } } as unknown as ChatGateway);
 
       service.joinConversation(["u1", "u2"], "c1");
 
-      expect(inRoom).toHaveBeenCalledTimes(2);
-      expect(inRoom).toHaveBeenNthCalledWith(1, userRoom("u1"));
-      expect(inRoom).toHaveBeenNthCalledWith(2, userRoom("u2"));
-      expect(socketsJoin).toHaveBeenCalledTimes(2);
-      expect(socketsJoin).toHaveBeenNthCalledWith(1, convRoom("c1"));
-      expect(socketsJoin).toHaveBeenNthCalledWith(2, convRoom("c1"));
+      expect(inRoom).toHaveBeenCalledTimes(1);
+      expect(inRoom).toHaveBeenCalledWith([userRoom("u1"), userRoom("u2")]);
+      expect(socketsJoin).toHaveBeenCalledTimes(1);
+      expect(socketsJoin).toHaveBeenCalledWith(convRoom("c1"));
+    });
+
+    it("does not touch the adapter when there are no participants", () => {
+      const inRoom = vi.fn();
+      const service = new RealtimeService({ server: { in: inRoom } } as unknown as ChatGateway);
+
+      service.joinConversation([], "c1");
+
+      expect(inRoom).not.toHaveBeenCalled();
     });
 
     it("does nothing when the gateway server is not initialized", () => {

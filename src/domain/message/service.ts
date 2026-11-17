@@ -5,7 +5,11 @@ import {
   type ConversationRepository,
 } from "../conversation/repository.js";
 import { RealtimeService } from "../realtime/realtime.service.js";
-import { MESSAGE_REPOSITORY, type MessageRepository } from "./repository.js";
+import {
+  MESSAGE_REPOSITORY,
+  type MessageRepository,
+  type ReplyTargetMessage,
+} from "./repository.js";
 import type { Message } from "./schema.js";
 import type { SendMessageDto } from "./dto/request.js";
 import type {
@@ -60,7 +64,7 @@ export class MessageService {
     @Optional() @Inject(STORAGE_SERVICE) private readonly storage?: StorageService,
   ) {}
 
-  private replyTarget(message: Message): ReplyTargetResponse {
+  private replyTarget(message: ReplyTargetMessage): ReplyTargetResponse {
     return {
       id: message.id,
       senderId: message.senderId,
@@ -77,11 +81,8 @@ export class MessageService {
     dto: SendMessageDto,
     story?: StoryReplyRef,
   ): Promise<MessageResponse> {
-    // 1. Verify that sender is a member of this conversation
-    const participantIds = await this.convRepo.getParticipantUserIds(conversationId);
-    if (!participantIds.includes(senderId)) {
-      throw new BusinessError("NOT_PARTICIPANT");
-    }
+    // 1. Verify that sender is a member of this conversation (NOT_PARTICIPANT)
+    //    and resolve the direct partner for the friendship gate.
     const directPartnerId = await this.assertDirectConversationAllowed(conversationId, senderId);
 
     let sourceMessage: Awaited<ReturnType<MessageRepository["findById"]>> = null;
@@ -133,39 +134,42 @@ export class MessageService {
       }
     }
 
-    if (attachments?.length) {
-      const storage = this.storage;
-      if (!storage) throw new BusinessError("OBJECT_NOT_UPLOADED");
-      await Promise.all(
-        attachments.map(async (attachment) => {
-          if (attachment.sizeBytes > CHAT_MAX_FILE_BYTES) {
-            throw new BusinessError("FILE_TOO_LARGE", {
-              maxMb: String(Math.floor(CHAT_MAX_FILE_BYTES / (1024 * 1024))),
-            });
-          }
-          const isValidKey = sourceMessage
-            ? sourceMessage.attachments?.some(
-                (sourceAttachment) => sourceAttachment.objectKey === attachment.objectKey,
-              )
-            : attachment.objectKey.startsWith(`chat/${conversationId}/${senderId}/`);
-          if (!isValidKey) {
-            throw new BusinessError("INVALID_OBJECT_KEY");
-          }
-          const object = await storage.headObject(attachment.objectKey);
-          if (!object) throw new BusinessError("OBJECT_NOT_UPLOADED");
-          if (object.contentLength !== attachment.sizeBytes) {
-            throw new BusinessError("INVALID_OBJECT_KEY");
-          }
-        }),
-      );
+    const storage = this.storage;
+    if (attachments?.length && !storage) throw new BusinessError("OBJECT_NOT_UPLOADED");
+    for (const attachment of attachments ?? []) {
+      if (attachment.sizeBytes > CHAT_MAX_FILE_BYTES) {
+        throw new BusinessError("FILE_TOO_LARGE", {
+          maxMb: String(Math.floor(CHAT_MAX_FILE_BYTES / (1024 * 1024))),
+        });
+      }
+      const isValidKey = sourceMessage
+        ? sourceMessage.attachments?.some(
+            (sourceAttachment) => sourceAttachment.objectKey === attachment.objectKey,
+          )
+        : attachment.objectKey.startsWith(`chat/${conversationId}/${senderId}/`);
+      if (!isValidKey) throw new BusinessError("INVALID_OBJECT_KEY");
     }
 
+    const replyPromise = dto.replyToId
+      ? this.messageRepo.findById(dto.replyToId, false)
+      : Promise.resolve(null);
+    const attachmentChecks = (attachments ?? []).map(async (attachment) => {
+      const object = await storage!.headObject(attachment.objectKey);
+      if (!object) throw new BusinessError("OBJECT_NOT_UPLOADED");
+      if (object.contentLength !== attachment.sizeBytes) {
+        throw new BusinessError("INVALID_OBJECT_KEY");
+      }
+    });
+    await Promise.all(attachmentChecks);
+
+    let validatedReplyTarget: Message | null = null;
     if (dto.replyToId) {
-      const reply = await this.messageRepo.findById(dto.replyToId);
+      const reply = await replyPromise;
       if (!reply || reply.conversationId !== conversationId) {
         throw new BusinessError("BAD_REQUEST");
       }
       if (reply.deletedAt) throw new BusinessError("MESSAGE_REVOKED");
+      validatedReplyTarget = reply;
     }
 
     let bucket = "lemon-chat-storage";
@@ -210,9 +214,16 @@ export class MessageService {
       storyPreview: story?.storyPreview ?? null,
     });
 
-    const response = await toMessageResponseAsync(message, this.storage, senderId);
+    const staleReplyTargetId =
+      message.replyToId && message.replyToId !== dto.replyToId ? message.replyToId : undefined;
+    const [response, staleReplyTarget] = await Promise.all([
+      toMessageResponseAsync(message, this.storage, senderId),
+      staleReplyTargetId
+        ? this.messageRepo.findById(staleReplyTargetId, false)
+        : Promise.resolve(null),
+    ]);
     if (message.replyToId) {
-      const target = await this.messageRepo.findById(message.replyToId, false);
+      const target = staleReplyTargetId ? staleReplyTarget : validatedReplyTarget;
       response.replyTarget =
         target && target.conversationId === conversationId ? this.replyTarget(target) : null;
     }
@@ -232,11 +243,14 @@ export class MessageService {
     limit?: number,
     after?: string,
   ): Promise<MessageTimelineResponse> {
-    await this.assertDirectConversationAllowed(conversationId, userId);
-    if (
-      (cursor && !(await this.convRepo.isMessageInConversation(conversationId, cursor))) ||
-      (after && !(await this.convRepo.isMessageInConversation(conversationId, after)))
-    ) {
+    const [, cursorInConversation, afterInConversation] = await Promise.all([
+      this.assertDirectConversationAllowed(conversationId, userId),
+      cursor
+        ? this.convRepo.isMessageInConversation(conversationId, cursor)
+        : Promise.resolve(true),
+      after ? this.convRepo.isMessageInConversation(conversationId, after) : Promise.resolve(true),
+    ]);
+    if (!cursorInConversation || !afterInConversation) {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
 
@@ -272,7 +286,7 @@ export class MessageService {
   }
 
   async editMessage(userId: string, messageId: string, body: string): Promise<MessageResponse> {
-    const msg = await this.messageRepo.findById(messageId);
+    const msg = await this.messageRepo.findById(messageId, false);
     if (!msg) {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
@@ -309,7 +323,7 @@ export class MessageService {
   }
 
   async revokeMessage(userId: string, messageId: string): Promise<MessageResponse> {
-    const msg = await this.messageRepo.findById(messageId);
+    const msg = await this.messageRepo.findById(messageId, false);
     if (!msg) {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
@@ -341,16 +355,11 @@ export class MessageService {
     messageId: string,
     emoji: string,
   ): Promise<{ messageId: string; reactions: MessageReactionSummary[] }> {
-    const message = await this.messageRepo.findById(messageId, false);
-    if (!message || message.deletedAt) throw new BusinessError("MESSAGE_NOT_FOUND");
-    const partnerId = await this.assertDirectConversationAllowed(message.conversationId, userId);
-    const result = partnerId
-      ? await this.messageRepo.reactMessage(userId, messageId, emoji, {
-          userAId: userId,
-          userBId: partnerId,
-        })
-      : await this.messageRepo.reactMessage(userId, messageId, emoji);
-    const { reactions, conversationId } = result;
+    const { reactions, conversationId } = await this.messageRepo.reactMessage(
+      userId,
+      messageId,
+      emoji,
+    );
     this.realtimeService.emitMessageReaction(conversationId, {
       messageId,
       userId,

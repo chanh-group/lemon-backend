@@ -7,6 +7,36 @@ export type MessageWithAttachments = Message & {
   reactions?: MessageReaction[];
 };
 
+/** Attachment columns consumed by the response mapper (no bucket/checksum/createdAt). */
+export type AttachmentResponseSource = Pick<
+  MessageAttachment,
+  | "id"
+  | "messageId"
+  | "kind"
+  | "objectKey"
+  | "fileName"
+  | "mimeType"
+  | "sizeBytes"
+  | "width"
+  | "height"
+  | "durationMs"
+>;
+
+/** Reaction columns consumed by the response mapper (no createdAt). */
+export type ReactionResponseSource = Pick<MessageReaction, "messageId" | "userId" | "emoji">;
+
+/** Message columns consumed when rendering a reply target. */
+export type ReplyTargetMessage = Pick<
+  Message,
+  "id" | "senderId" | "kind" | "body" | "deletedAt" | "storyPreview"
+>;
+
+/** Message row plus the projected extras consumed by the response mapper. */
+export type MessageResponseSource = Message & {
+  attachments?: AttachmentResponseSource[];
+  reactions?: ReactionResponseSource[];
+};
+
 export interface AttachmentInsertData {
   bucket: string;
   objectKey: string;
@@ -21,7 +51,7 @@ export interface AttachmentInsertData {
 }
 
 export interface MessageTimelineResult {
-  items: MessageWithAttachments[];
+  items: MessageResponseSource[];
   nextCursor?: string;
   hasMore: boolean;
 }
@@ -32,11 +62,6 @@ export interface CreatedMessageResult {
 }
 
 export interface MessageRepository {
-  findByClientMsgId(
-    conversationId: string,
-    senderId: string,
-    clientMsgId: string,
-  ): Promise<MessageWithAttachments | null>;
   createMessageWithConversationUpdate(messageData: {
     conversationId: string;
     senderId: string;
@@ -57,7 +82,7 @@ export interface MessageRepository {
     after?: string,
   ): Promise<MessageTimelineResult>;
   findById(messageId: string, includeDetails?: boolean): Promise<MessageWithAttachments | null>;
-  findReplyTargets(conversationId: string, messageIds: string[]): Promise<Message[]>;
+  findReplyTargets(conversationId: string, messageIds: string[]): Promise<ReplyTargetMessage[]>;
   resolveWriteMiss(
     messageId: string,
     userId: string,
@@ -73,7 +98,6 @@ export interface MessageRepository {
     userId: string,
     messageId: string,
     emoji: string,
-    requiredFriendship?: { userAId: string; userBId: string },
   ): Promise<{ reactions: MessageReactionSummary[]; conversationId: string }>;
 }
 
