@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Inject,
+  Logger,
   Param,
   ParseUUIDPipe,
   Post,
@@ -50,6 +51,8 @@ interface UploadedMulterFile {
 
 @Controller("files")
 export class FileController {
+  private readonly logger = new Logger(FileController.name);
+
   constructor(
     private readonly fileService: FileService,
     @Inject(RATE_LIMITER)
@@ -106,19 +109,32 @@ export class FileController {
     if (current.myRole !== "ADMIN") throw new BusinessError("FORBIDDEN");
     const avatarUrl = await this.fileService.uploadGroupAvatar(actorId, groupId, file);
     try {
-      const updated = await this.conversationService.updateGroupAvatar(groupId, actorId, avatarUrl);
-      return ok(updated);
+      await this.conversationService.updateGroupAvatar(groupId, actorId, avatarUrl);
     } catch (error) {
+      let currentAvatarUrl: string | null | undefined;
       try {
         const check = await this.conversationService.getById(groupId, actorId);
-        if (check.avatarUrl !== avatarUrl) {
+        currentAvatarUrl = check.avatarUrl;
+      } catch (checkError) {
+        this.logger.warn("Group avatar write outcome could not be verified; retaining object", {
+          err: checkError,
+          groupId,
+        });
+        throw error;
+      }
+      if (currentAvatarUrl !== avatarUrl) {
+        try {
           await this.fileService.deleteGroupAvatarObject(groupId, avatarUrl);
+        } catch (cleanupError) {
+          this.logger.warn("Failed to remove unreferenced group avatar object", {
+            err: cleanupError,
+            groupId,
+          });
         }
-      } catch {
-        await this.fileService.deleteGroupAvatarObject(groupId, avatarUrl).catch(() => undefined);
       }
       throw error;
     }
+    return ok(await this.conversationService.getById(groupId, actorId));
   }
 
   @Post("presign")

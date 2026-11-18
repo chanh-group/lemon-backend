@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NoteRepository } from "../../../../src/domain/note/repository.js";
+import type { ConversationRepository } from "../../../../src/domain/conversation/repository.js";
 import type { PurgeableStory, StoryRepository } from "../../../../src/domain/story/repository.js";
 import { PurgeJob } from "../../../../src/jobs/purge/job.js";
 import { PURGE_BATCH_LIMIT, PURGE_LOCK_TTL_SECS } from "../../../../src/utils/cache/constants.js";
@@ -29,12 +30,24 @@ function setup(opts?: {
   noteIds?: string[];
   deleted?: string[];
   failed?: string[];
+  avatarJobs?: Array<{
+    id: string;
+    conversationId: string | null;
+    objectKey: string;
+    attempts: number;
+  }>;
 }): {
   job: PurgeJob;
   cache: MemoryCacheService;
   storyRepo: StoryStub;
   noteRepo: NoteStub;
   storage: StorageStub;
+  conversationRepo: {
+    findPendingAvatarCleanupJobs: ReturnType<typeof vi.fn>;
+    getGroupAvatarUrl: ReturnType<typeof vi.fn>;
+    completeAvatarCleanupJobs: ReturnType<typeof vi.fn>;
+    failAvatarCleanupJob: ReturnType<typeof vi.fn>;
+  };
 } {
   const cache = new MemoryCacheService();
   const storyRepo: StoryStub = {
@@ -52,14 +65,21 @@ function setup(opts?: {
       failed: opts?.failed ?? [],
     }),
   };
+  const conversationRepo = {
+    findPendingAvatarCleanupJobs: vi.fn().mockResolvedValue(opts?.avatarJobs ?? []),
+    getGroupAvatarUrl: vi.fn().mockResolvedValue(null),
+    completeAvatarCleanupJobs: vi.fn().mockResolvedValue(0),
+    failAvatarCleanupJob: vi.fn().mockResolvedValue(undefined),
+  };
   const job = new PurgeJob(
     storyRepo as unknown as StoryRepository,
     noteRepo as unknown as NoteRepository,
     storage as unknown as StorageService,
     cache,
     { purgeExpired: vi.fn().mockResolvedValue(0) } as never,
+    conversationRepo as unknown as ConversationRepository,
   );
-  return { job, cache, storyRepo, noteRepo, storage };
+  return { job, cache, storyRepo, noteRepo, storage, conversationRepo };
 }
 
 describe("PurgeJob", () => {
@@ -247,5 +267,25 @@ describe("PurgeJob", () => {
     storyRepo.findPurgeable.mockRejectedValue(new Error("db down"));
     await expect(job.run()).resolves.toBeUndefined();
     expect(noteRepo.deleteByIds).toHaveBeenCalledWith(["n1"]);
+  });
+
+  it("keeps an avatar cleanup job when the current reference cannot be checked", async () => {
+    const { job, storage, conversationRepo } = setup({
+      avatarJobs: [
+        {
+          id: "job-1",
+          conversationId: "group-1",
+          objectKey: "group-avatars/group-1/photo.png",
+          attempts: 0,
+        },
+      ],
+    });
+    conversationRepo.getGroupAvatarUrl.mockRejectedValue(new Error("database unavailable"));
+
+    await job.run();
+
+    expect(storage.deleteObjects).not.toHaveBeenCalled();
+    expect(conversationRepo.completeAvatarCleanupJobs).not.toHaveBeenCalled();
+    expect(conversationRepo.failAvatarCleanupJob).not.toHaveBeenCalled();
   });
 });

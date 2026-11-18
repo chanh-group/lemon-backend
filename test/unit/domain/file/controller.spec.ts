@@ -86,8 +86,11 @@ describe("FileController", () => {
     const avatarUrl = "https://api.example.com/api/files/group-avatars/photo.png";
     const uploadGroupAvatar = vi.fn().mockResolvedValue(avatarUrl);
     const deleteGroupAvatarObject = vi.fn().mockResolvedValue(undefined);
-    const updateGroupAvatar = vi.fn().mockResolvedValue({ id: groupId, avatarUrl });
-    const getById = vi.fn().mockResolvedValue({ myRole: "ADMIN", avatarUrl: null });
+    const updateGroupAvatar = vi.fn().mockResolvedValue(undefined);
+    const getById = vi
+      .fn()
+      .mockResolvedValueOnce({ myRole: "ADMIN", avatarUrl: null })
+      .mockResolvedValueOnce({ id: groupId, avatarUrl });
     const c = new FileController(
       { uploadGroupAvatar, deleteGroupAvatarObject } as unknown as FileService,
       new MemoryRateLimiter(),
@@ -101,6 +104,102 @@ describe("FileController", () => {
     expect(uploadGroupAvatar).toHaveBeenCalledWith("user-1", groupId, file);
     expect(updateGroupAvatar).toHaveBeenCalledWith(groupId, "user-1", avatarUrl);
     expect(result.data).toEqual({ id: groupId, avatarUrl });
+  });
+
+  it("does not delete a committed avatar if reading the response fails", async () => {
+    const groupId = "0193a2b1-0000-7000-8000-000000000010";
+    const avatarUrl = "https://api.example.com/api/files/group-avatars/new.png";
+    const getById = vi
+      .fn()
+      .mockResolvedValueOnce({ myRole: "ADMIN", avatarUrl: null })
+      .mockRejectedValueOnce(new Error("read failed"));
+    const deleteGroupAvatarObject = vi.fn();
+    const c = new FileController(
+      {
+        uploadGroupAvatar: vi.fn().mockResolvedValue(avatarUrl),
+        deleteGroupAvatarObject,
+      } as unknown as FileService,
+      new MemoryRateLimiter(),
+      { findById: vi.fn() } as unknown as UserService,
+      {
+        getById,
+        updateGroupAvatar: vi.fn().mockResolvedValue(undefined),
+      } as unknown as ConversationService,
+    );
+
+    await expect(
+      c.uploadGroupAvatar({ user: { id: "user-1" } }, groupId, {
+        buffer: Buffer.from("image"),
+        size: 5,
+        mimetype: "image/png",
+        originalname: "new.png",
+      }),
+    ).rejects.toThrow("read failed");
+    expect(deleteGroupAvatarObject).not.toHaveBeenCalled();
+  });
+
+  it("retains a new avatar when a failed write cannot be verified", async () => {
+    const groupId = "0193a2b1-0000-7000-8000-000000000010";
+    const avatarUrl = "https://api.example.com/api/files/group-avatars/new.png";
+    const getById = vi
+      .fn()
+      .mockResolvedValueOnce({ myRole: "ADMIN", avatarUrl: null })
+      .mockRejectedValueOnce(new Error("read failed"));
+    const deleteGroupAvatarObject = vi.fn();
+    const c = new FileController(
+      {
+        uploadGroupAvatar: vi.fn().mockResolvedValue(avatarUrl),
+        deleteGroupAvatarObject,
+      } as unknown as FileService,
+      new MemoryRateLimiter(),
+      { findById: vi.fn() } as unknown as UserService,
+      {
+        getById,
+        updateGroupAvatar: vi.fn().mockRejectedValue(new Error("write uncertain")),
+      } as unknown as ConversationService,
+    );
+
+    await expect(
+      c.uploadGroupAvatar({ user: { id: "user-1" } }, groupId, {
+        buffer: Buffer.from("image"),
+        size: 5,
+        mimetype: "image/png",
+        originalname: "new.png",
+      }),
+    ).rejects.toThrow("write uncertain");
+    expect(deleteGroupAvatarObject).not.toHaveBeenCalled();
+  });
+
+  it("retains a new avatar when a write error follows a committed update", async () => {
+    const groupId = "0193a2b1-0000-7000-8000-000000000010";
+    const avatarUrl = "https://api.example.com/api/files/group-avatars/new.png";
+    const getById = vi
+      .fn()
+      .mockResolvedValueOnce({ myRole: "ADMIN", avatarUrl: null })
+      .mockResolvedValueOnce({ myRole: "ADMIN", avatarUrl });
+    const deleteGroupAvatarObject = vi.fn();
+    const c = new FileController(
+      {
+        uploadGroupAvatar: vi.fn().mockResolvedValue(avatarUrl),
+        deleteGroupAvatarObject,
+      } as unknown as FileService,
+      new MemoryRateLimiter(),
+      { findById: vi.fn() } as unknown as UserService,
+      {
+        getById,
+        updateGroupAvatar: vi.fn().mockRejectedValue(new Error("commit response lost")),
+      } as unknown as ConversationService,
+    );
+
+    await expect(
+      c.uploadGroupAvatar({ user: { id: "user-1" } }, groupId, {
+        buffer: Buffer.from("image"),
+        size: 5,
+        mimetype: "image/png",
+        originalname: "new.png",
+      }),
+    ).rejects.toThrow("commit response lost");
+    expect(deleteGroupAvatarObject).not.toHaveBeenCalled();
   });
 
   it("serves private group avatar bytes with auth check and no-store headers", async () => {

@@ -64,6 +64,10 @@ export interface ConversationRepository {
   updateGroup(conversationId: string, actorId: string, title: string): Promise<void>;
   updateGroupAvatar(conversationId: string, actorId: string, avatarUrl: string): Promise<void>;
   getGroupAvatarUrl(conversationId: string): Promise<string | null>;
+  getAccessibleGroupAvatarUrl(
+    conversationId: string,
+    userId: string,
+  ): Promise<{ avatarUrl: string | null } | null>;
   updateMemberRole(
     conversationId: string,
     actorId: string,

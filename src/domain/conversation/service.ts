@@ -295,12 +295,18 @@ export class ConversationService {
     conversationId: string,
     actorId: string,
     avatarUrl: string,
-  ): Promise<ConversationResponse> {
+  ): Promise<void> {
     await this.requireGroupManager(conversationId, actorId);
     await this.convRepo.updateGroupAvatar(conversationId, actorId, avatarUrl);
-    const memberIds = await this.convRepo.getParticipantUserIds(conversationId);
-    this.realtimeService.emitGroupEvent(memberIds, "conversation:updated", { conversationId });
-    return this.getById(conversationId, actorId);
+    try {
+      const memberIds = await this.convRepo.getParticipantUserIds(conversationId);
+      this.realtimeService.emitGroupEvent(memberIds, "conversation:updated", { conversationId });
+    } catch (err) {
+      this.logger.warn("Group avatar saved but realtime notification failed", {
+        err,
+        conversationId,
+      });
+    }
   }
 
   async updateGroupRole(

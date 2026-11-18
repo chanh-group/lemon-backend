@@ -174,14 +174,21 @@ describe("ConversationService", () => {
 
     it("allows a group admin to attach an avatar and notifies members", async () => {
       findByIdMock.mockResolvedValue({ id: convId, kind: "GROUP", myRole: "ADMIN" });
-      const response = { id: convId, avatarUrl } as Awaited<ReturnType<typeof service.getById>>;
-      vi.spyOn(service, "getById").mockResolvedValue(response);
-
-      expect(await service.updateGroupAvatar(convId, userA, avatarUrl)).toBe(response);
+      await expect(service.updateGroupAvatar(convId, userA, avatarUrl)).resolves.toBeUndefined();
       expect(updateGroupAvatarMock).toHaveBeenCalledWith(convId, userA, avatarUrl);
       expect(emitGroupEventMock).toHaveBeenCalledWith([userA, userB], "conversation:updated", {
         conversationId: convId,
       });
+    });
+
+    it("keeps the committed avatar when the notification lookup fails", async () => {
+      findByIdMock.mockResolvedValue({ id: convId, kind: "GROUP", myRole: "ADMIN" });
+      getParticipantUserIdsMock.mockRejectedValueOnce(
+        new Error("database temporarily unavailable"),
+      );
+
+      await expect(service.updateGroupAvatar(convId, userA, avatarUrl)).resolves.toBeUndefined();
+      expect(updateGroupAvatarMock).toHaveBeenCalledWith(convId, userA, avatarUrl);
     });
 
     it("rejects a regular member attempting to update the group photo", async () => {

@@ -142,6 +142,25 @@ describe("ConversationPgRepository group avatar", () => {
     expect(lookup.params).toEqual([groupId, "GROUP"]);
   });
 
+  it("checks group membership and avatar URL in one statement", async () => {
+    const { db, dbSelect } = makeDb();
+    const groupId = "0193a2b1-0000-7000-8000-000000000010";
+    dbSelect.limitMock.mockResolvedValueOnce([{ avatarUrl: "https://api.example.com/group.png" }]);
+
+    expect(
+      await new ConversationPgRepository(db).getAccessibleGroupAvatarUrl(groupId, userAId),
+    ).toEqual({ avatarUrl: "https://api.example.com/group.png" });
+    expect(dbSelect.innerJoinMock).toHaveBeenCalledWith(
+      conversationParticipants,
+      expect.anything(),
+    );
+    const join = render(dbSelect.innerJoinMock.mock.calls[0][1]);
+    expect(join.sql).toContain('"conversation_participants"."left_at" is null');
+    expect(join.params).toContain(userAId);
+    const lookup = render(dbSelect.whereMock.mock.calls[0][0]);
+    expect(lookup.params).toEqual([groupId, "GROUP"]);
+  });
+
   it("writes a new avatar when the actor is an active group admin", async () => {
     const groupLimit = vi
       .fn()

@@ -437,6 +437,32 @@ export class ConversationPgRepository implements ConversationRepository {
     return group?.avatarUrl ?? null;
   }
 
+  async getAccessibleGroupAvatarUrl(
+    conversationId: string,
+    userId: string,
+  ): Promise<{ avatarUrl: string | null } | null> {
+    const [group] = await this.db
+      .select({ avatarUrl: conversations.avatarUrl })
+      .from(conversations)
+      .innerJoin(
+        conversationParticipants,
+        and(
+          eq(conversationParticipants.conversationId, conversations.id),
+          eq(conversationParticipants.userId, userId),
+          isNull(conversationParticipants.leftAt),
+        ),
+      )
+      .where(
+        and(
+          eq(conversations.id, conversationId),
+          eq(conversations.kind, "GROUP"),
+          isNull(conversations.deletedAt),
+        ),
+      )
+      .limit(1);
+    return group ?? null;
+  }
+
   private async updateGroupMetadata(
     conversationId: string,
     actorId: string,

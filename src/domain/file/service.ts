@@ -179,12 +179,11 @@ export class FileService {
     if (!isAvatarFileName(fileName) || !this.conversations) {
       throw new BusinessError("CONVERSATION_NOT_FOUND");
     }
-    const isParticipant = await this.conversations.isParticipant(groupId, userId);
-    if (!isParticipant) {
+    const group = await this.conversations.getAccessibleGroupAvatarUrl(groupId, userId);
+    if (!group) {
       throw new BusinessError("NOT_PARTICIPANT");
     }
-    const currentUrl = await this.conversations.getGroupAvatarUrl(groupId);
-    const objectKey = groupAvatarObjectKeyFromUrl(currentUrl ?? "", groupId);
+    const objectKey = groupAvatarObjectKeyFromUrl(group.avatarUrl ?? "", groupId);
     if (objectKey !== `group-avatars/${groupId}/${fileName}`) {
       throw new BusinessError("CONVERSATION_NOT_FOUND");
     }
@@ -230,7 +229,10 @@ export class FileService {
     if (!avatarUrl) return;
     const objectKey = groupAvatarObjectKeyFromUrl(avatarUrl, groupId);
     if (!objectKey) return;
-    await this.storage.deleteObjects([objectKey]);
+    const result = await this.storage.deleteObjects([objectKey]);
+    if (!result.deleted.includes(objectKey)) {
+      throw new StorageError("Group avatar object deletion was not confirmed");
+    }
   }
 
   async upload(

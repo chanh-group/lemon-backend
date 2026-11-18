@@ -172,8 +172,11 @@ export class PurgeJob {
           } else {
             toDeleteJobs.push(job);
           }
-        } catch {
-          toDeleteJobs.push(job);
+        } catch (err) {
+          this.logger.warn("Purge: could not verify group avatar reference, keeping cleanup job", {
+            err,
+            jobId: job.id,
+          });
         }
       }
 
