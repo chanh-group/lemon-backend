@@ -39,6 +39,10 @@ export interface SocketUser {
   userId: string;
 }
 
+export interface SocketReadyEvent {
+  userId: string;
+}
+
 /** What this node last wrote to a user's presence state key. */
 type WrittenPresence = { state: "online"; conns: number } | { state: "offline" };
 
@@ -188,6 +192,10 @@ export class ChatGateway
     this.userConnections.set(userId, currentConns);
 
     await this.setOnlinePresence(userId, currentConns);
+
+    if (!client.disconnected) {
+      client.emit("ready", { userId });
+    }
 
     logger.log(
       `User connected: ${userId} (socket ${client.id}, active connections: ${currentConns})`,
