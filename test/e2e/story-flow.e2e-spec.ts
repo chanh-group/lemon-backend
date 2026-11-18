@@ -141,17 +141,15 @@ describe("Story flows with PostgreSQL and Redis", () => {
     const quota = 512 * 1024 * 1024;
     const legacyKey = `stories/${stranger}/legacy.jpg`;
     objects.set(legacyKey, { body: Buffer.alloc(5), contentType: "image/jpeg" });
-    await db
-      .insert(stories)
-      .values({
-        userId: stranger,
-        kind: "IMAGE",
-        objectKey: legacyKey,
-        bucket: "test-bucket",
-        mimeType: "image/jpeg",
-        expiresAt: new Date(Date.now() + 3600_000),
-        mediaSizeBytes: null,
-      });
+    await db.insert(stories).values({
+      userId: stranger,
+      kind: "IMAGE",
+      objectKey: legacyKey,
+      bucket: "test-bucket",
+      mimeType: "image/jpeg",
+      expiresAt: new Date(Date.now() + 3600_000),
+      mediaSizeBytes: null,
+    });
     const usage = await request(app.getHttpServer())
       .get("/api/stories/storage")
       .auth(strangerToken, { type: "bearer" })
