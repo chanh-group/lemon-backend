@@ -12,7 +12,7 @@
     "dev": "bun --watch src/main.ts",
     "fmt": "oxfmt --write .",
     "fmt:check": "oxfmt --check src/ test/",
-    "start": "nest start --exec \"node --env-file=.env\"",
+    "start": "nest start",
     "start:dev": "bun --watch src/main.ts",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
