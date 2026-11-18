@@ -8,6 +8,11 @@ export interface AcceptedFriendRequest {
   conversation: ConversationResponse;
 }
 
+export interface CancelledFriendRequest {
+  id: string;
+  addresseeId: string;
+}
+
 export interface FriendUser {
   id: string;
   name: string;
@@ -46,7 +51,10 @@ export interface FriendRepository {
   }>;
   acceptRequest(requestId: string, addresseeId: string): Promise<AcceptedFriendRequest | null>;
   deleteIncomingRequest(requestId: string, addresseeId: string): Promise<boolean>;
-  deleteOutgoingRequest(requestId: string, requesterId: string): Promise<boolean>;
+  deleteOutgoingRequest(
+    requestId: string,
+    requesterId: string,
+  ): Promise<CancelledFriendRequest | null>;
   deleteAcceptedPair(userAId: string, userBId: string): Promise<boolean>;
   blockPair(blockerId: string, targetId: string): Promise<void>;
 }

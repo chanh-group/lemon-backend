@@ -5,7 +5,11 @@ import type { DrizzleDb } from "../../configs/database.js";
 import { users } from "../user/schema.js";
 import { SystemError } from "../../utils/errors/system.js";
 import { conversationParticipants, conversations } from "../conversation/schema.js";
-import type { AcceptedFriendRequest, FriendRepository } from "./repository.js";
+import type {
+  AcceptedFriendRequest,
+  CancelledFriendRequest,
+  FriendRepository,
+} from "./repository.js";
 import { friendships } from "./schema.js";
 import { canonicalPair, toCursorPage } from "../shared.js";
 
@@ -343,7 +347,10 @@ export class FriendPgRepository implements FriendRepository {
     return Boolean(row);
   }
 
-  async deleteOutgoingRequest(requestId: string, requesterId: string): Promise<boolean> {
+  async deleteOutgoingRequest(
+    requestId: string,
+    requesterId: string,
+  ): Promise<CancelledFriendRequest | null> {
     const [row] = await this.db
       .delete(friendships)
       .where(
@@ -353,8 +360,8 @@ export class FriendPgRepository implements FriendRepository {
           eq(friendships.status, "PENDING"),
         ),
       )
-      .returning({ id: friendships.id });
-    return Boolean(row);
+      .returning({ id: friendships.id, addresseeId: friendships.addresseeId });
+    return row ?? null;
   }
 
   async deleteAcceptedPair(userAId: string, userBId: string): Promise<boolean> {

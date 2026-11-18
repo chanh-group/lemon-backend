@@ -203,4 +203,36 @@ describe("FriendService", () => {
       expect(emitFriendRemoved).toHaveBeenCalledWith(userId, otherId);
     });
   });
+
+  describe("cancelRequest", () => {
+    it("throws FRIEND_REQUEST_NOT_FOUND when outgoing request does not exist", async () => {
+      friendRepo.deleteOutgoingRequest.mockResolvedValue(null);
+
+      await expect(service.cancelRequest("missing-request", userId)).rejects.toMatchObject({
+        code: "FRIEND_REQUEST_NOT_FOUND",
+      });
+    });
+
+    it("deletes outgoing request and emits friend:request:cancelled to the recipient", async () => {
+      const emitFriendRequestCancelled = vi.fn();
+      friendRepo.deleteOutgoingRequest.mockResolvedValue({
+        id: "request-id",
+        addresseeId: otherId,
+      });
+      service = new FriendService(
+        friendRepo as never,
+        userRepo as never,
+        { emitFriendRequestReceived: vi.fn(), emitFriendRequestCancelled } as never,
+        cache as never,
+      );
+
+      await service.cancelRequest("request-id", userId);
+
+      expect(friendRepo.deleteOutgoingRequest).toHaveBeenCalledWith("request-id", userId);
+      expect(emitFriendRequestCancelled).toHaveBeenCalledWith(otherId, {
+        requestId: "request-id",
+        requesterId: userId,
+      });
+    });
+  });
 });
