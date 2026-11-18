@@ -73,8 +73,7 @@ export class StoryService {
     const rows = await this.storyRepo.findUnmeasuredMedia(userId);
     for (const row of rows) {
       const head = await this.storage.headObject(row.objectKey);
-      if (!head) continue;
-      await this.storyRepo.setMediaSize(row.id, head.contentLength);
+      await this.storyRepo.setMediaSize(row.id, head?.contentLength ?? 0);
     }
   }
 
