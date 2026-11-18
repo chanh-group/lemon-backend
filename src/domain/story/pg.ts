@@ -21,7 +21,11 @@ import type { DrizzleDb } from "../../configs/database.js";
 import { friendships } from "../friend/schema.js";
 import { messages } from "../message/schema.js";
 import { users } from "../user/schema.js";
-import { STORY_FEED_MAX_PER_AUTHOR, type StoryReactionKind } from "./constants.js";
+import {
+  STORY_FEED_MAX_PER_AUTHOR,
+  STORY_STORAGE_LIMIT_BYTES,
+  type StoryReactionKind,
+} from "./constants.js";
 import type {
   StoryItemResponse,
   StoryReactionResponse,
@@ -59,6 +63,21 @@ export class StoryPgRepository implements StoryRepository {
     audienceUserIds?: string[],
   ): Promise<Story> {
     return this.db.transaction(async (tx) => {
+      if (data.mediaSizeBytes != null) {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtext('story_quota:' || ${data.userId}))`,
+        );
+        const [usage] = await tx
+          .select({
+            bytes: sql<number>`coalesce(sum(${stories.mediaSizeBytes}), 0)::bigint`,
+            unknown: sql<number>`count(*) filter (where ${stories.objectKey} is not null and ${stories.mediaSizeBytes} is null)::int`,
+          })
+          .from(stories)
+          .where(and(eq(stories.userId, data.userId), isNull(stories.deletedAt)));
+        if (Number(usage.unknown) > 0) throw new BusinessError("STORY_STORAGE_UNAVAILABLE");
+        if (Number(usage.bytes) + data.mediaSizeBytes > STORY_STORAGE_LIMIT_BYTES)
+          throw new BusinessError("STORY_STORAGE_FULL");
+      }
       const [created] = await tx
         .insert(stories)
         .values({
@@ -76,6 +95,36 @@ export class StoryPgRepository implements StoryRepository {
       }
       return created;
     });
+  }
+
+  async findUnmeasuredMedia(userId: string): Promise<Array<{ id: string; objectKey: string }>> {
+    const rows = await this.db
+      .select({ id: stories.id, objectKey: stories.objectKey })
+      .from(stories)
+      .where(
+        and(
+          eq(stories.userId, userId),
+          isNull(stories.deletedAt),
+          isNotNull(stories.objectKey),
+          isNull(stories.mediaSizeBytes),
+        ),
+      );
+    return rows.filter((row): row is { id: string; objectKey: string } => row.objectKey !== null);
+  }
+
+  async setMediaSize(id: string, size: number): Promise<void> {
+    await this.db
+      .update(stories)
+      .set({ mediaSizeBytes: size })
+      .where(and(eq(stories.id, id), isNull(stories.mediaSizeBytes)));
+  }
+
+  async getStorageUsage(userId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ bytes: sql<number>`coalesce(sum(${stories.mediaSizeBytes}), 0)::bigint` })
+      .from(stories)
+      .where(and(eq(stories.userId, userId), isNull(stories.deletedAt)));
+    return Number(row.bytes);
   }
 
   async findById(id: string): Promise<Story | null> {

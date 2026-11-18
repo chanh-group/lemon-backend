@@ -48,13 +48,15 @@ function makeDb(rows: unknown[] = []) {
   const valuesMock = vi.fn(() => ({
     onConflictDoUpdate: onConflictMock,
     onConflictDoNothing: onConflictDoNothingMock,
+    returning: returningMock,
   }));
   const insertMock = vi.fn(() => ({ values: valuesMock }));
   const deleteWhereMock = vi.fn<(condition: SQL) => unknown>(() => ({ returning: returningMock }));
   const deleteMock = vi.fn(() => ({ where: deleteWhereMock }));
   const updateSetMock = vi.fn(() => ({ where: vi.fn(() => ({ returning: returningMock })) }));
   const updateMock = vi.fn(() => ({ set: updateSetMock }));
-  const tx = { select: selectMock, insert: insertMock, update: updateMock };
+  const executeMock = vi.fn(() => Promise.resolve());
+  const tx = { select: selectMock, insert: insertMock, update: updateMock, execute: executeMock };
   const transactionMock = vi.fn((cb: (t: typeof tx) => Promise<unknown>) => cb(tx));
   const db = {
     select: selectMock,
@@ -78,6 +80,7 @@ function makeDb(rows: unknown[] = []) {
     valuesMock,
     onConflictMock,
     returningMock,
+    executeMock,
     transactionMock,
   };
 }
@@ -515,5 +518,90 @@ describe("StoryPgRepository.findViewersByStoryId", () => {
     expect(countWhere).toContain('"story_views"."story_id" = $1');
     expect(countWhere).toContain('"story_views"."anonymous" = $2');
     expect(countWhere).toContain("now() - interval '24 hours'");
+  });
+});
+
+describe("story storage accounting", () => {
+  it("excludes deleted stories when calculating available space", async () => {
+    const { db, whereMock } = makeDb([{ bytes: 123 }]);
+    expect(await new StoryPgRepository(db).getStorageUsage("user-1")).toBe(123);
+    expect(render(whereMock.mock.calls[0][0])).toContain('"stories"."deleted_at" is null');
+  });
+
+  it("only backfills media still counted against quota", async () => {
+    const { db, whereMock } = makeDb([{ id: "s", objectKey: "stories/u/a.jpg" }]);
+    expect(await new StoryPgRepository(db).findUnmeasuredMedia("user-1")).toHaveLength(1);
+    const query = render(whereMock.mock.calls[0][0]);
+    expect(query).toContain('"stories"."deleted_at" is null');
+    expect(query).toContain('"stories"."media_size_bytes" is null');
+  });
+});
+
+describe("StoryPgRepository.create", () => {
+  const baseMediaStory = {
+    userId: "user-1",
+    kind: "IMAGE" as const,
+    bucket: "b",
+    objectKey: "stories/user-1/a.jpg",
+    mimeType: "image/jpeg",
+    mediaSizeBytes: 1024,
+    width: null,
+    height: null,
+    durationMs: null,
+    caption: null,
+    background: null,
+    allowReplies: true,
+    allowReactions: true,
+    audienceMode: "ALL_FRIENDS" as const,
+  };
+
+  it("acquires an advisory lock and checks quota for media stories", async () => {
+    const { db, executeMock, selectMock, whereMock, returningMock } = makeDb([
+      { bytes: 0, unknown: 0 },
+    ]);
+    returningMock.mockResolvedValue([{ id: "s1" }]);
+    const repo = new StoryPgRepository(db);
+
+    await repo.create(baseMediaStory);
+
+    expect(executeMock).toHaveBeenCalledOnce();
+    const lockSql = (executeMock.mock.calls[0] as unknown[])[0] as SQL;
+    expect(render(lockSql)).toContain("pg_advisory_xact_lock");
+    expect(selectMock).toHaveBeenCalled();
+  });
+
+  it("skips quota check and advisory lock for text stories", async () => {
+    const { db, executeMock, selectMock, returningMock } = makeDb([{ bytes: 0, unknown: 0 }]);
+    returningMock.mockResolvedValue([{ id: "s1" }]);
+    const repo = new StoryPgRepository(db);
+
+    await repo.create({
+      ...baseMediaStory,
+      kind: "TEXT",
+      objectKey: null,
+      mimeType: null,
+      mediaSizeBytes: null,
+      caption: "hi",
+    });
+
+    expect(executeMock).not.toHaveBeenCalled();
+  });
+
+  it("throws STORY_STORAGE_FULL when media exceeds quota", async () => {
+    const { db, returningMock } = makeDb([{ bytes: 512 * 1024 * 1024 - 1, unknown: 0 }]);
+    returningMock.mockResolvedValue([]);
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.create(baseMediaStory)).rejects.toMatchObject({ code: "STORY_STORAGE_FULL" });
+  });
+
+  it("throws STORY_STORAGE_UNAVAILABLE when unmeasured media exists", async () => {
+    const { db, returningMock } = makeDb([{ bytes: 0, unknown: 1 }]);
+    returningMock.mockResolvedValue([]);
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.create(baseMediaStory)).rejects.toMatchObject({
+      code: "STORY_STORAGE_UNAVAILABLE",
+    });
   });
 });

@@ -38,6 +38,9 @@ export interface StoryRepository {
     audienceUserIds?: string[],
   ): Promise<Story>;
   findById(id: string): Promise<Story | null>;
+  findUnmeasuredMedia(userId: string): Promise<Array<{ id: string; objectKey: string }>>;
+  setMediaSize(id: string, size: number): Promise<void>;
+  getStorageUsage(userId: string): Promise<number>;
   updateActive(
     id: string,
     userId: string,

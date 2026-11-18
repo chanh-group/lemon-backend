@@ -109,5 +109,7 @@
   "STORY_UNMUTED": "Đã bỏ ẩn story của người dùng này",
   "STORY_SETTINGS_UPDATED": "Đã cập nhật cài đặt story",
   "STORY_LIKED": "Đã thích story",
-  "STORY_UNLIKED": "Đã bỏ thích story"
+  "STORY_UNLIKED": "Đã bỏ thích story",
+  "STORY_STORAGE_FULL": "Kho tin đã đầy. Hãy xóa bớt tin và thử lại.",
+  "STORY_STORAGE_UNAVAILABLE": "Chưa thể kiểm tra dung lượng kho tin. Vui lòng thử lại."
 }
