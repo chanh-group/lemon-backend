@@ -82,11 +82,11 @@ export class FriendService {
       [accepted.requesterId, accepted.addresseeId],
       accepted.conversation.id,
     );
+    await this.invalidateSocialFeeds(accepted.requesterId, accepted.addresseeId);
     this.realtimeService.emitFriendRequestAccepted(accepted.requesterId, {
       requestId: accepted.id,
       addresseeId: accepted.addresseeId,
     });
-    await this.invalidateSocialFeeds(accepted.requesterId, accepted.addresseeId);
     return accepted.conversation;
   }
 

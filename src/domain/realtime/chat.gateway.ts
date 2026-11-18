@@ -194,7 +194,7 @@ export class ChatGateway
     await this.setOnlinePresence(userId, currentConns);
 
     if (!client.disconnected) {
-      client.emit("ready", { userId });
+      client.emit("ready", { userId } satisfies SocketReadyEvent);
     }
 
     logger.log(
