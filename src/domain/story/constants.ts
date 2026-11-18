@@ -38,3 +38,5 @@ export const STORY_VIEWER_NAMES_EXPIRY_MS = 24 * 60 * 60 * 1000;
  * per-viewer feed cache entry without limit.
  */
 export const STORY_FEED_MAX_PER_AUTHOR = 30;
+
+export const STORY_STORAGE_LIMIT_BYTES = 512 * 1024 * 1024;

@@ -1,0 +1,1 @@
+ALTER TABLE "stories" ADD COLUMN "media_size_bytes" integer;

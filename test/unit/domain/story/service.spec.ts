@@ -69,6 +69,7 @@ describe("StoryService", () => {
     bucket: "lemon-stories",
     objectKey: "stories/user-owner-1/photo.jpg",
     mimeType: "image/jpeg",
+    mediaSizeBytes: 1024,
     width: 1080,
     height: 1920,
     durationMs: null,
@@ -220,6 +221,9 @@ describe("StoryService", () => {
 
     const mockRepo: StoryRepository = {
       create: createStoryMock,
+      findUnmeasuredMedia: vi.fn().mockResolvedValue([]),
+      setMediaSize: vi.fn().mockResolvedValue(undefined),
+      getStorageUsage: vi.fn().mockResolvedValue(0),
       updateActive: updateActiveMock,
       findById: findByIdMock,
       findActiveById: findActiveByIdMock,

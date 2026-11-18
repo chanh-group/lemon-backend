@@ -121,6 +121,12 @@ export class StoryController {
     return messageOnly(t("STORY_UNMUTED", lang));
   }
 
+  @Get("storage")
+  async getStorage(@Req() req: { user?: unknown }) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    return ok(await this.storyService.getStorageUsage(userId));
+  }
+
   @Get("archive")
   async getArchive(
     @Req() req: { user?: unknown },
