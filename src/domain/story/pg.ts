@@ -63,20 +63,19 @@ export class StoryPgRepository implements StoryRepository {
     audienceUserIds?: string[],
   ): Promise<Story> {
     return this.db.transaction(async (tx) => {
-      await tx.select({ id: users.id }).from(users).where(eq(users.id, data.userId)).for("update");
-      const [usage] = await tx
-        .select({
-          bytes: sql<number>`coalesce(sum(${stories.mediaSizeBytes}), 0)::bigint`,
-          unknown: sql<number>`count(*) filter (where ${stories.objectKey} is not null and ${stories.mediaSizeBytes} is null)::int`,
-        })
-        .from(stories)
-        .where(and(eq(stories.userId, data.userId), isNull(stories.deletedAt)));
-      if (Number(usage.unknown) > 0) throw new BusinessError("STORY_STORAGE_UNAVAILABLE");
-      if (
-        Number(usage.bytes) >= STORY_STORAGE_LIMIT_BYTES ||
-        Number(usage.bytes) + (data.mediaSizeBytes ?? 0) > STORY_STORAGE_LIMIT_BYTES
-      )
-        throw new BusinessError("STORY_STORAGE_FULL");
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext('story_quota:' || ${data.userId}))`);
+      if (data.mediaSizeBytes != null) {
+        const [usage] = await tx
+          .select({
+            bytes: sql<number>`coalesce(sum(${stories.mediaSizeBytes}), 0)::bigint`,
+            unknown: sql<number>`count(*) filter (where ${stories.objectKey} is not null and ${stories.mediaSizeBytes} is null)::int`,
+          })
+          .from(stories)
+          .where(and(eq(stories.userId, data.userId), isNull(stories.deletedAt)));
+        if (Number(usage.unknown) > 0) throw new BusinessError("STORY_STORAGE_UNAVAILABLE");
+        if (Number(usage.bytes) + data.mediaSizeBytes > STORY_STORAGE_LIMIT_BYTES)
+          throw new BusinessError("STORY_STORAGE_FULL");
+      }
       const [created] = await tx
         .insert(stories)
         .values({
