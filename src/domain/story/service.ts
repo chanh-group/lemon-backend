@@ -21,7 +21,12 @@ import {
   toStoryItemResponse,
   toStoryPreview,
 } from "./dto/mapper.js";
-import { STORY_SILENT_LIKE_EMOJI, STORY_STORAGE_LIMIT_BYTES, type StoryEmoji, type StoryReactionKind } from "./constants.js";
+import {
+  STORY_SILENT_LIKE_EMOJI,
+  STORY_STORAGE_LIMIT_BYTES,
+  type StoryEmoji,
+  type StoryReactionKind,
+} from "./constants.js";
 import type {
   CreateStoryDto,
   ReplyStoryDto,
@@ -75,7 +80,10 @@ export class StoryService {
 
   async getStorageUsage(userId: string): Promise<{ usedBytes: number; limitBytes: number }> {
     await this.measureLegacyMedia(userId);
-    return { usedBytes: await this.storyRepo.getStorageUsage(userId), limitBytes: STORY_STORAGE_LIMIT_BYTES };
+    return {
+      usedBytes: await this.storyRepo.getStorageUsage(userId),
+      limitBytes: STORY_STORAGE_LIMIT_BYTES,
+    };
   }
 
   async createStory(userId: string, dto: CreateStoryDto): Promise<StoryItemResponse> {

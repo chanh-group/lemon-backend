@@ -517,3 +517,19 @@ describe("StoryPgRepository.findViewersByStoryId", () => {
     expect(countWhere).toContain("now() - interval '24 hours'");
   });
 });
+
+describe("story storage accounting", () => {
+  it("excludes deleted stories when calculating available space", async () => {
+    const { db, whereMock } = makeDb([{ bytes: 123 }]);
+    expect(await new StoryPgRepository(db).getStorageUsage("user-1")).toBe(123);
+    expect(render(whereMock.mock.calls[0][0])).toContain('"stories"."deleted_at" is null');
+  });
+
+  it("only backfills media still counted against quota", async () => {
+    const { db, whereMock } = makeDb([{ id: "s", objectKey: "stories/u/a.jpg" }]);
+    expect(await new StoryPgRepository(db).findUnmeasuredMedia("user-1")).toHaveLength(1);
+    const query = render(whereMock.mock.calls[0][0]);
+    expect(query).toContain('"stories"."deleted_at" is null');
+    expect(query).toContain('"stories"."media_size_bytes" is null');
+  });
+});
