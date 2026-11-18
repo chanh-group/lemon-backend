@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import { randomUUID } from "node:crypto";
 import { NOTE_REPOSITORY } from "../../domain/note/repository.js";
@@ -6,6 +6,11 @@ import type { NoteRepository } from "../../domain/note/repository.js";
 import { STORY_REPOSITORY } from "../../domain/story/repository.js";
 import type { PurgeableStory } from "../../domain/story/repository.js";
 import type { StoryRepository } from "../../domain/story/repository.js";
+import {
+  CONVERSATION_REPOSITORY,
+  type ConversationRepository,
+} from "../../domain/conversation/repository.js";
+import { groupAvatarObjectKeyFromUrl } from "../../utils/storage/avatar.js";
 import {
   PURGE_BATCH_LIMIT,
   PURGE_CRON_EXPRESSION,
@@ -38,6 +43,9 @@ export class PurgeJob {
     private readonly cache: CacheStore,
     @Inject(AUTH_SESSION_REPOSITORY)
     private readonly authSessions: AuthSessionRepository,
+    @Optional()
+    @Inject(CONVERSATION_REPOSITORY)
+    private readonly conversationRepo?: ConversationRepository,
   ) {}
 
   @Cron(PURGE_CRON_EXPRESSION)
@@ -57,16 +65,18 @@ export class PurgeJob {
       return;
     }
     try {
-      const [{ stories, objects }, notes, sessions] = await Promise.all([
+      const [{ stories, objects }, notes, sessions, avatars] = await Promise.all([
         this.purgeStories(),
         this.purgeNotes(),
         this.purgeSessions(),
+        this.purgeGroupAvatars(),
       ]);
       this.logger.log("Purge completed", {
         stories,
         objects,
         notes,
         sessions,
+        avatars,
         durationMs: Date.now() - startedAt,
       });
     } finally {
@@ -135,6 +145,87 @@ export class PurgeJob {
       return await this.authSessions.purgeExpired(PURGE_BATCH_LIMIT);
     } catch (err) {
       this.logger.error("Purge sessions failed", { err });
+      return 0;
+    }
+  }
+
+  private async purgeGroupAvatars(): Promise<number> {
+    if (!this.conversationRepo) return 0;
+    try {
+      const jobs = await this.conversationRepo.findPendingAvatarCleanupJobs(PURGE_BATCH_LIMIT);
+      if (jobs.length === 0) return 0;
+
+      const toDeleteJobs: typeof jobs = [];
+      const cancelJobIds: string[] = [];
+
+      for (const job of jobs) {
+        try {
+          const currentUrl = job.conversationId
+            ? await this.conversationRepo.getGroupAvatarUrl(job.conversationId)
+            : null;
+          if (
+            currentUrl &&
+            job.conversationId &&
+            groupAvatarObjectKeyFromUrl(currentUrl, job.conversationId) === job.objectKey
+          ) {
+            cancelJobIds.push(job.id);
+          } else {
+            toDeleteJobs.push(job);
+          }
+        } catch {
+          toDeleteJobs.push(job);
+        }
+      }
+
+      if (cancelJobIds.length > 0) {
+        await this.conversationRepo.completeAvatarCleanupJobs(cancelJobIds);
+      }
+
+      if (toDeleteJobs.length === 0) return cancelJobIds.length;
+
+      let deletedKeys = new Set<string>();
+      let failedKeys = new Set<string>();
+      try {
+        const result = await this.storage.deleteObjects(toDeleteJobs.map((j) => j.objectKey));
+        deletedKeys = new Set(result.deleted);
+        failedKeys = new Set(result.failed);
+        if (result.failed.length > 0) {
+          this.logger.warn("Purge: some group avatar objects failed to delete", {
+            failed: result.failed.length,
+          });
+        }
+      } catch (err) {
+        this.logger.warn("Purge: group avatar deletion failed, jobs kept for retry", { err });
+        for (const job of toDeleteJobs) {
+          await this.conversationRepo.failAvatarCleanupJob(
+            job.id,
+            job.attempts,
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+        return cancelJobIds.length;
+      }
+
+      const completedIds: string[] = [];
+      for (const job of toDeleteJobs) {
+        if (deletedKeys.has(job.objectKey)) {
+          completedIds.push(job.id);
+        } else if (failedKeys.has(job.objectKey)) {
+          await this.conversationRepo.failAvatarCleanupJob(
+            job.id,
+            job.attempts,
+            "Storage deleteObjects reported failed",
+          );
+        }
+      }
+
+      if (completedIds.length > 0) {
+        await this.conversationRepo.completeAvatarCleanupJobs(completedIds);
+      }
+
+      return cancelJobIds.length + completedIds.length;
+    } catch (err) {
+      this.logger.error("Purge group avatars failed", { err });
       return 0;
     }
   }

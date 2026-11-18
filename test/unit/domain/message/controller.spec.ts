@@ -43,6 +43,7 @@ describe("MessageController", () => {
       reactions: { emoji: string; count: number; userIds: string[] }[];
     }>
   >;
+  let getReplyTargetMock: Mock;
 
   const mockUserId = "0193a2b1-0000-7000-8000-000000000001";
   const mockConvId = "0193a2b1-0000-7000-8000-000000000010";
@@ -114,12 +115,20 @@ describe("MessageController", () => {
         reactions: [{ emoji: "❤️", count: 1, userIds: [mockUserId] }],
       });
 
+    getReplyTargetMock = vi.fn().mockResolvedValue({
+      id: mockMsgId,
+      body: "Quote text",
+      senderId: mockUserId,
+      kind: "TEXT",
+    });
+
     const mockService = {
       sendMessage: sendMessageMock,
       getTimeline: getTimelineMock,
       editMessage: editMessageMock,
       revokeMessage: revokeMessageMock,
       reactToMessage: reactToMessageMock,
+      getReplyTarget: getReplyTargetMock,
     } as unknown as MessageService;
 
     controller = new MessageController(mockService, new MemoryRateLimiter());
@@ -127,7 +136,11 @@ describe("MessageController", () => {
 
   describe("sendMessage", () => {
     it("POST /conversations/:id/messages - wraps the message in the localized created envelope (vi)", async () => {
-      const dto: SendMessageDto = { body: "Xin chao!", kind: "TEXT" };
+      const dto: SendMessageDto = {
+        body: "Xin chao!",
+        kind: "TEXT",
+        clientMsgId: "0193259e-7bd8-7d43-902a-c71d6d84351b",
+      };
       const res = await controller.sendMessage({ user: { id: mockUserId } }, mockConvId, dto, "vi");
 
       expect(sendMessageMock).toHaveBeenCalledWith(mockUserId, mockConvId, dto);
@@ -139,7 +152,11 @@ describe("MessageController", () => {
     });
 
     it("localizes the sent message to en", async () => {
-      const dto: SendMessageDto = { body: "Xin chao!", kind: "TEXT" };
+      const dto: SendMessageDto = {
+        body: "Xin chao!",
+        kind: "TEXT",
+        clientMsgId: "0193259e-7bd8-7d43-902a-c71d6d84351b",
+      };
       const res = await controller.sendMessage({ user: { id: mockUserId } }, mockConvId, dto, "en");
 
       expect(res).toEqual({
@@ -351,6 +368,31 @@ describe("MessageController", () => {
     });
   });
 
+  describe("getReplyTarget", () => {
+    it("GET /conversations/:id/messages/:messageId/reply-target - calls service.getReplyTarget and returns replyTarget", async () => {
+      const mockReplyTarget = {
+        id: mockMsgId,
+        body: "Quote text",
+        senderId: mockUserId,
+        kind: "TEXT" as const,
+      };
+      getReplyTargetMock.mockResolvedValueOnce(mockReplyTarget);
+
+      const res = await controller.getReplyTarget(
+        { user: { id: mockUserId } },
+        mockConvId,
+        mockMsgId,
+      );
+
+      expect(getReplyTargetMock).toHaveBeenCalledWith(mockUserId, mockConvId, mockMsgId);
+      expect(res).toEqual({
+        success: true,
+        message: "OK",
+        data: mockReplyTarget,
+      });
+    });
+  });
+
   describe("HTTP request path (@Lang wiring)", () => {
     let app: INestApplication<App>;
     let httpSendMessage: ReturnType<typeof vi.fn>;
@@ -397,7 +439,11 @@ describe("MessageController", () => {
 
       const response = await request(app.getHttpServer())
         .post(`/conversations/${mockConvId}/messages`)
-        .send({ body: "Xin chao!", kind: "TEXT" })
+        .send({
+          body: "Xin chao!",
+          kind: "TEXT",
+          clientMsgId: "0193259e-7bd8-7d43-902a-c71d6d84351b",
+        })
         .expect(201);
 
       expect(response.body.success).toBe(true);

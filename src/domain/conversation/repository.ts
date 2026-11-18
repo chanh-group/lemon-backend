@@ -6,7 +6,9 @@ export interface ConversationWithPartner {
   avatarUrl?: string | null;
   memberCount?: number;
   myRole?: "ADMIN" | "MEMBER";
+  joinGeneration?: string;
   historyBoundaryMessageId?: string | null;
+  historyBoundaryWasEmpty?: boolean;
   lastReadAt?: Date | null;
   partner?: {
     id: string;
@@ -103,6 +105,13 @@ export interface ConversationRepository {
     conversationIds: string[],
     userId: string,
   ): Promise<Map<string, number>>;
+  findPendingAvatarCleanupJobs(
+    limit: number,
+  ): Promise<
+    Array<{ id: string; conversationId: string | null; objectKey: string; attempts: number }>
+  >;
+  completeAvatarCleanupJobs(ids: string[]): Promise<number>;
+  failAvatarCleanupJob(id: string, attempts: number, error: string): Promise<void>;
 }
 
 export const CONVERSATION_REPOSITORY = Symbol("CONVERSATION_REPOSITORY");

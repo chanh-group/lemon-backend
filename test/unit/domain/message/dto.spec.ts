@@ -16,23 +16,28 @@ function messagesFor(schema: z.ZodType, input: unknown, path?: string): string[]
     .map((issue) => issue.message);
 }
 
+const validClientMsgId = "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b";
+
 describe("Message DTOs", () => {
   describe("sendMessageSchema", () => {
     it("accepts a valid TEXT message", () => {
       const result = sendMessageSchema.safeParse({
         body: "Xin chào bạn!",
         kind: "TEXT",
+        clientMsgId: validClientMsgId,
       });
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.kind).toBe("TEXT");
         expect(result.data.body).toBe("Xin chào bạn!");
+        expect(result.data.clientMsgId).toBe(validClientMsgId);
       }
     });
 
     it("defaults kind to TEXT when omitted", () => {
       const result = sendMessageSchema.safeParse({
         body: "Tin nhắn mặc định",
+        clientMsgId: validClientMsgId,
       });
       expect(result.success).toBe(true);
       if (result.success) {
@@ -55,47 +60,79 @@ describe("Message DTOs", () => {
       ).toEqual(["VALIDATION_UUID_CLIENT_MSG"]);
     });
 
+    it("rejects missing clientMsgId", () => {
+      const result = sendMessageSchema.safeParse({
+        body: "Tin nhắn thiếu clientMsgId",
+        kind: "TEXT",
+      });
+      expect(result.success).toBe(false);
+    });
+
     it("rejects non-UUID replyToId with the VALIDATION_UUID_REPLY_TO key", () => {
       expect(
-        messagesFor(sendMessageSchema, { body: "Hello", replyToId: "not-a-uuid" }, "replyToId"),
+        messagesFor(
+          sendMessageSchema,
+          { body: "Hello", clientMsgId: validClientMsgId, replyToId: "not-a-uuid" },
+          "replyToId",
+        ),
       ).toEqual(["VALIDATION_UUID_REPLY_TO"]);
     });
 
     it("rejects TEXT message with empty body with VALIDATION_MESSAGE_BODY_REQUIRED", () => {
-      expect(messagesFor(sendMessageSchema, { body: "", kind: "TEXT" }, "body")).toEqual([
-        "VALIDATION_MESSAGE_BODY_REQUIRED",
-      ]);
+      expect(
+        messagesFor(
+          sendMessageSchema,
+          { body: "", kind: "TEXT", clientMsgId: validClientMsgId },
+          "body",
+        ),
+      ).toEqual(["VALIDATION_MESSAGE_BODY_REQUIRED"]);
     });
 
     it("rejects TEXT message with whitespace-only body with VALIDATION_MESSAGE_BODY_REQUIRED", () => {
-      expect(messagesFor(sendMessageSchema, { body: "     ", kind: "TEXT" }, "body")).toEqual([
-        "VALIDATION_MESSAGE_BODY_REQUIRED",
-      ]);
+      expect(
+        messagesFor(
+          sendMessageSchema,
+          { body: "     ", kind: "TEXT", clientMsgId: validClientMsgId },
+          "body",
+        ),
+      ).toEqual(["VALIDATION_MESSAGE_BODY_REQUIRED"]);
     });
 
     it("rejects TEXT message with missing body with VALIDATION_MESSAGE_BODY_REQUIRED", () => {
-      expect(messagesFor(sendMessageSchema, { kind: "TEXT" }, "body")).toEqual([
-        "VALIDATION_MESSAGE_BODY_REQUIRED",
-      ]);
+      expect(
+        messagesFor(sendMessageSchema, { kind: "TEXT", clientMsgId: validClientMsgId }, "body"),
+      ).toEqual(["VALIDATION_MESSAGE_BODY_REQUIRED"]);
     });
 
     it("rejects body longer than 4000 characters with the encoded VALIDATION_BODY_MAX key", () => {
       expect(
-        messagesFor(sendMessageSchema, { body: "a".repeat(4001), kind: "TEXT" }, "body"),
+        messagesFor(
+          sendMessageSchema,
+          { body: "a".repeat(4001), kind: "TEXT", clientMsgId: validClientMsgId },
+          "body",
+        ),
       ).toEqual(["VALIDATION_BODY_MAX|max=4000"]);
     });
 
     it("requires attachments for media messages and rejects SYSTEM", () => {
       const result = sendMessageSchema.safeParse({
         kind: "IMAGE",
+        clientMsgId: validClientMsgId,
       });
       expect(result.success).toBe(false);
-      expect(sendMessageSchema.safeParse({ kind: "SYSTEM", body: "spoofed" }).success).toBe(false);
+      expect(
+        sendMessageSchema.safeParse({
+          kind: "SYSTEM",
+          body: "spoofed",
+          clientMsgId: validClientMsgId,
+        }).success,
+      ).toBe(false);
     });
 
     it("strips client-supplied storyId and storyPreview from the parsed payload", () => {
       const result = sendMessageSchema.safeParse({
         body: "Spoofed story quote",
+        clientMsgId: validClientMsgId,
         storyId: "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b",
         storyPreview: {
           id: "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b",
@@ -115,6 +152,7 @@ describe("Message DTOs", () => {
     it("rejects invalid kind enum value", () => {
       const result = sendMessageSchema.safeParse({
         body: "Hello",
+        clientMsgId: validClientMsgId,
         kind: "UNKNOWN_KIND" as any,
       });
       expect(result.success).toBe(false);
@@ -145,6 +183,7 @@ describe("Message DTOs", () => {
   describe("sendMessageSchema - forwarding", () => {
     it("accepts a source message ID without client-supplied content", () => {
       const result = sendMessageSchema.safeParse({
+        clientMsgId: validClientMsgId,
         isForwarded: true,
         sourceMessageId: "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b",
       });

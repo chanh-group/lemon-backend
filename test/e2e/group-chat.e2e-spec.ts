@@ -18,6 +18,7 @@ import { messageHiddenForUsers } from "../../src/domain/message/schema.js";
 import { users } from "../../src/domain/user/schema.js";
 import { ErrorFilter } from "../../src/middleware/error-filter.js";
 import { standardSchemaPipe } from "../../src/utils/validation.js";
+import { STORAGE_SERVICE, type StorageService } from "../../src/utils/storage/store.js";
 
 describe("Group conversations with PostgreSQL and Redis", () => {
   let app: INestApplication;
@@ -31,7 +32,37 @@ describe("Group conversations with PostgreSQL and Redis", () => {
   let conversationId: string;
 
   beforeAll(async () => {
-    const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const objects = new Map<string, { body: Buffer; contentType: string }>();
+    const storage: StorageService = {
+      getBucket: () => "test-bucket",
+      presignPut: async ({ objectKey }) => ({ uploadUrl: `https://storage.local/${objectKey}` }),
+      presignGet: async ({ objectKey }) => ({ downloadUrl: `https://storage.local/${objectKey}` }),
+      headObject: async (key) => {
+        const o = objects.get(key);
+        return o ? { contentLength: o.body.length, contentType: o.contentType } : null;
+      },
+      getObject: async (key) => {
+        const o = objects.get(key);
+        return o
+          ? {
+              body: new Uint8Array(o.body),
+              contentLength: o.body.length,
+              contentType: o.contentType,
+            }
+          : null;
+      },
+      putObject: async ({ objectKey, body, mimeType }) => {
+        objects.set(objectKey, { body: Buffer.from(body), contentType: mimeType });
+      },
+      deleteObjects: async (keys) => {
+        for (const key of keys) objects.delete(key);
+        return { deleted: keys, failed: [] };
+      },
+    };
+    const module = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(STORAGE_SERVICE)
+      .useValue(storage)
+      .compile();
     app = module.createNestApplication();
     app.setGlobalPrefix("api");
     app.use(cookieParser());
@@ -111,7 +142,7 @@ describe("Group conversations with PostgreSQL and Redis", () => {
     const beforeJoin = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .auth(tokens.get(creatorId)!, { type: "bearer" })
-      .send({ body: "Before joining" })
+      .send({ body: "Before joining", clientMsgId: uuidv7() })
       .expect(201);
 
     await request(app.getHttpServer())
@@ -133,7 +164,7 @@ describe("Group conversations with PostgreSQL and Redis", () => {
     const afterJoin = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .auth(tokens.get(memberId)!, { type: "bearer" })
-      .send({ body: "After joining" })
+      .send({ body: "After joining", clientMsgId: uuidv7() })
       .expect(201);
     const visibleHistory = await request(app.getHttpServer())
       .get(`/api/conversations/${conversationId}/messages`)
@@ -187,13 +218,47 @@ describe("Group conversations with PostgreSQL and Redis", () => {
     await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .auth(tokens.get(memberId)!, { type: "bearer" })
-      .send({ body: "Still in the group" })
+      .send({ body: "Still in the group", clientMsgId: uuidv7() })
       .expect(201);
 
+    // Member cannot upload group avatar
+    await request(app.getHttpServer())
+      .post(`/api/files/group-avatars/${conversationId}/upload`)
+      .auth(tokens.get(memberId)!, { type: "bearer" })
+      .attach("file", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "avatar.png")
+      .expect(403);
+
+    // Admin can upload group avatar
+    const uploadRes = await request(app.getHttpServer())
+      .post(`/api/files/group-avatars/${conversationId}/upload`)
+      .auth(tokens.get(creatorId)!, { type: "bearer" })
+      .attach("file", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "avatar.png")
+      .expect(200);
+    expect(uploadRes.body.data.avatarUrl).toContain(`/api/files/group-avatars/${conversationId}/`);
+    const avatarPath = new URL(uploadRes.body.data.avatarUrl).pathname;
+
+    // Unauthenticated cannot download private group avatar
+    await request(app.getHttpServer()).get(avatarPath).expect(401);
+
+    // Member can download group avatar with private, no-store Cache-Control
+    const avatarRes = await request(app.getHttpServer())
+      .get(avatarPath)
+      .auth(tokens.get(memberId)!, { type: "bearer" })
+      .expect(200);
+    expect(avatarRes.headers["cache-control"]).toBe("private, no-store");
+
+    // Member cannot rename group
     await request(app.getHttpServer())
       .patch(`/api/conversations/${conversationId}`)
       .auth(tokens.get(memberId)!, { type: "bearer" })
       .send({ title: "Renamed by member" })
+      .expect(403);
+
+    // Admin can rename group
+    await request(app.getHttpServer())
+      .patch(`/api/conversations/${conversationId}`)
+      .auth(tokens.get(creatorId)!, { type: "bearer" })
+      .send({ title: "Renamed by admin" })
       .expect(200);
 
     const lastAdminLeave = await request(app.getHttpServer())

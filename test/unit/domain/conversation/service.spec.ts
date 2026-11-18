@@ -184,15 +184,13 @@ describe("ConversationService", () => {
       });
     });
 
-    it("allows a regular member to update the group photo", async () => {
+    it("rejects a regular member attempting to update the group photo", async () => {
       findByIdMock.mockResolvedValue({ id: convId, kind: "GROUP", myRole: "MEMBER" });
-      vi.spyOn(service, "getById").mockResolvedValue({
-        id: convId,
-        avatarUrl,
-      } as Awaited<ReturnType<typeof service.getById>>);
 
-      await service.updateGroupAvatar(convId, userA, avatarUrl);
-      expect(updateGroupAvatarMock).toHaveBeenCalledWith(convId, userA, avatarUrl);
+      await expect(service.updateGroupAvatar(convId, userA, avatarUrl)).rejects.toMatchObject({
+        code: "FORBIDDEN",
+      });
+      expect(updateGroupAvatarMock).not.toHaveBeenCalled();
     });
 
     it("rejects a user who is no longer in the group", async () => {
@@ -204,8 +202,17 @@ describe("ConversationService", () => {
     });
   });
 
-  it("lets a regular member rename the group", async () => {
+  it("rejects a regular member attempting to rename the group", async () => {
     findByIdMock.mockResolvedValue({ id: convId, kind: "GROUP", myRole: "MEMBER" });
+
+    await expect(service.updateGroupTitle(convId, userA, "New title")).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    expect(updateGroupTitleMock).not.toHaveBeenCalled();
+  });
+
+  it("lets an admin rename the group", async () => {
+    findByIdMock.mockResolvedValue({ id: convId, kind: "GROUP", myRole: "ADMIN" });
 
     await service.updateGroupTitle(convId, userA, "New title");
 

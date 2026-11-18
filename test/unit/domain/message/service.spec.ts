@@ -28,6 +28,7 @@ describe("MessageService", () => {
   let getParticipantUserIdsMock: Mock;
   let getMessageRecipientUserIdsMock: Mock;
   let isMessageInConversationMock: Mock;
+  let isParticipantMock: Mock;
   let findConversationByIdMock: Mock;
   let assertCanChatMock: Mock;
   let emitNewMessageMock: Mock;
@@ -40,6 +41,7 @@ describe("MessageService", () => {
   const outsider = "0193a2b1-0000-7000-8000-000000000099";
   const convId = "0193a2b1-0000-7000-8000-000000000010";
   const msgId = "0193a2b1-0000-7000-8000-000000000020";
+  const defaultClientMsgId = "0193259e-7bd8-7d43-902a-c71d6d84351b";
 
   const mockMessage: Message = {
     id: msgId,
@@ -74,6 +76,7 @@ describe("MessageService", () => {
     getParticipantUserIdsMock = vi.fn().mockResolvedValue([userA, userB]);
     getMessageRecipientUserIdsMock = vi.fn().mockResolvedValue([userA, userB]);
     isMessageInConversationMock = vi.fn().mockResolvedValue(true);
+    isParticipantMock = vi.fn().mockResolvedValue(true);
     findConversationByIdMock = vi
       .fn()
       .mockImplementation((_conversationId: string, userId: string) =>
@@ -103,6 +106,7 @@ describe("MessageService", () => {
       getParticipantUserIds: getParticipantUserIdsMock,
       getMessageRecipientUserIds: getMessageRecipientUserIdsMock,
       isMessageInConversation: isMessageInConversationMock,
+      isParticipant: isParticipantMock,
       findById: findConversationByIdMock,
       canAccessMessage: canAccessMessageMock,
       getGroupMembership: getGroupMembershipMock,
@@ -127,13 +131,21 @@ describe("MessageService", () => {
       findConversationByIdMock.mockResolvedValueOnce(null);
 
       await expect(
-        service.sendMessage(outsider, convId, { body: "Hello", kind: "TEXT" }),
+        service.sendMessage(outsider, convId, {
+          body: "Hello",
+          kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
+        }),
       ).rejects.toThrow(expect.objectContaining({ code: "NOT_PARTICIPANT" }));
     });
 
     it("throws BAD_REQUEST if TEXT message body is empty", async () => {
       await expect(
-        service.sendMessage(userA, convId, { body: "   ", kind: "TEXT" }),
+        service.sendMessage(userA, convId, {
+          body: "   ",
+          kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
+        }),
       ).rejects.toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
     });
 
@@ -145,7 +157,11 @@ describe("MessageService", () => {
       assertCanChatMock.mockRejectedValue(new BusinessError("FRIENDSHIP_REQUIRED"));
 
       await expect(
-        service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" }),
+        service.sendMessage(userA, convId, {
+          body: "Hello",
+          kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
+        }),
       ).rejects.toMatchObject({ code: "FRIENDSHIP_REQUIRED" });
       expect(createMessageMock).not.toHaveBeenCalled();
     });
@@ -154,7 +170,11 @@ describe("MessageService", () => {
       findConversationByIdMock.mockResolvedValue({ kind: "DIRECT", partner: { id: userB } });
       createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
 
-      await service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" });
+      await service.sendMessage(userA, convId, {
+        body: "Hello",
+        kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
+      });
 
       expect(createMessageMock).toHaveBeenCalledWith(
         expect.objectContaining({ requiredFriendship: { userAId: userA, userBId: userB } }),
@@ -163,20 +183,32 @@ describe("MessageService", () => {
 
     it("throws BAD_REQUEST if message body exceeds 4000 characters", async () => {
       await expect(
-        service.sendMessage(userA, convId, { body: "a".repeat(4001), kind: "TEXT" }),
+        service.sendMessage(userA, convId, {
+          body: "a".repeat(4001),
+          kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
+        }),
       ).rejects.toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
     });
 
     it("successfully creates a message and emits a realtime event", async () => {
       createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
 
-      const res = await service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" });
+      const res = await service.sendMessage(userA, convId, {
+        body: "Hello",
+        kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
+      });
 
       expect(res).not.toBe(mockMessage);
       expect(res.id).toBe(msgId);
       expect(res.body).toBe("Hello");
       expect(res).not.toHaveProperty("clientMsgId");
-      expect(emitNewMessageMock).toHaveBeenCalledWith(convId, res, expect.any(Array));
+      expect(emitNewMessageMock).toHaveBeenCalledWith(
+        convId,
+        { ...res, replyTarget: null },
+        expect.any(Array),
+      );
     });
 
     it("redacts a reply target per recipient instead of broadcasting the sender view", async () => {
@@ -190,14 +222,16 @@ describe("MessageService", () => {
       await service.sendMessage(userA, convId, {
         body: "Reply",
         kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
         replyToId: replyTargetId,
       });
 
-      const [, , payloads] = emitNewMessageMock.mock.calls[0];
+      const [, broadcastPayload, payloads] = emitNewMessageMock.mock.calls[0];
+      expect(broadcastPayload).toEqual(expect.objectContaining({ replyTarget: null }));
       expect(payloads).toEqual([
         expect.objectContaining({
           userId: userA,
-          payload: expect.objectContaining({ replyTarget: expect.anything() }),
+          payload: expect.objectContaining({ replyTarget: null }),
         }),
         expect.objectContaining({
           userId: userB,
@@ -227,7 +261,7 @@ describe("MessageService", () => {
       await service.sendMessage(
         userA,
         convId,
-        { body: "🔥", kind: "TEXT" },
+        { body: "🔥", kind: "TEXT", clientMsgId: defaultClientMsgId },
         {
           kind: "STORY_REACTION",
           storyId,
@@ -247,7 +281,11 @@ describe("MessageService", () => {
     it("does not emit for idempotent retries", async () => {
       createMessageMock.mockResolvedValue({ message: mockMessage, isNew: false });
 
-      const res = await service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" });
+      const res = await service.sendMessage(userA, convId, {
+        body: "Hello",
+        kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
+      });
 
       expect(res.id).toBe(msgId);
       expect(res).not.toHaveProperty("clientMsgId");
@@ -263,7 +301,12 @@ describe("MessageService", () => {
       });
 
       await expect(
-        service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT", replyToId: otherMsgId }),
+        service.sendMessage(userA, convId, {
+          body: "Hello",
+          kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
+          replyToId: otherMsgId,
+        }),
       ).rejects.toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
       expect(createMessageMock).not.toHaveBeenCalled();
     });
@@ -272,7 +315,12 @@ describe("MessageService", () => {
       findByIdMock.mockResolvedValue(null);
 
       await expect(
-        service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT", replyToId: msgId }),
+        service.sendMessage(userA, convId, {
+          body: "Hello",
+          kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
+          replyToId: msgId,
+        }),
       ).rejects.toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
       expect(createMessageMock).not.toHaveBeenCalled();
     });
@@ -281,7 +329,12 @@ describe("MessageService", () => {
       findByIdMock.mockResolvedValue({ ...mockMessage, deletedAt: new Date() });
 
       await expect(
-        service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT", replyToId: msgId }),
+        service.sendMessage(userA, convId, {
+          body: "Hello",
+          kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
+          replyToId: msgId,
+        }),
       ).rejects.toThrow(expect.objectContaining({ code: "MESSAGE_REVOKED" }));
       expect(createMessageMock).not.toHaveBeenCalled();
     });
@@ -293,6 +346,7 @@ describe("MessageService", () => {
       const res = await service.sendMessage(userA, convId, {
         body: "Hello",
         kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
         replyToId: msgId,
       });
 
@@ -311,6 +365,7 @@ describe("MessageService", () => {
       const res = await service.sendMessage(userA, convId, {
         body: "Hello",
         kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
         replyToId: msgId,
       });
 
@@ -332,6 +387,7 @@ describe("MessageService", () => {
       const res = await service.sendMessage(userA, convId, {
         body: "Hello",
         kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
         replyToId: msgId,
       });
 
@@ -343,10 +399,10 @@ describe("MessageService", () => {
       });
       expect(emitNewMessageMock).toHaveBeenCalledWith(
         convId,
-        expect.objectContaining({ replyTarget: res.replyTarget }),
+        expect.objectContaining({ replyTarget: null }),
         expect.arrayContaining([
           expect.objectContaining({
-            payload: expect.objectContaining({ replyTarget: res.replyTarget }),
+            payload: expect.objectContaining({ replyTarget: null }),
           }),
         ]),
       );
@@ -355,7 +411,11 @@ describe("MessageService", () => {
     it("does not look up a reply message when replyToId is absent", async () => {
       createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
 
-      await service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" });
+      await service.sendMessage(userA, convId, {
+        body: "Hello",
+        kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
+      });
 
       expect(findByIdMock).not.toHaveBeenCalled();
     });
@@ -640,6 +700,7 @@ describe("MessageService", () => {
 
       const res = await serviceWithStorage.sendMessage(userA, convId, {
         kind: "FILE",
+        clientMsgId: defaultClientMsgId,
         attachments: [
           {
             objectKey: `chat/${convId}/${userA}/report.pdf`,
@@ -688,6 +749,7 @@ describe("MessageService", () => {
       createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
       const request = serviceWithStorage.sendMessage(userA, convId, {
         kind: "FILE",
+        clientMsgId: defaultClientMsgId,
         replyToId: msgId,
         attachments: [
           {
@@ -773,6 +835,7 @@ describe("MessageService", () => {
 
       const res = await serviceWithStorage.sendMessage(userA, convId, {
         kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
         isForwarded: true,
         sourceMessageId: msgId,
         attachments: [
@@ -803,6 +866,7 @@ describe("MessageService", () => {
       await expect(
         service.sendMessage(userA, convId, {
           kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
           isForwarded: true,
           sourceMessageId: msgId,
         }),
@@ -870,6 +934,47 @@ describe("MessageService", () => {
         code: "USER_BLOCKED",
       });
       expect(emitMessageReactionMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getReplyTarget", () => {
+    it("throws NOT_PARTICIPANT if viewer is not in conversation", async () => {
+      isParticipantMock.mockResolvedValueOnce(false);
+      await expect(service.getReplyTarget(outsider, convId, msgId)).rejects.toMatchObject({
+        code: "NOT_PARTICIPANT",
+      });
+    });
+
+    it("throws MESSAGE_NOT_FOUND if message is not visible / outside boundary", async () => {
+      isParticipantMock.mockResolvedValueOnce(true);
+      findReplyTargetsMock.mockResolvedValueOnce([]);
+      await expect(service.getReplyTarget(userA, convId, msgId)).rejects.toMatchObject({
+        code: "MESSAGE_NOT_FOUND",
+      });
+    });
+
+    it("returns the reply target with sender profile if viewer has access", async () => {
+      isParticipantMock.mockResolvedValueOnce(true);
+      findReplyTargetsMock.mockResolvedValueOnce([
+        {
+          id: msgId,
+          senderId: userB,
+          kind: "TEXT",
+          body: "Hello",
+          deletedAt: null,
+          storyPreview: null,
+        },
+      ]);
+      findSenderProfilesMock.mockResolvedValueOnce([
+        { id: userB, username: "bob", fullName: "Bob", avatarUrl: null },
+      ]);
+
+      const res = await service.getReplyTarget(userA, convId, msgId);
+      expect(res).toMatchObject({
+        id: msgId,
+        body: "Hello",
+        sender: { id: userB, username: "bob" },
+      });
     });
   });
 });

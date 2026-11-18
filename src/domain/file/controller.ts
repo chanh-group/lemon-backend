@@ -72,15 +72,19 @@ export class FileController {
   }
 
   @Get("group-avatars/:groupId/:fileName")
-  @Public()
-  @Header("Cache-Control", "no-store")
+  @Header("Cache-Control", "private, no-store")
   async getGroupAvatar(
+    @Req() req: { user?: unknown },
     @Param("groupId", ParseUUIDPipe) groupId: string,
     @Param("fileName") fileName: string,
     @Res() response: Response,
   ) {
-    const url = await this.fileService.getGroupAvatarDownloadUrl(groupId, fileName);
-    return response.redirect(HttpStatus.FOUND, url);
+    const userId = getAuthUser(req).id;
+    const object = await this.fileService.getGroupAvatar(userId, groupId, fileName);
+    response.setHeader("Content-Type", object.contentType);
+    response.setHeader("Content-Length", object.contentLength);
+    response.setHeader("Cache-Control", "private, no-store");
+    return response.end(Buffer.from(object.body));
   }
 
   @Post("group-avatars/:groupId/upload")
@@ -99,13 +103,20 @@ export class FileController {
     if (!file) throw new BusinessError("BAD_REQUEST");
     const actorId = getAuthUser(req).id;
     const current = await this.conversationService.getById(groupId, actorId);
+    if (current.myRole !== "ADMIN") throw new BusinessError("FORBIDDEN");
     const avatarUrl = await this.fileService.uploadGroupAvatar(actorId, groupId, file);
     try {
       const updated = await this.conversationService.updateGroupAvatar(groupId, actorId, avatarUrl);
-      await this.fileService.deleteGroupAvatarObject(groupId, current.avatarUrl);
       return ok(updated);
     } catch (error) {
-      await this.fileService.deleteGroupAvatarObject(groupId, avatarUrl).catch(() => undefined);
+      try {
+        const check = await this.conversationService.getById(groupId, actorId);
+        if (check.avatarUrl !== avatarUrl) {
+          await this.fileService.deleteGroupAvatarObject(groupId, avatarUrl);
+        }
+      } catch {
+        await this.fileService.deleteGroupAvatarObject(groupId, avatarUrl).catch(() => undefined);
+      }
       throw error;
     }
   }

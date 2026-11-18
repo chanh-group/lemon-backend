@@ -87,7 +87,7 @@ describe("FileController", () => {
     const uploadGroupAvatar = vi.fn().mockResolvedValue(avatarUrl);
     const deleteGroupAvatarObject = vi.fn().mockResolvedValue(undefined);
     const updateGroupAvatar = vi.fn().mockResolvedValue({ id: groupId, avatarUrl });
-    const getById = vi.fn().mockResolvedValue({ avatarUrl: null });
+    const getById = vi.fn().mockResolvedValue({ myRole: "ADMIN", avatarUrl: null });
     const c = new FileController(
       { uploadGroupAvatar, deleteGroupAvatarObject } as unknown as FileService,
       new MemoryRateLimiter(),
@@ -97,30 +97,40 @@ describe("FileController", () => {
 
     const result = await c.uploadGroupAvatar({ user: { id: "user-1" } }, groupId, file);
 
-    expect(uploadGroupAvatar).toHaveBeenCalledWith("user-1", groupId, file);
     expect(getById).toHaveBeenCalledWith(groupId, "user-1");
+    expect(uploadGroupAvatar).toHaveBeenCalledWith("user-1", groupId, file);
     expect(updateGroupAvatar).toHaveBeenCalledWith(groupId, "user-1", avatarUrl);
-    expect(deleteGroupAvatarObject).toHaveBeenCalledWith(groupId, null);
     expect(result.data).toEqual({ id: groupId, avatarUrl });
   });
 
-  it("redirects the current group photo to a fresh storage URL", async () => {
+  it("serves private group avatar bytes with auth check and no-store headers", async () => {
     const groupId = "0193a2b1-0000-7000-8000-000000000010";
     const fileName = "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b.png";
-    const downloadUrl = "https://s3.example/signed-group-avatar";
-    const getGroupAvatarDownloadUrl = vi.fn().mockResolvedValue(downloadUrl);
-    const redirect = vi.fn();
+    const avatarData = {
+      body: new Uint8Array([1, 2, 3]),
+      contentType: "image/png",
+      contentLength: 3,
+    };
+    const getGroupAvatar = vi.fn().mockResolvedValue(avatarData);
+    const setHeader = vi.fn();
+    const end = vi.fn();
     const c = new FileController(
-      { getGroupAvatarDownloadUrl } as unknown as FileService,
+      { getGroupAvatar } as unknown as FileService,
       new MemoryRateLimiter(),
       { findById: vi.fn() } as unknown as UserService,
       { updateGroupAvatar: vi.fn() } as unknown as ConversationService,
     );
 
-    await c.getGroupAvatar(groupId, fileName, { redirect } as unknown as Response);
+    await c.getGroupAvatar({ user: { id: "user-1" } }, groupId, fileName, {
+      setHeader,
+      end,
+    } as unknown as Response);
 
-    expect(getGroupAvatarDownloadUrl).toHaveBeenCalledWith(groupId, fileName);
-    expect(redirect).toHaveBeenCalledWith(302, downloadUrl);
+    expect(getGroupAvatar).toHaveBeenCalledWith("user-1", groupId, fileName);
+    expect(setHeader).toHaveBeenCalledWith("Content-Type", "image/png");
+    expect(setHeader).toHaveBeenCalledWith("Content-Length", 3);
+    expect(setHeader).toHaveBeenCalledWith("Cache-Control", "private, no-store");
+    expect(end).toHaveBeenCalledWith(Buffer.from(avatarData.body));
   });
 
   it("handles uploadFile fallback endpoint", async () => {

@@ -70,6 +70,7 @@
   "VALIDATION_UUID_TARGET_USER": "targetUserId must be a valid UUID",
   "VALIDATION_UUID_FRIEND_USER": "userId must be a valid UUID",
   "VALIDATION_UUID_CLIENT_MSG": "clientMsgId must be a valid UUID",
+  "VALIDATION_REQUIRED_CLIENT_MSG": "clientMsgId is required",
   "VALIDATION_UUID_REPLY_TO": "replyToId must be a valid UUID",
   "VALIDATION_UUID_LAST_READ": "lastReadMessageId must be a valid UUID",
   "VALIDATION_MESSAGE_BODY_REQUIRED": "Text message body is required",

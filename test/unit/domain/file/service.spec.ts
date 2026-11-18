@@ -21,6 +21,7 @@ describe("FileService", () => {
     (params: { objectKey: string; body: Buffer; mimeType: string }) => Promise<void>
   >;
   let headObjectMock: Mock;
+  let getObjectMock: Mock;
   let presignGetMock: Mock;
   let isParticipantMock: Mock;
   let findByIdMock: Mock;
@@ -31,6 +32,7 @@ describe("FileService", () => {
       presignPut: presignPutMock,
       putObject: putObjectMock,
       headObject: headObjectMock,
+      getObject: getObjectMock,
       presignGet: presignGetMock,
     }) as unknown as StorageService;
 
@@ -38,6 +40,11 @@ describe("FileService", () => {
     presignPutMock = vi.fn().mockResolvedValue({ uploadUrl: "https://s3.example/signed" });
     putObjectMock = vi.fn().mockResolvedValue(undefined);
     headObjectMock = vi.fn().mockResolvedValue({ contentLength: 1024, contentType: "image/png" });
+    getObjectMock = vi.fn().mockResolvedValue({
+      body: new Uint8Array([1, 2, 3]),
+      contentLength: 3,
+      contentType: "image/png",
+    });
     presignGetMock = vi.fn().mockResolvedValue({ downloadUrl: "https://s3.example/avatar" });
     isParticipantMock = vi.fn().mockResolvedValue(true);
     findByIdMock = vi.fn().mockResolvedValue({ kind: "GROUP", myRole: "ADMIN" });
@@ -51,9 +58,9 @@ describe("FileService", () => {
 
   afterEach(() => vi.unstubAllEnvs());
 
-  it("uploads an avatar for an active group member and gives it a group-scoped URL", async () => {
+  it("uploads an avatar for an active group admin and gives it a group-scoped URL", async () => {
     vi.stubEnv("API_PUBLIC_URL", "https://api.example.com");
-    findByIdMock.mockResolvedValueOnce({ kind: "GROUP", myRole: "MEMBER" });
+    findByIdMock.mockResolvedValueOnce({ kind: "GROUP", myRole: "ADMIN" });
     const groupId = "0193a2b1-0000-7000-8000-000000000010";
     const file = { buffer: Buffer.from("image"), size: 5, mimetype: "image/png" };
 
@@ -63,6 +70,16 @@ describe("FileService", () => {
     expect(objectKey).toMatch(new RegExp(`^group-avatars/${groupId}/[0-9a-f-]+\\.png$`));
     expect(url).toBe(groupAvatarUrlForObjectKey(groupId, objectKey));
     expect(findByIdMock).toHaveBeenCalledWith(groupId, "user-1");
+  });
+
+  it("rejects group avatar upload for a regular member", async () => {
+    findByIdMock.mockResolvedValueOnce({ kind: "GROUP", myRole: "MEMBER" });
+    const groupId = "0193a2b1-0000-7000-8000-000000000010";
+    const file = { buffer: Buffer.from("image"), size: 5, mimetype: "image/png" };
+
+    await expect(service.uploadGroupAvatar("user-1", groupId, file)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
   });
 
   it("does not store a group avatar for a nonmember", async () => {
@@ -77,31 +94,34 @@ describe("FileService", () => {
     expect(putObjectMock).not.toHaveBeenCalled();
   });
 
-  it("serves only the currently attached group avatar", async () => {
+  it("serves only the currently attached group avatar to active participants", async () => {
     vi.stubEnv("API_PUBLIC_URL", "https://api.example.com");
     const groupId = "0193a2b1-0000-7000-8000-000000000010";
     const fileName = "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b.png";
     const objectKey = `group-avatars/${groupId}/${fileName}`;
+
+    isParticipantMock.mockResolvedValueOnce(false);
+    await expect(service.getGroupAvatar("user-1", groupId, fileName)).rejects.toMatchObject({
+      code: "NOT_PARTICIPANT",
+    });
+
     getGroupAvatarUrlMock.mockResolvedValueOnce(null);
-    await expect(service.getGroupAvatarDownloadUrl(groupId, fileName)).rejects.toMatchObject({
+    await expect(service.getGroupAvatar("user-1", groupId, fileName)).rejects.toMatchObject({
       code: "CONVERSATION_NOT_FOUND",
     });
-    expect(headObjectMock).not.toHaveBeenCalled();
 
     const newerFileName = "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6c.png";
     getGroupAvatarUrlMock.mockResolvedValueOnce(
       groupAvatarUrlForObjectKey(groupId, `group-avatars/${groupId}/${newerFileName}`),
     );
-    await expect(service.getGroupAvatarDownloadUrl(groupId, fileName)).rejects.toMatchObject({
+    await expect(service.getGroupAvatar("user-1", groupId, fileName)).rejects.toMatchObject({
       code: "CONVERSATION_NOT_FOUND",
     });
-    expect(headObjectMock).not.toHaveBeenCalled();
 
     getGroupAvatarUrlMock.mockResolvedValueOnce(groupAvatarUrlForObjectKey(groupId, objectKey));
-    expect(await service.getGroupAvatarDownloadUrl(groupId, fileName)).toBe(
-      "https://s3.example/avatar",
-    );
-    expect(presignGetMock).toHaveBeenCalledWith(expect.objectContaining({ objectKey }));
+    const result = await service.getGroupAvatar("user-1", groupId, fileName);
+    expect(result.contentType).toBe("image/png");
+    expect(getObjectMock).toHaveBeenCalledWith(objectKey);
   });
 
   it("presigns an image upload with a server-generated user-scoped key", async () => {

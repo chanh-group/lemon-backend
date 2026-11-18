@@ -258,7 +258,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       const response = await request(app.getHttpServer())
         .post(`/api/conversations/${conversationId}/messages`)
         .set("Authorization", `Bearer ${tokenA}`)
-        .send({ body, kind: "TEXT" })
+        .send({ body, kind: "TEXT", clientMsgId: uuidv7() })
         .expect(201);
       return response.body.data.id as string;
     };
@@ -297,6 +297,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       .set("Authorization", `Bearer ${tokenA}`)
       .send({
         body: xssPayload,
+        clientMsgId: uuidv7(),
         kind: "TEXT",
       })
       .expect(201);
@@ -336,7 +337,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     const sent = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .set("Authorization", `Bearer ${tokenA}`)
-      .send({ body: "Only one side will hide this", kind: "TEXT" })
+      .send({ body: "Only one side will hide this", clientMsgId: uuidv7(), kind: "TEXT" })
       .expect(201);
     const hiddenId = sent.body.data.id as string;
 
@@ -465,11 +466,23 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     }
   });
 
+  it("POST /api/conversations/:id/messages - should reject request without clientMsgId with 422 VALIDATION_ERROR", async () => {
+    const res = await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/messages`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ body: "Valid body without clientMsgId" })
+      .expect(422);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.code).toBe("VALIDATION_ERROR");
+    expect(res.body.message).toContain("clientMsgId");
+  });
+
   it("POST /api/conversations/:id/messages - should reject empty text message with 422 VALIDATION_ERROR", async () => {
     const res = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .set("Authorization", `Bearer ${tokenA}`)
-      .send({ body: "   " })
+      .send({ body: "   ", clientMsgId: uuidv7() })
       .expect(422);
 
     expect(res.body.success).toBe(false);
@@ -482,7 +495,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     const res = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .set("Authorization", `Bearer ${tokenA}`)
-      .send({ body: longBody })
+      .send({ body: longBody, clientMsgId: uuidv7() })
       .expect(422);
 
     expect(res.body.success).toBe(false);
@@ -516,7 +529,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     const sendRes = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .set("Authorization", `Bearer ${tokenA}`)
-      .send({ body: "Tin nhắn của User A" })
+      .send({ body: "Tin nhắn của User A", clientMsgId: uuidv7() })
       .expect(201);
 
     const freshMsgId = sendRes.body.data.id;
@@ -579,7 +592,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     const sendRes = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .set("Authorization", `Bearer ${tokenA}`)
-      .send({ body: "Tin nhắn sắp bị thu hồi" })
+      .send({ body: "Tin nhắn sắp bị thu hồi", clientMsgId: uuidv7() })
       .expect(201);
 
     const targetMsgId = sendRes.body.data.id;
@@ -603,7 +616,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     const sent = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .set("Authorization", `Bearer ${tokenA}`)
-      .send({ body: "Hide after block" })
+      .send({ body: "Hide after block", clientMsgId: uuidv7() })
       .expect(201);
     const [userLow, userHigh] = [userA, userB].sort();
     await db

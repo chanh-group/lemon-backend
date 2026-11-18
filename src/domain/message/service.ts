@@ -250,22 +250,19 @@ export class MessageService {
 
     if (isNew) {
       // replyTarget is viewer-dependent: a user can hide a message locally or
-      // be below the group's history boundary. Never broadcast an enriched
-      // payload to a shared conversation room.
+      // be below the group's history boundary. Realtime events broadcast
+      // without replyTarget content to prevent cross-epoch leaks; clients
+      // fetch replyTarget on-demand via the authenticated quote endpoint if not cached.
       const participantIds = await this.convRepo.getParticipantUserIds(conversationId);
-      const replyVisibleTo = response.replyToId
-        ? new Set(
-            await this.convRepo.getMessageRecipientUserIds(conversationId, response.replyToId),
-          )
-        : null;
       const recipientPayloads = participantIds.map((participantId) => ({
         userId: participantId,
-        payload:
-          !response.replyToId || replyVisibleTo?.has(participantId)
-            ? response
-            : { ...response, replyTarget: null },
+        payload: { ...response, replyTarget: null },
       }));
-      this.realtimeService.emitNewMessage(conversationId, response, recipientPayloads);
+      this.realtimeService.emitNewMessage(
+        conversationId,
+        { ...response, replyTarget: null },
+        recipientPayloads,
+      );
     }
 
     return response;
@@ -328,6 +325,25 @@ export class MessageService {
       }
     }
     return response;
+  }
+
+  async getReplyTarget(
+    userId: string,
+    conversationId: string,
+    messageId: string,
+  ): Promise<ReplyTargetResponse> {
+    const isMember = await this.convRepo.isParticipant(conversationId, userId);
+    if (!isMember) {
+      throw new BusinessError("NOT_PARTICIPANT");
+    }
+    const [target] = await this.messageRepo.findReplyTargets(conversationId, [messageId], userId);
+    if (!target) {
+      throw new BusinessError("MESSAGE_NOT_FOUND");
+    }
+    const replyTarget = this.replyTarget(target);
+    const [replySender] = await this.messageRepo.findSenderProfiles([target.senderId]);
+    if (replySender) replyTarget.sender = replySender;
+    return replyTarget;
   }
 
   private async assertDirectConversationAllowed(

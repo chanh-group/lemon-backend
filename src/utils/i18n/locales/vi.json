@@ -70,6 +70,7 @@
   "VALIDATION_UUID_TARGET_USER": "targetUserId phải là định dạng UUID hợp lệ",
   "VALIDATION_UUID_FRIEND_USER": "userId phải là định dạng UUID hợp lệ",
   "VALIDATION_UUID_CLIENT_MSG": "clientMsgId phải là định dạng UUID hợp lệ",
+  "VALIDATION_REQUIRED_CLIENT_MSG": "clientMsgId là bắt buộc",
   "VALIDATION_UUID_REPLY_TO": "replyToId phải là định dạng UUID hợp lệ",
   "VALIDATION_UUID_LAST_READ": "lastReadMessageId phải là định dạng UUID hợp lệ",
   "VALIDATION_MESSAGE_BODY_REQUIRED": "Nội dung tin nhắn văn bản không được để trống",

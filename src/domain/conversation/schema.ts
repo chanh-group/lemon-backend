@@ -2,8 +2,10 @@ import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   bigint,
+  boolean,
   check,
   index,
+  integer,
   pgEnum,
   pgTable,
   primaryKey,
@@ -18,6 +20,11 @@ import { users } from "../user/schema.js";
 
 export const conversationKindEnum = pgEnum("conversation_kind", ["DIRECT", "GROUP"]);
 export const participantRoleEnum = pgEnum("participant_role", ["MEMBER", "ADMIN"]);
+export const avatarCleanupStatusEnum = pgEnum("avatar_cleanup_status", [
+  "PENDING",
+  "PROCESSING",
+  "FAILED",
+]);
 
 export const conversations = pgTable(
   "conversations",
@@ -79,6 +86,10 @@ export const conversationParticipants = pgTable(
       // turning a late member into a full-history viewer.
       onDelete: "restrict",
     }),
+    historyBoundaryWasEmpty: boolean("history_boundary_was_empty").notNull().default(false),
+    joinGeneration: bigint("join_generation", { mode: "bigint" })
+      .notNull()
+      .default(sql`1`),
   },
   (table) => [
     primaryKey({ columns: [table.conversationId, table.userId] }),
@@ -89,7 +100,26 @@ export const conversationParticipants = pgTable(
   ],
 );
 
+export const avatarCleanupJobs = pgTable(
+  "avatar_cleanup_jobs",
+  {
+    id: uuidV7("id").primaryKey(),
+    conversationId: uuid("conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
+    }),
+    objectKey: text("object_key").notNull().unique(),
+    status: avatarCleanupStatusEnum("status").notNull().default("PENDING"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: created("created_at"),
+    updatedAt: updated("updated_at"),
+  },
+  (table) => [index("avatar_cleanup_status_idx").on(table.status, table.createdAt)],
+);
+
 export type Conversation = typeof conversations.$inferSelect;
 export type NewConversation = typeof conversations.$inferInsert;
 export type ConversationParticipant = typeof conversationParticipants.$inferSelect;
 export type NewConversationParticipant = typeof conversationParticipants.$inferInsert;
+export type AvatarCleanupJob = typeof avatarCleanupJobs.$inferSelect;
+export type NewAvatarCleanupJob = typeof avatarCleanupJobs.$inferInsert;

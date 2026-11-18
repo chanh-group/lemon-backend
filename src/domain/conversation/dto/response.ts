@@ -20,6 +20,7 @@ export interface ConversationResponse {
   avatarUrl?: string | null;
   memberCount?: number;
   myRole?: "ADMIN" | "MEMBER";
+  joinGeneration?: string;
 }
 
 export interface ConversationMemberResponse {

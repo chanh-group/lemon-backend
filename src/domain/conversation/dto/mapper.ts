@@ -25,6 +25,7 @@ export function toConversationResponse(conv: ConversationWithPartner): Conversat
       avatarUrl: conv.avatarUrl ?? null,
       memberCount: conv.memberCount ?? 0,
       myRole: conv.myRole ?? "MEMBER",
+      ...(conv.joinGeneration !== undefined && { joinGeneration: String(conv.joinGeneration) }),
     }),
   };
 }

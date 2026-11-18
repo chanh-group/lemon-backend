@@ -192,7 +192,7 @@ describe("Group chat across two Redis adapter nodes", () => {
     const old = await request(nodeA.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .auth(tokens.get(creatorId)!, { type: "bearer" })
-      .send({ body: "secret before join" })
+      .send({ body: "secret before join", clientMsgId: uuidv7() })
       .expect(201);
 
     await request(nodeA.getHttpServer())
@@ -205,7 +205,7 @@ describe("Group chat across two Redis adapter nodes", () => {
     await request(nodeA.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .auth(tokens.get(creatorId)!, { type: "bearer" })
-      .send({ body: "reply after join", replyToId: old.body.data.id })
+      .send({ body: "reply after join", replyToId: old.body.data.id, clientMsgId: uuidv7() })
       .expect(201);
     const received = await lateReply;
     expect(received.body).toBe("reply after join");
@@ -313,7 +313,7 @@ describe("Group chat across two Redis adapter nodes", () => {
       await request(nodeA.getHttpServer())
         .post(`/api/conversations/${conversationId}/messages`)
         .auth(tokens.get(creatorId)!, { type: "bearer" })
-        .send({ body: "after removal" })
+        .send({ body: "after removal", clientMsgId: uuidv7() })
         .expect(201);
       expect((await creatorMessage).body).toBe("after removal");
       await new Promise((resolve) => setTimeout(resolve, 500));

@@ -142,12 +142,16 @@ describe("ConversationPgRepository group avatar", () => {
     expect(lookup.params).toEqual([groupId, "GROUP"]);
   });
 
-  it("writes a new avatar when the actor is an active group member", async () => {
-    const lock = vi.fn().mockResolvedValue([]);
-    const roleLimit = vi.fn().mockResolvedValue([{ role: "MEMBER" }]);
+  it("writes a new avatar when the actor is an active group admin", async () => {
+    const groupLimit = vi
+      .fn()
+      .mockResolvedValue([{ id: convRow.id, kind: "GROUP", deletedAt: null, avatarUrl: null }]);
+    const roleLimit = vi.fn().mockResolvedValue([{ role: "ADMIN" }]);
     const select = vi
       .fn()
-      .mockReturnValueOnce({ from: () => ({ where: () => ({ for: lock }) }) })
+      .mockReturnValueOnce({
+        from: () => ({ where: () => ({ for: () => ({ limit: groupLimit }) }) }),
+      })
       .mockReturnValueOnce({ from: () => ({ where: () => ({ limit: roleLimit }) }) });
     const updateWhere = vi.fn().mockResolvedValue([]);
     const set = vi.fn().mockReturnValue({ where: updateWhere });
@@ -356,8 +360,22 @@ describe("ConversationPgRepository.createDirectConversation", () => {
     expect(valuesMock).toHaveBeenNthCalledWith(1, { kind: "DIRECT", directKey });
     expect(insertMock).toHaveBeenNthCalledWith(2, conversationParticipants);
     expect(valuesMock).toHaveBeenNthCalledWith(2, [
-      { conversationId: newConvRow.id, userId: userAId, role: "MEMBER" },
-      { conversationId: newConvRow.id, userId: userBId, role: "MEMBER" },
+      {
+        conversationId: newConvRow.id,
+        userId: userAId,
+        role: "MEMBER",
+        historyBoundaryMessageId: null,
+        historyBoundaryWasEmpty: true,
+        joinGeneration: 1n,
+      },
+      {
+        conversationId: newConvRow.id,
+        userId: userBId,
+        role: "MEMBER",
+        historyBoundaryMessageId: null,
+        historyBoundaryWasEmpty: true,
+        joinGeneration: 1n,
+      },
     ]);
     expect(onConflictDoNothingMock).toHaveBeenCalledTimes(1);
   });
@@ -375,8 +393,22 @@ describe("ConversationPgRepository.createDirectConversation", () => {
     expect(valuesMock).toHaveBeenNthCalledWith(1, { kind: "DIRECT", directKey });
     expect(insertMock).toHaveBeenNthCalledWith(2, conversationParticipants);
     expect(valuesMock).toHaveBeenNthCalledWith(2, [
-      { conversationId: newConvRow.id, userId: userAId, role: "MEMBER" },
-      { conversationId: newConvRow.id, userId: userBId, role: "MEMBER" },
+      {
+        conversationId: newConvRow.id,
+        userId: userAId,
+        role: "MEMBER",
+        historyBoundaryMessageId: null,
+        historyBoundaryWasEmpty: true,
+        joinGeneration: 1n,
+      },
+      {
+        conversationId: newConvRow.id,
+        userId: userBId,
+        role: "MEMBER",
+        historyBoundaryMessageId: null,
+        historyBoundaryWasEmpty: true,
+        joinGeneration: 1n,
+      },
     ]);
   });
 });

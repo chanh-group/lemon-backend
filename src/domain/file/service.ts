@@ -171,24 +171,28 @@ export class FileService {
     return downloadUrl;
   }
 
-  async getGroupAvatarDownloadUrl(groupId: string, fileName: string): Promise<string> {
-    if (!isAvatarFileName(fileName) || !this.conversations)
+  async getGroupAvatar(
+    userId: string,
+    groupId: string,
+    fileName: string,
+  ): Promise<{ body: Uint8Array; contentType: string; contentLength: number }> {
+    if (!isAvatarFileName(fileName) || !this.conversations) {
       throw new BusinessError("CONVERSATION_NOT_FOUND");
+    }
+    const isParticipant = await this.conversations.isParticipant(groupId, userId);
+    if (!isParticipant) {
+      throw new BusinessError("NOT_PARTICIPANT");
+    }
     const currentUrl = await this.conversations.getGroupAvatarUrl(groupId);
     const objectKey = groupAvatarObjectKeyFromUrl(currentUrl ?? "", groupId);
-    if (objectKey !== `group-avatars/${groupId}/${fileName}`)
+    if (objectKey !== `group-avatars/${groupId}/${fileName}`) {
       throw new BusinessError("CONVERSATION_NOT_FOUND");
-    const object = await this.storage.headObject(objectKey);
+    }
+    const object = await this.storage.getObject(objectKey);
     if (!object) throw new BusinessError("CONVERSATION_NOT_FOUND");
     validateUpload("USER_AVATAR", object.contentLength, object.contentType);
     if (object.contentLength < 1) throw new BusinessError("FILE_TYPE_NOT_ALLOWED");
-    const { downloadUrl } = await this.storage.presignGet({
-      objectKey,
-      fileName,
-      disposition: "inline",
-      mimeType: object.contentType,
-    });
-    return downloadUrl;
+    return object;
   }
 
   async uploadGroupAvatar(
@@ -198,7 +202,8 @@ export class FileService {
   ): Promise<string> {
     if (!this.conversations) throw new BusinessError("FORBIDDEN");
     const group = await this.conversations.findById(groupId, userId);
-    if (group?.kind !== "GROUP") throw new BusinessError("NOT_PARTICIPANT");
+    if (!group || group.kind !== "GROUP") throw new BusinessError("NOT_PARTICIPANT");
+    if (group.myRole !== "ADMIN") throw new BusinessError("FORBIDDEN");
     if (file.size < 1) throw new BusinessError("FILE_TYPE_NOT_ALLOWED");
     validateUpload("USER_AVATAR", file.size, file.mimetype);
     const ext = MIME_EXTENSION_MAP[file.mimetype];

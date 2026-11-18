@@ -176,6 +176,13 @@
       "when": 1794924171714,
       "tag": "0024_fine_jasper_sitwell",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1795006499622,
+      "tag": "0025_chubby_enchantress",
+      "breakpoints": true
     }
   ]
 }

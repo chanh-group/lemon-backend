@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, asc, desc, eq, inArray, isNull, ne, notExists, or, sql } from "drizzle-orm";
+import { v7 as uuidv7 } from "uuid";
+import { and, asc, desc, eq, inArray, isNull, lt, ne, notExists, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
@@ -13,24 +14,27 @@ import type {
   CreatedGroupResult,
   GroupCreateRequestMatch,
 } from "./repository.js";
-import { conversationParticipants, conversations } from "./schema.js";
+import { avatarCleanupJobs, conversationParticipants, conversations } from "./schema.js";
 import { canonicalPair, toCursorPage } from "../shared.js";
 import { GROUP_MAX_MEMBERS } from "./constants.js";
+import { groupAvatarObjectKeyFromUrl } from "../../utils/storage/avatar.js";
 
 const partnerParticipants = alias(conversationParticipants, "partner_participants");
 const lastSender = alias(users, "last_message_sender");
 
 function visiblePreview(userId: string) {
   const boundaryId = sql`(SELECT cp.history_boundary_message_id FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
+  const wasEmpty = sql`(SELECT cp.history_boundary_was_empty FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
   const joinedAt = sql`(SELECT cp.joined_at FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
   return sql<string | null>`CASE WHEN ${boundaryId} IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM messages boundary_msg
       WHERE boundary_msg.id = ${boundaryId}
         AND boundary_msg.conversation_id = ${conversations.id}
         AND ROW(${conversations.lastMessageAt}, ${conversations.lastMessageId}) > ROW(boundary_msg.created_at, boundary_msg.id))
-    OR ${boundaryId} IS NULL
+    OR (${boundaryId} IS NULL
+      AND ${wasEmpty} = false
       AND ${conversations.lastMessageAt} IS NOT NULL
-      AND ${conversations.lastMessageAt} <= ${joinedAt}
+      AND ${conversations.lastMessageAt} <= ${joinedAt})
     THEN NULL ELSE CASE WHEN EXISTS (
     SELECT 1 FROM message_hidden_for_users h
     WHERE h.message_id = ${conversations.lastMessageId} AND h.user_id = ${userId}::uuid
@@ -46,7 +50,8 @@ function visiblePreview(userId: string) {
         (${boundaryId} IS NOT NULL AND ROW(m.created_at, m.id) >
           (SELECT bm.created_at, bm.id FROM messages bm
             WHERE bm.id = ${boundaryId} AND bm.conversation_id = ${conversations.id}))
-        OR (${boundaryId} IS NULL AND m.created_at > ${joinedAt})
+        OR (${boundaryId} IS NULL AND ${wasEmpty} = true)
+        OR (${boundaryId} IS NULL AND ${wasEmpty} = false AND m.created_at > ${joinedAt})
       )
       AND NOT EXISTS (SELECT 1 FROM message_hidden_for_users h
         WHERE h.message_id = m.id AND h.user_id = ${userId}::uuid)
@@ -56,15 +61,17 @@ function visiblePreview(userId: string) {
 
 function visibleSenderId(userId: string) {
   const boundaryId = sql`(SELECT cp.history_boundary_message_id FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
+  const wasEmpty = sql`(SELECT cp.history_boundary_was_empty FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
   const joinedAt = sql`(SELECT cp.joined_at FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
   return sql<string | null>`CASE WHEN ${boundaryId} IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM messages boundary_msg
       WHERE boundary_msg.id = ${boundaryId}
         AND boundary_msg.conversation_id = ${conversations.id}
         AND ROW(${conversations.lastMessageAt}, ${conversations.lastMessageId}) > ROW(boundary_msg.created_at, boundary_msg.id))
-    OR ${boundaryId} IS NULL
+    OR (${boundaryId} IS NULL
+      AND ${wasEmpty} = false
       AND ${conversations.lastMessageAt} IS NOT NULL
-      AND ${conversations.lastMessageAt} <= ${joinedAt}
+      AND ${conversations.lastMessageAt} <= ${joinedAt})
     THEN NULL ELSE CASE WHEN EXISTS (
     SELECT 1 FROM message_hidden_for_users h
     WHERE h.message_id = ${conversations.lastMessageId} AND h.user_id = ${userId}::uuid
@@ -75,7 +82,8 @@ function visibleSenderId(userId: string) {
         (${boundaryId} IS NOT NULL AND ROW(m.created_at, m.id) >
           (SELECT bm.created_at, bm.id FROM messages bm
             WHERE bm.id = ${boundaryId} AND bm.conversation_id = ${conversations.id}))
-        OR (${boundaryId} IS NULL AND m.created_at > ${joinedAt})
+        OR (${boundaryId} IS NULL AND ${wasEmpty} = true)
+        OR (${boundaryId} IS NULL AND ${wasEmpty} = false AND m.created_at > ${joinedAt})
       )
       AND NOT EXISTS (SELECT 1 FROM message_hidden_for_users h
         WHERE h.message_id = m.id AND h.user_id = ${userId}::uuid)
@@ -85,15 +93,17 @@ function visibleSenderId(userId: string) {
 
 function visibleMessageAt(userId: string) {
   const boundaryId = sql`(SELECT cp.history_boundary_message_id FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
+  const wasEmpty = sql`(SELECT cp.history_boundary_was_empty FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
   const joinedAt = sql`(SELECT cp.joined_at FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.user_id = ${userId}::uuid)`;
   return sql<Date | null>`CASE WHEN ${boundaryId} IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM messages boundary_msg
       WHERE boundary_msg.id = ${boundaryId}
         AND boundary_msg.conversation_id = ${conversations.id}
         AND ROW(${conversations.lastMessageAt}, ${conversations.lastMessageId}) > ROW(boundary_msg.created_at, boundary_msg.id))
-    OR ${boundaryId} IS NULL
+    OR (${boundaryId} IS NULL
+      AND ${wasEmpty} = false
       AND ${conversations.lastMessageAt} IS NOT NULL
-      AND ${conversations.lastMessageAt} <= ${joinedAt}
+      AND ${conversations.lastMessageAt} <= ${joinedAt})
     THEN NULL ELSE CASE WHEN EXISTS (
     SELECT 1 FROM message_hidden_for_users h
     WHERE h.message_id = ${conversations.lastMessageId} AND h.user_id = ${userId}::uuid
@@ -104,7 +114,8 @@ function visibleMessageAt(userId: string) {
         (${boundaryId} IS NOT NULL AND ROW(m.created_at, m.id) >
           (SELECT bm.created_at, bm.id FROM messages bm
             WHERE bm.id = ${boundaryId} AND bm.conversation_id = ${conversations.id}))
-        OR (${boundaryId} IS NULL AND m.created_at > ${joinedAt})
+        OR (${boundaryId} IS NULL AND ${wasEmpty} = true)
+        OR (${boundaryId} IS NULL AND ${wasEmpty} = false AND m.created_at > ${joinedAt})
       )
       AND NOT EXISTS (SELECT 1 FROM message_hidden_for_users h
         WHERE h.message_id = m.id AND h.user_id = ${userId}::uuid)
@@ -161,11 +172,21 @@ export class ConversationPgRepository implements ConversationRepository {
           })
           .returning();
         await tx.insert(conversationParticipants).values([
-          { conversationId: group.id, userId: input.creatorId, role: "ADMIN" },
+          {
+            conversationId: group.id,
+            userId: input.creatorId,
+            role: "ADMIN",
+            historyBoundaryMessageId: null,
+            historyBoundaryWasEmpty: true,
+            joinGeneration: 1n,
+          },
           ...input.memberIds.map((userId) => ({
             conversationId: group.id,
             userId,
             role: "MEMBER" as const,
+            historyBoundaryMessageId: null,
+            historyBoundaryWasEmpty: true,
+            joinGeneration: 1n,
           })),
         ]);
         return {
@@ -177,6 +198,7 @@ export class ConversationPgRepository implements ConversationRepository {
             avatarUrl: group.avatarUrl,
             memberCount: input.memberIds.length + 1,
             myRole: "ADMIN" as const,
+            joinGeneration: "1",
             lastMessagePreview: null,
             lastMessageAt: null,
             createdAt: group.createdAt,
@@ -282,6 +304,15 @@ export class ConversationPgRepository implements ConversationRepository {
       if (usersToAdd.length !== memberIds.length || usersToAdd.some((user) => !user.isActive)) {
         throw new BusinessError("USER_NOT_FOUND");
       }
+      const [latestMsg] = await tx
+        .select({ id: messages.id })
+        .from(messages)
+        .where(eq(messages.conversationId, conversationId))
+        .orderBy(desc(messages.createdAt), desc(messages.id))
+        .limit(1);
+      const boundaryId = latestMsg?.id ?? null;
+      const boundaryWasEmpty = !latestMsg;
+
       await tx
         .insert(conversationParticipants)
         .values(
@@ -289,7 +320,9 @@ export class ConversationPgRepository implements ConversationRepository {
             conversationId,
             userId,
             role: "MEMBER" as const,
-            historyBoundaryMessageId: group.lastMessageId,
+            historyBoundaryMessageId: boundaryId,
+            historyBoundaryWasEmpty: boundaryWasEmpty,
+            joinGeneration: 1n,
           })),
         )
         .onConflictDoUpdate({
@@ -298,9 +331,11 @@ export class ConversationPgRepository implements ConversationRepository {
             role: "MEMBER",
             joinedAt: sql`clock_timestamp()`,
             leftAt: null,
-            lastReadMessageId: group.lastMessageId,
+            lastReadMessageId: boundaryId,
             lastReadAt: sql`clock_timestamp()`,
-            historyBoundaryMessageId: group.lastMessageId,
+            historyBoundaryMessageId: boundaryId,
+            historyBoundaryWasEmpty: boundaryWasEmpty,
+            joinGeneration: sql`${conversationParticipants.joinGeneration} + 1`,
           },
           where: sql`${conversationParticipants.leftAt} IS NOT NULL`,
         });
@@ -317,7 +352,7 @@ export class ConversationPgRepository implements ConversationRepository {
         lastMessagePreview: group.lastMessagePreview,
         lastMessageAt: group.lastMessageAt,
         createdAt: group.createdAt,
-        myRole: "MEMBER" as const,
+        myRole: "ADMIN" as const,
         memberCount: active.length + memberIds.length,
       };
     });
@@ -408,11 +443,20 @@ export class ConversationPgRepository implements ConversationRepository {
     changes: { title?: string; avatarUrl?: string },
   ): Promise<void> {
     await this.db.transaction(async (tx) => {
-      await tx
-        .select({ id: conversations.id })
+      const [group] = await tx
+        .select({
+          id: conversations.id,
+          avatarUrl: conversations.avatarUrl,
+          kind: conversations.kind,
+          deletedAt: conversations.deletedAt,
+        })
         .from(conversations)
         .where(eq(conversations.id, conversationId))
-        .for("update");
+        .for("update")
+        .limit(1);
+      if (!group || group.kind !== "GROUP" || group.deletedAt) {
+        throw new BusinessError("CONVERSATION_NOT_FOUND");
+      }
       const [actor] = await tx
         .select({ role: conversationParticipants.role })
         .from(conversationParticipants)
@@ -425,6 +469,27 @@ export class ConversationPgRepository implements ConversationRepository {
         )
         .limit(1);
       if (!actor) throw new BusinessError("NOT_PARTICIPANT");
+      if (actor.role !== "ADMIN") throw new BusinessError("FORBIDDEN");
+
+      if (
+        changes.avatarUrl !== undefined &&
+        group.avatarUrl &&
+        group.avatarUrl !== changes.avatarUrl
+      ) {
+        const oldObjectKey = groupAvatarObjectKeyFromUrl(group.avatarUrl, conversationId);
+        if (oldObjectKey) {
+          await tx
+            .insert(avatarCleanupJobs)
+            .values({
+              id: uuidv7(),
+              conversationId,
+              objectKey: oldObjectKey,
+              status: "PENDING",
+            })
+            .onConflictDoNothing();
+        }
+      }
+
       await tx
         .update(conversations)
         .set({ ...changes, updatedAt: sql`now()` })
@@ -536,7 +601,11 @@ export class ConversationPgRepository implements ConversationRepository {
   async disbandGroup(conversationId: string, actorId: string): Promise<string[]> {
     return this.db.transaction(async (tx) => {
       const [group] = await tx
-        .select({ kind: conversations.kind, deletedAt: conversations.deletedAt })
+        .select({
+          kind: conversations.kind,
+          deletedAt: conversations.deletedAt,
+          avatarUrl: conversations.avatarUrl,
+        })
         .from(conversations)
         .where(eq(conversations.id, conversationId))
         .for("update")
@@ -554,6 +623,22 @@ export class ConversationPgRepository implements ConversationRepository {
         );
       const actor = active.find((member) => member.userId === actorId);
       if (actor?.role !== "ADMIN") throw new BusinessError("FORBIDDEN");
+
+      if (group.avatarUrl) {
+        const oldObjectKey = groupAvatarObjectKeyFromUrl(group.avatarUrl, conversationId);
+        if (oldObjectKey) {
+          await tx
+            .insert(avatarCleanupJobs)
+            .values({
+              id: uuidv7(),
+              conversationId,
+              objectKey: oldObjectKey,
+              status: "PENDING",
+            })
+            .onConflictDoNothing();
+        }
+      }
+
       await tx
         .update(conversationParticipants)
         .set({ leftAt: sql`clock_timestamp()` })
@@ -647,7 +732,8 @@ export class ConversationPgRepository implements ConversationRepository {
               WHERE m.id = ${conversationParticipants.historyBoundaryMessageId}
                 AND m.conversation_id = ${conversationParticipants.conversationId}
             ))
-            OR (${conversationParticipants.historyBoundaryMessageId} IS NULL AND ${messages.createdAt} > ${conversationParticipants.joinedAt})
+            OR (${conversationParticipants.historyBoundaryMessageId} IS NULL AND ${conversationParticipants.historyBoundaryWasEmpty} = true)
+            OR (${conversationParticipants.historyBoundaryMessageId} IS NULL AND ${conversationParticipants.historyBoundaryWasEmpty} = false AND ${messages.createdAt} > ${conversationParticipants.joinedAt})
           )`,
         ),
       )
@@ -668,6 +754,11 @@ export class ConversationPgRepository implements ConversationRepository {
       )
       OR (
         ${conversationParticipants.historyBoundaryMessageId} IS NULL
+        AND ${conversationParticipants.historyBoundaryWasEmpty} = true
+      )
+      OR (
+        ${conversationParticipants.historyBoundaryMessageId} IS NULL
+        AND ${conversationParticipants.historyBoundaryWasEmpty} = false
         AND ${messages.createdAt} > ${conversationParticipants.joinedAt}
       )
     )`;
@@ -800,8 +891,22 @@ export class ConversationPgRepository implements ConversationRepository {
         await tx
           .insert(conversationParticipants)
           .values([
-            { conversationId: convId, userId: participantLow, role: "MEMBER" },
-            { conversationId: convId, userId: participantHigh, role: "MEMBER" },
+            {
+              conversationId: convId,
+              userId: participantLow,
+              role: "MEMBER",
+              historyBoundaryMessageId: null,
+              historyBoundaryWasEmpty: true,
+              joinGeneration: 1n,
+            },
+            {
+              conversationId: convId,
+              userId: participantHigh,
+              role: "MEMBER",
+              historyBoundaryMessageId: null,
+              historyBoundaryWasEmpty: true,
+              joinGeneration: 1n,
+            },
           ])
           .onConflictDoNothing();
 
@@ -877,6 +982,7 @@ export class ConversationPgRepository implements ConversationRepository {
         createdAt: conversations.createdAt,
         lastReadMessageId: conversationParticipants.lastReadMessageId,
         unreadRevision: sql<string>`${conversations.unreadRevision}::text`,
+        joinGeneration: sql<string>`${conversationParticipants.joinGeneration}::text`,
       })
       .from(conversationParticipants)
       .innerJoin(conversations, eq(conversationParticipants.conversationId, conversations.id))
@@ -950,6 +1056,8 @@ export class ConversationPgRepository implements ConversationRepository {
         myRole: conversationParticipants.role,
         memberCount: sql<number>`(SELECT count(*)::int FROM conversation_participants cp WHERE cp.conversation_id = ${conversations.id} AND cp.left_at IS NULL)`,
         historyBoundaryMessageId: conversationParticipants.historyBoundaryMessageId,
+        historyBoundaryWasEmpty: conversationParticipants.historyBoundaryWasEmpty,
+        joinGeneration: sql<string>`${conversationParticipants.joinGeneration}::text`,
         lastReadAt: conversationParticipants.lastReadAt,
       })
       .from(conversations)
@@ -1001,6 +1109,8 @@ export class ConversationPgRepository implements ConversationRepository {
       myRole: row.myRole,
       memberCount: row.memberCount,
       historyBoundaryMessageId: row.historyBoundaryMessageId,
+      historyBoundaryWasEmpty: row.historyBoundaryWasEmpty,
+      joinGeneration: row.joinGeneration,
       lastReadAt: row.lastReadAt,
       createdAt: row.createdAt,
       partner:
@@ -1085,6 +1195,7 @@ export class ConversationPgRepository implements ConversationRepository {
         .select({
           lastReadMessageId: conversationParticipants.lastReadMessageId,
           historyBoundaryMessageId: conversationParticipants.historyBoundaryMessageId,
+          historyBoundaryWasEmpty: conversationParticipants.historyBoundaryWasEmpty,
           joinedAt: conversationParticipants.joinedAt,
         })
         .from(conversationParticipants)
@@ -1143,7 +1254,11 @@ export class ConversationPgRepository implements ConversationRepository {
       ) {
         throw new BusinessError("BAD_REQUEST");
       }
-      if (!boundary && message.createdAt <= participant.joinedAt) {
+      if (
+        !boundary &&
+        !participant.historyBoundaryWasEmpty &&
+        message.createdAt <= participant.joinedAt
+      ) {
         throw new BusinessError("BAD_REQUEST");
       }
       const [lastRead] = participant.lastReadMessageId
@@ -1204,7 +1319,8 @@ export class ConversationPgRepository implements ConversationRepository {
               WHERE m.id = ${conversationParticipants.historyBoundaryMessageId}
                 AND m.conversation_id = ${conversationParticipants.conversationId}
             ))
-            OR (${conversationParticipants.historyBoundaryMessageId} IS NULL AND ${messages.createdAt} > ${conversationParticipants.joinedAt})
+            OR (${conversationParticipants.historyBoundaryMessageId} IS NULL AND ${conversationParticipants.historyBoundaryWasEmpty} = true)
+            OR (${conversationParticipants.historyBoundaryMessageId} IS NULL AND ${conversationParticipants.historyBoundaryWasEmpty} = false AND ${messages.createdAt} > ${conversationParticipants.joinedAt})
           )`,
           or(
             isNull(conversationParticipants.lastReadMessageId),
@@ -1256,7 +1372,8 @@ export class ConversationPgRepository implements ConversationRepository {
               WHERE m.id = ${conversationParticipants.historyBoundaryMessageId}
                 AND m.conversation_id = ${conversationParticipants.conversationId}
             ))
-            OR (${conversationParticipants.historyBoundaryMessageId} IS NULL AND ${messages.createdAt} > ${conversationParticipants.joinedAt})
+            OR (${conversationParticipants.historyBoundaryMessageId} IS NULL AND ${conversationParticipants.historyBoundaryWasEmpty} = true)
+            OR (${conversationParticipants.historyBoundaryMessageId} IS NULL AND ${conversationParticipants.historyBoundaryWasEmpty} = false AND ${messages.createdAt} > ${conversationParticipants.joinedAt})
           )`,
           or(
             isNull(conversationParticipants.lastReadMessageId),
@@ -1275,5 +1392,41 @@ export class ConversationPgRepository implements ConversationRepository {
       )
       .groupBy(messages.conversationId);
     return new Map(rows.map((row) => [row.conversationId, Number(row.count)]));
+  }
+
+  async findPendingAvatarCleanupJobs(
+    limit: number,
+  ): Promise<
+    Array<{ id: string; conversationId: string | null; objectKey: string; attempts: number }>
+  > {
+    return this.db
+      .select({
+        id: avatarCleanupJobs.id,
+        conversationId: avatarCleanupJobs.conversationId,
+        objectKey: avatarCleanupJobs.objectKey,
+        attempts: avatarCleanupJobs.attempts,
+      })
+      .from(avatarCleanupJobs)
+      .where(and(eq(avatarCleanupJobs.status, "PENDING"), lt(avatarCleanupJobs.attempts, 5)))
+      .limit(limit);
+  }
+
+  async completeAvatarCleanupJobs(ids: string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    const res = await this.db.delete(avatarCleanupJobs).where(inArray(avatarCleanupJobs.id, ids));
+    return (res as unknown as { rowCount?: number }).rowCount ?? ids.length;
+  }
+
+  async failAvatarCleanupJob(id: string, attempts: number, error: string): Promise<void> {
+    const nextAttempts = attempts + 1;
+    await this.db
+      .update(avatarCleanupJobs)
+      .set({
+        attempts: nextAttempts,
+        status: nextAttempts >= 5 ? "FAILED" : "PENDING",
+        lastError: error.slice(0, 500),
+        updatedAt: sql`now()`,
+      })
+      .where(eq(avatarCleanupJobs.id, id));
   }
 }

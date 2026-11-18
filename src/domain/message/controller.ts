@@ -95,6 +95,17 @@ export class MessageController {
     return ok(data);
   }
 
+  @Get("conversations/:id/messages/:messageId/reply-target")
+  async getReplyTarget(
+    @Req() req: { user?: unknown },
+    @Param("id", ParseUUIDPipe) conversationId: string,
+    @Param("messageId", ParseUUIDPipe) messageId: string,
+  ) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    const data = await this.messageService.getReplyTarget(userId, conversationId, messageId);
+    return ok(data);
+  }
+
   @Patch("messages/:id")
   async editMessage(
     @Req() req: { user?: unknown },

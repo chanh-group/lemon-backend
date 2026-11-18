@@ -285,7 +285,7 @@ export class ConversationService {
   }
 
   async updateGroupTitle(conversationId: string, actorId: string, title: string): Promise<void> {
-    await this.requireGroupMember(conversationId, actorId);
+    await this.requireGroupManager(conversationId, actorId);
     await this.convRepo.updateGroup(conversationId, actorId, title);
     const memberIds = await this.convRepo.getParticipantUserIds(conversationId);
     this.realtimeService.emitGroupEvent(memberIds, "conversation:updated", { conversationId });
@@ -296,7 +296,7 @@ export class ConversationService {
     actorId: string,
     avatarUrl: string,
   ): Promise<ConversationResponse> {
-    await this.requireGroupMember(conversationId, actorId);
+    await this.requireGroupManager(conversationId, actorId);
     await this.convRepo.updateGroupAvatar(conversationId, actorId, avatarUrl);
     const memberIds = await this.convRepo.getParticipantUserIds(conversationId);
     this.realtimeService.emitGroupEvent(memberIds, "conversation:updated", { conversationId });
