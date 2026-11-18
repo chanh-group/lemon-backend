@@ -153,6 +153,68 @@ describe("RealtimeService", () => {
     });
   });
 
+  describe("emitFriendRequestAccepted", () => {
+    it("emits friend:request:accepted to only the requester's user room", () => {
+      const emit = vi.fn();
+      const to = vi.fn().mockReturnValue({ emit });
+      const service = createService(to);
+      const payload = {
+        requestId: "request-id",
+        addresseeId: "addressee-id",
+      };
+
+      service.emitFriendRequestAccepted("requester-id", payload);
+
+      expect(to).toHaveBeenCalledWith(userRoom("requester-id"));
+      expect(emit).toHaveBeenCalledWith("friend:request:accepted", payload);
+    });
+
+    it("swallows socket emit failures", () => {
+      const to = vi.fn().mockImplementation(() => {
+        throw new Error("socket down");
+      });
+      const service = createService(to);
+
+      expect(() =>
+        service.emitFriendRequestAccepted("requester-id", {
+          requestId: "request-id",
+          addresseeId: "addressee-id",
+        }),
+      ).not.toThrow();
+    });
+  });
+
+  describe("emitFriendRequestDeclined", () => {
+    it("emits friend:request:declined to only the requester's user room", () => {
+      const emit = vi.fn();
+      const to = vi.fn().mockReturnValue({ emit });
+      const service = createService(to);
+      const payload = {
+        requestId: "request-id",
+        addresseeId: "addressee-id",
+      };
+
+      service.emitFriendRequestDeclined("requester-id", payload);
+
+      expect(to).toHaveBeenCalledWith(userRoom("requester-id"));
+      expect(emit).toHaveBeenCalledWith("friend:request:declined", payload);
+    });
+
+    it("swallows socket emit failures", () => {
+      const to = vi.fn().mockImplementation(() => {
+        throw new Error("socket down");
+      });
+      const service = createService(to);
+
+      expect(() =>
+        service.emitFriendRequestDeclined("requester-id", {
+          requestId: "request-id",
+          addresseeId: "addressee-id",
+        }),
+      ).not.toThrow();
+    });
+  });
+
   describe("emitFriendRemoved", () => {
     it("emits friend:removed to both users' rooms", () => {
       const emit = vi.fn();

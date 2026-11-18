@@ -23,6 +23,16 @@ export interface FriendRequestCancelledEvent {
   requesterId: string;
 }
 
+export interface FriendRequestAcceptedEvent {
+  requestId: string;
+  addresseeId: string;
+}
+
+export interface FriendRequestDeclinedEvent {
+  requestId: string;
+  addresseeId: string;
+}
+
 @Injectable()
 export class RealtimeService {
   constructor(private readonly gateway: ChatGateway) {}
@@ -142,6 +152,30 @@ export class RealtimeService {
       this.gateway.server.to(userRoom(userId)).emit("friend:request:cancelled", payload);
     } catch (err) {
       logger.warn(`Failed to emit friend:request:cancelled for user ${userId}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Broadcast friend request acceptance to the requester's personal room
+   */
+  emitFriendRequestAccepted(userId: string, payload: FriendRequestAcceptedEvent): void {
+    if (!this.gateway?.server) return;
+    try {
+      this.gateway.server.to(userRoom(userId)).emit("friend:request:accepted", payload);
+    } catch (err) {
+      logger.warn(`Failed to emit friend:request:accepted for user ${userId}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Broadcast friend request decline to the requester's personal room
+   */
+  emitFriendRequestDeclined(userId: string, payload: FriendRequestDeclinedEvent): void {
+    if (!this.gateway?.server) return;
+    try {
+      this.gateway.server.to(userRoom(userId)).emit("friend:request:declined", payload);
+    } catch (err) {
+      logger.warn(`Failed to emit friend:request:declined for user ${userId}: ${String(err)}`);
     }
   }
 

@@ -8,6 +8,7 @@ import { conversationParticipants, conversations } from "../conversation/schema.
 import type {
   AcceptedFriendRequest,
   CancelledFriendRequest,
+  DeclinedFriendRequest,
   FriendRepository,
 } from "./repository.js";
 import { friendships } from "./schema.js";
@@ -258,7 +259,11 @@ export class FriendPgRepository implements FriendRepository {
             eq(friendships.status, "PENDING"),
           ),
         )
-        .returning({ requesterId: friendships.requesterId, addresseeId: friendships.addresseeId });
+        .returning({
+          id: friendships.id,
+          requesterId: friendships.requesterId,
+          addresseeId: friendships.addresseeId,
+        });
       if (!accepted) return null;
 
       const [userLow, userHigh] = canonicalPair(accepted.requesterId, accepted.addresseeId);
@@ -333,7 +338,10 @@ export class FriendPgRepository implements FriendRepository {
     });
   }
 
-  async deleteIncomingRequest(requestId: string, addresseeId: string): Promise<boolean> {
+  async deleteIncomingRequest(
+    requestId: string,
+    addresseeId: string,
+  ): Promise<DeclinedFriendRequest | null> {
     const [row] = await this.db
       .delete(friendships)
       .where(
@@ -343,8 +351,8 @@ export class FriendPgRepository implements FriendRepository {
           eq(friendships.status, "PENDING"),
         ),
       )
-      .returning({ id: friendships.id });
-    return Boolean(row);
+      .returning({ id: friendships.id, requesterId: friendships.requesterId });
+    return row ?? null;
   }
 
   async deleteOutgoingRequest(

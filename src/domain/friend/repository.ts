@@ -3,9 +3,15 @@ import type { CursorPage } from "../shared.js";
 import type { ConversationResponse } from "../conversation/dto/response.js";
 
 export interface AcceptedFriendRequest {
+  id: string;
   requesterId: string;
   addresseeId: string;
   conversation: ConversationResponse;
+}
+
+export interface DeclinedFriendRequest {
+  id: string;
+  requesterId: string;
 }
 
 export interface CancelledFriendRequest {
@@ -50,7 +56,10 @@ export interface FriendRepository {
     outgoing: CursorPage<FriendRequestRecord>;
   }>;
   acceptRequest(requestId: string, addresseeId: string): Promise<AcceptedFriendRequest | null>;
-  deleteIncomingRequest(requestId: string, addresseeId: string): Promise<boolean>;
+  deleteIncomingRequest(
+    requestId: string,
+    addresseeId: string,
+  ): Promise<DeclinedFriendRequest | null>;
   deleteOutgoingRequest(
     requestId: string,
     requesterId: string,

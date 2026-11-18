@@ -82,14 +82,23 @@ export class FriendService {
       [accepted.requesterId, accepted.addresseeId],
       accepted.conversation.id,
     );
+    this.realtimeService.emitFriendRequestAccepted(accepted.requesterId, {
+      requestId: accepted.id,
+      addresseeId: accepted.addresseeId,
+    });
     await this.invalidateSocialFeeds(accepted.requesterId, accepted.addresseeId);
     return accepted.conversation;
   }
 
   async declineRequest(requestId: string, userId: string): Promise<void> {
-    if (!(await this.friendRepo.deleteIncomingRequest(requestId, userId))) {
+    const deleted = await this.friendRepo.deleteIncomingRequest(requestId, userId);
+    if (!deleted) {
       throw new BusinessError("FRIEND_REQUEST_NOT_FOUND");
     }
+    this.realtimeService.emitFriendRequestDeclined(deleted.requesterId, {
+      requestId: deleted.id,
+      addresseeId: userId,
+    });
   }
 
   async cancelRequest(requestId: string, userId: string): Promise<void> {
