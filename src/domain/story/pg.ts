@@ -64,7 +64,9 @@ export class StoryPgRepository implements StoryRepository {
   ): Promise<Story> {
     return this.db.transaction(async (tx) => {
       if (data.mediaSizeBytes != null) {
-        await tx.execute(sql`select pg_advisory_xact_lock(hashtext('story_quota:' || ${data.userId}))`);
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtext('story_quota:' || ${data.userId}))`,
+        );
         const [usage] = await tx
           .select({
             bytes: sql<number>`coalesce(sum(${stories.mediaSizeBytes}), 0)::bigint`,

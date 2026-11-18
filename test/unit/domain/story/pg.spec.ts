@@ -556,7 +556,9 @@ describe("StoryPgRepository.create", () => {
   };
 
   it("acquires an advisory lock and checks quota for media stories", async () => {
-    const { db, executeMock, selectMock, whereMock, returningMock } = makeDb([{ bytes: 0, unknown: 0 }]);
+    const { db, executeMock, selectMock, whereMock, returningMock } = makeDb([
+      { bytes: 0, unknown: 0 },
+    ]);
     returningMock.mockResolvedValue([{ id: "s1" }]);
     const repo = new StoryPgRepository(db);
 
@@ -573,7 +575,14 @@ describe("StoryPgRepository.create", () => {
     returningMock.mockResolvedValue([{ id: "s1" }]);
     const repo = new StoryPgRepository(db);
 
-    await repo.create({ ...baseMediaStory, kind: "TEXT", objectKey: null, mimeType: null, mediaSizeBytes: null, caption: "hi" });
+    await repo.create({
+      ...baseMediaStory,
+      kind: "TEXT",
+      objectKey: null,
+      mimeType: null,
+      mediaSizeBytes: null,
+      caption: "hi",
+    });
 
     expect(executeMock).not.toHaveBeenCalled();
   });
@@ -591,6 +600,8 @@ describe("StoryPgRepository.create", () => {
     returningMock.mockResolvedValue([]);
     const repo = new StoryPgRepository(db);
 
-    await expect(repo.create(baseMediaStory)).rejects.toMatchObject({ code: "STORY_STORAGE_UNAVAILABLE" });
+    await expect(repo.create(baseMediaStory)).rejects.toMatchObject({
+      code: "STORY_STORAGE_UNAVAILABLE",
+    });
   });
 });

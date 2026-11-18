@@ -513,7 +513,9 @@ describe("StoryService", () => {
         realtimeServiceMock,
       );
 
-      await (svc as unknown as { measureLegacyMedia(id: string): Promise<void> }).measureLegacyMedia("user-1");
+      await (
+        svc as unknown as { measureLegacyMedia(id: string): Promise<void> }
+      ).measureLegacyMedia("user-1");
 
       expect(setMediaSizeMock).toHaveBeenCalledWith("s1", 0);
       expect(setMediaSizeMock).toHaveBeenCalledWith("s2", 500);
