@@ -489,6 +489,64 @@ describe("StoryService", () => {
     });
   });
 
+  describe("measureLegacyMedia", () => {
+    it("records zero size for missing legacy objects instead of blocking", async () => {
+      const findUnmeasuredMock = vi.fn().mockResolvedValue([
+        { id: "s1", objectKey: "stories/u/gone.jpg" },
+        { id: "s2", objectKey: "stories/u/exists.jpg" },
+      ]);
+      const setMediaSizeMock = vi.fn().mockResolvedValue(undefined);
+      headObjectMock
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ contentLength: 500, contentType: "image/jpeg" });
+
+      const repo = {
+        findUnmeasuredMedia: findUnmeasuredMock,
+        setMediaSize: setMediaSizeMock,
+      };
+      const svc = new StoryService(
+        repo as never,
+        {} as never,
+        storageMock,
+        conversationServiceMock,
+        messageServiceMock,
+        realtimeServiceMock,
+      );
+
+      await (svc as unknown as { measureLegacyMedia(id: string): Promise<void> }).measureLegacyMedia("user-1");
+
+      expect(setMediaSizeMock).toHaveBeenCalledWith("s1", 0);
+      expect(setMediaSizeMock).toHaveBeenCalledWith("s2", 500);
+    });
+  });
+
+  describe("getStorageUsage", () => {
+    it("returns usage and limit after measuring legacy media", async () => {
+      const getStorageUsageMock = vi.fn().mockResolvedValue(12345);
+      const findUnmeasuredMock = vi.fn().mockResolvedValue([]);
+      const setMediaSizeMock = vi.fn().mockResolvedValue(undefined);
+
+      const repo = {
+        findUnmeasuredMedia: findUnmeasuredMock,
+        setMediaSize: setMediaSizeMock,
+        getStorageUsage: getStorageUsageMock,
+      };
+      const svc = new StoryService(
+        repo as never,
+        {} as never,
+        storageMock,
+        conversationServiceMock,
+        messageServiceMock,
+        realtimeServiceMock,
+      );
+
+      const result = await svc.getStorageUsage("user-1");
+
+      expect(result.usedBytes).toBe(12345);
+      expect(result.limitBytes).toBe(512 * 1024 * 1024);
+    });
+  });
+
   describe("reactStory and likeStory", () => {
     it("throws STORY_INTERACTIONS_DISABLED when reactions are turned off for reactStory", async () => {
       findActiveByIdMock.mockResolvedValueOnce({
