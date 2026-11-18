@@ -28,3 +28,33 @@ describe("FriendPgRepository.getAcceptedFriendIds", () => {
     expect(query.params).toEqual(["ACCEPTED", userId, userId]);
   });
 });
+
+describe("FriendPgRepository.deleteOutgoingRequest", () => {
+  it("deletes the pending outgoing request and returns id and addresseeId", async () => {
+    const returning = vi.fn().mockResolvedValue([{ id: "req-1", addresseeId: friendId }]);
+    const where = vi.fn().mockReturnValue({ returning });
+    const deleteFn = vi.fn(() => ({ where }));
+    const repo = new FriendPgRepository({ delete: deleteFn } as unknown as DrizzleDb);
+
+    await expect(repo.deleteOutgoingRequest("req-1", userId)).resolves.toEqual({
+      id: "req-1",
+      addresseeId: friendId,
+    });
+
+    const condition = where.mock.calls[0][0] as SQL;
+    const query = new PgDialect().sqlToQuery(condition);
+    expect(query.sql).toContain('"friendships"."id" =');
+    expect(query.sql).toContain('"friendships"."requester_id" =');
+    expect(query.sql).toContain('"friendships"."status" =');
+    expect(query.params).toEqual(["req-1", userId, "PENDING"]);
+  });
+
+  it("returns null when no matching pending outgoing request exists", async () => {
+    const returning = vi.fn().mockResolvedValue([]);
+    const where = vi.fn().mockReturnValue({ returning });
+    const deleteFn = vi.fn(() => ({ where }));
+    const repo = new FriendPgRepository({ delete: deleteFn } as unknown as DrizzleDb);
+
+    await expect(repo.deleteOutgoingRequest("missing", userId)).resolves.toBeNull();
+  });
+});

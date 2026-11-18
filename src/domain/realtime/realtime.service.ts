@@ -18,6 +18,11 @@ export interface StoryReactionRemovedEvent {
   user: UserSummary;
 }
 
+export interface FriendRequestCancelledEvent {
+  requestId: string;
+  requesterId: string;
+}
+
 @Injectable()
 export class RealtimeService {
   constructor(private readonly gateway: ChatGateway) {}
@@ -125,6 +130,18 @@ export class RealtimeService {
       this.gateway.server.to(userRoom(userId)).emit("friend:request:new", payload);
     } catch (err) {
       logger.warn(`Failed to emit friend:request:new for user ${userId}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Broadcast friend request cancellation to the recipient's personal room
+   */
+  emitFriendRequestCancelled(userId: string, payload: FriendRequestCancelledEvent): void {
+    if (!this.gateway?.server) return;
+    try {
+      this.gateway.server.to(userRoom(userId)).emit("friend:request:cancelled", payload);
+    } catch (err) {
+      logger.warn(`Failed to emit friend:request:cancelled for user ${userId}: ${String(err)}`);
     }
   }
 

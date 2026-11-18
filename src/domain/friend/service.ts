@@ -93,9 +93,14 @@ export class FriendService {
   }
 
   async cancelRequest(requestId: string, userId: string): Promise<void> {
-    if (!(await this.friendRepo.deleteOutgoingRequest(requestId, userId))) {
+    const deleted = await this.friendRepo.deleteOutgoingRequest(requestId, userId);
+    if (!deleted) {
       throw new BusinessError("FRIEND_REQUEST_NOT_FOUND");
     }
+    this.realtimeService.emitFriendRequestCancelled(deleted.addresseeId, {
+      requestId: deleted.id,
+      requesterId: userId,
+    });
   }
 
   async removeFriend(userId: string, friendId: string): Promise<void> {

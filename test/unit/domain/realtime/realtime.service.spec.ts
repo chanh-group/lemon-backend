@@ -122,6 +122,37 @@ describe("RealtimeService", () => {
     });
   });
 
+  describe("emitFriendRequestCancelled", () => {
+    it("emits friend:request:cancelled to only the recipient's user room", () => {
+      const emit = vi.fn();
+      const to = vi.fn().mockReturnValue({ emit });
+      const service = createService(to);
+      const payload = {
+        requestId: "request-id",
+        requesterId: "requester-id",
+      };
+
+      service.emitFriendRequestCancelled("recipient-id", payload);
+
+      expect(to).toHaveBeenCalledWith(userRoom("recipient-id"));
+      expect(emit).toHaveBeenCalledWith("friend:request:cancelled", payload);
+    });
+
+    it("swallows socket emit failures", () => {
+      const to = vi.fn().mockImplementation(() => {
+        throw new Error("socket down");
+      });
+      const service = createService(to);
+
+      expect(() =>
+        service.emitFriendRequestCancelled("recipient-id", {
+          requestId: "request-id",
+          requesterId: "requester-id",
+        }),
+      ).not.toThrow();
+    });
+  });
+
   describe("emitFriendRemoved", () => {
     it("emits friend:removed to both users' rooms", () => {
       const emit = vi.fn();
