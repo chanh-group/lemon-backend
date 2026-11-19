@@ -75,8 +75,8 @@ describe("Drizzle Table Constraints and Schema Metadata Verification", () => {
       expect(schema.conversationKindEnum.enumValues).toEqual(["DIRECT", "GROUP"]);
     });
 
-    it("participantRoleEnum should contain MEMBER, ADMIN, OWNER", () => {
-      expect(schema.participantRoleEnum.enumValues).toEqual(["MEMBER", "ADMIN", "OWNER"]);
+    it("participantRoleEnum should contain MEMBER and ADMIN", () => {
+      expect(schema.participantRoleEnum.enumValues).toEqual(["MEMBER", "ADMIN"]);
     });
 
     it("messageKindEnum should contain all 8 message types", () => {

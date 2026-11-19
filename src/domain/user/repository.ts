@@ -4,6 +4,7 @@ import type { CursorPage } from "../shared.js";
 
 export interface UserRepository {
   findById(id: string): Promise<User | null>;
+  findByIds(ids: string[]): Promise<User[]>;
   findByEmail(email: string): Promise<User | null>;
   findByUsername(username: string): Promise<User | null>;
   findByIdentifier(identifier: string): Promise<User | null>;

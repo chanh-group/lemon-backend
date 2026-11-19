@@ -43,10 +43,39 @@ describe("toMessageResponse", () => {
 
   it("nulls body when the message was revoked", () => {
     const deletedAt = new Date("2026-10-18T11:00:00Z");
-    const dto = toMessageResponse(makeMessage({ deletedAt }));
+    const dto = toMessageResponse(
+      makeMessage({
+        deletedAt,
+        storyPreview: {
+          id: "story-1",
+          kind: "TEXT",
+          bucket: null,
+          objectKey: null,
+          caption: "Private",
+          background: null,
+        },
+      }),
+      [
+        {
+          id: "attachment-1",
+          objectKey: "chat/file",
+          kind: "FILE",
+          fileName: "file.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 1,
+          width: null,
+          height: null,
+          durationMs: null,
+          previewUrl: "signed-preview-url",
+          downloadUrl: "signed-download-url",
+        },
+      ],
+    );
 
     expect(dto.body).toBeNull();
     expect(dto.deletedAt).toBe(deletedAt);
+    expect(dto.storyPreview).toBeNull();
+    expect(dto).not.toHaveProperty("attachments");
   });
 
   it("exposes correlation only to the sender", () => {

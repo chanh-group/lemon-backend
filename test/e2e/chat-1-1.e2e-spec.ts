@@ -10,7 +10,7 @@ import { ErrorFilter } from "../../src/middleware/error-filter.js";
 import { standardSchemaPipe } from "../../src/utils/validation.js";
 import cookieParser from "cookie-parser";
 import { v7 as uuidv7 } from "uuid";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { conversations } from "../../src/domain/conversation/schema.js";
 import { getDrizzleToken } from "@nestjs/drizzle";
 import { JWT_CONFIG } from "../../src/domain/auth/constants.js";
@@ -85,11 +85,13 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
   });
 
   afterAll(async () => {
-    if (conversationId) {
-      await db.delete(conversations).where(eq(conversations.id, conversationId));
+    if (db) {
+      if (conversationId) {
+        await db.delete(conversations).where(eq(conversations.id, conversationId));
+      }
+      await db.delete(users).where(inArray(users.id, [userA, userB]));
     }
-    await db.delete(users).where(inArray(users.id, [userA, userB]));
-    await app.close();
+    if (app) await app.close();
   });
 
   // --- SECURITY TESTS (ZERO TRUST / NO x-user-id) ---
@@ -256,7 +258,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       const response = await request(app.getHttpServer())
         .post(`/api/conversations/${conversationId}/messages`)
         .set("Authorization", `Bearer ${tokenA}`)
-        .send({ body, kind: "TEXT" })
+        .send({ body, kind: "TEXT", clientMsgId: uuidv7() })
         .expect(201);
       return response.body.data.id as string;
     };
@@ -295,6 +297,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       .set("Authorization", `Bearer ${tokenA}`)
       .send({
         body: xssPayload,
+        clientMsgId: uuidv7(),
         kind: "TEXT",
       })
       .expect(201);
@@ -328,6 +331,39 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     expect(
       recipient.body.data.items.find((m: { id: string }) => m.id === messageId).clientMsgId,
     ).toBeUndefined();
+  });
+
+  it("hides a message only for the requesting participant, including after reloading the timeline", async () => {
+    const sent = await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/messages`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ body: "Only one side will hide this", clientMsgId: uuidv7(), kind: "TEXT" })
+      .expect(201);
+    const hiddenId = sent.body.data.id as string;
+
+    await request(app.getHttpServer())
+      .delete(`/api/messages/${hiddenId}/for-me`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .expect(204);
+    await request(app.getHttpServer())
+      .delete(`/api/messages/${hiddenId}/for-me`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .expect(204);
+
+    const sender = await request(app.getHttpServer())
+      .get(`/api/conversations/${conversationId}/messages`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .expect(200);
+    const recipient = await request(app.getHttpServer())
+      .get(`/api/conversations/${conversationId}/messages`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .expect(200);
+    expect(sender.body.data.items.some((message: { id: string }) => message.id === hiddenId)).toBe(
+      true,
+    );
+    expect(
+      recipient.body.data.items.some((message: { id: string }) => message.id === hiddenId),
+    ).toBe(false);
   });
 
   it("PATCH /api/messages/:id - should edit own message with Bearer token", async () => {
@@ -364,6 +400,17 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     expect(res.body.data.deletedAt).not.toBeNull();
     expect(res.body.data.body).toBeNull();
     expect(res.body.data.clientMsgId).toBeUndefined();
+
+    const timeline = await request(app.getHttpServer())
+      .get(`/api/conversations/${conversationId}/messages`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .expect(200);
+    const tombstone = timeline.body.data.items.find(
+      (message: { id: string }) => message.id === messageId,
+    );
+    expect(tombstone).toMatchObject({ body: null, storyPreview: null });
+    expect(tombstone).not.toHaveProperty("attachments");
+    expect(tombstone.deletedAt).not.toBeNull();
   });
 
   // --- EDGE CASES & AUTHORIZATION TESTS ---
@@ -419,11 +466,23 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     }
   });
 
+  it("POST /api/conversations/:id/messages - should reject request without clientMsgId with 422 VALIDATION_ERROR", async () => {
+    const res = await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/messages`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ body: "Valid body without clientMsgId" })
+      .expect(422);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.code).toBe("VALIDATION_ERROR");
+    expect(res.body.message).toContain("clientMsgId");
+  });
+
   it("POST /api/conversations/:id/messages - should reject empty text message with 422 VALIDATION_ERROR", async () => {
     const res = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .set("Authorization", `Bearer ${tokenA}`)
-      .send({ body: "   " })
+      .send({ body: "   ", clientMsgId: uuidv7() })
       .expect(422);
 
     expect(res.body.success).toBe(false);
@@ -436,7 +495,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     const res = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .set("Authorization", `Bearer ${tokenA}`)
-      .send({ body: longBody })
+      .send({ body: longBody, clientMsgId: uuidv7() })
       .expect(422);
 
     expect(res.body.success).toBe(false);
@@ -470,7 +529,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     const sendRes = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .set("Authorization", `Bearer ${tokenA}`)
-      .send({ body: "Tin nhắn của User A" })
+      .send({ body: "Tin nhắn của User A", clientMsgId: uuidv7() })
       .expect(201);
 
     const freshMsgId = sendRes.body.data.id;
@@ -533,7 +592,7 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     const sendRes = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .set("Authorization", `Bearer ${tokenA}`)
-      .send({ body: "Tin nhắn sắp bị thu hồi" })
+      .send({ body: "Tin nhắn sắp bị thu hồi", clientMsgId: uuidv7() })
       .expect(201);
 
     const targetMsgId = sendRes.body.data.id;
@@ -551,5 +610,27 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
       .expect(200);
 
     expect(convRes.body.data.lastMessagePreview).toBe("[message-revoked]");
+  });
+
+  it("keeps hide-for-me available after the direct friendship is blocked", async () => {
+    const sent = await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/messages`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ body: "Hide after block", clientMsgId: uuidv7() })
+      .expect(201);
+    const [userLow, userHigh] = [userA, userB].sort();
+    await db
+      .update(friendships)
+      .set({ status: "BLOCKED" })
+      .where(and(eq(friendships.userLow, userLow), eq(friendships.userHigh, userHigh)));
+
+    await request(app.getHttpServer())
+      .delete(`/api/messages/${sent.body.data.id}/for-me`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .expect(204);
+    await request(app.getHttpServer())
+      .delete(`/api/messages/${sent.body.data.id}/for-me`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .expect(204);
   });
 });

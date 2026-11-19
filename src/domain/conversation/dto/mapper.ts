@@ -16,8 +16,16 @@ export function toConversationResponse(conv: ConversationWithPartner): Conversat
     }),
     lastMessagePreview: conv.lastMessagePreview,
     lastMessageSenderId: conv.lastMessageSenderId ?? null,
+    ...(conv.lastMessageSender && { lastMessageSender: conv.lastMessageSender }),
     lastMessageAt: conv.lastMessageAt,
     unreadCount: conv.unreadCount ?? 0,
     createdAt: conv.createdAt,
+    ...(conv.kind === "GROUP" && {
+      title: conv.title ?? null,
+      avatarUrl: conv.avatarUrl ?? null,
+      memberCount: conv.memberCount ?? 0,
+      myRole: conv.myRole ?? "MEMBER",
+      ...(conv.joinGeneration !== undefined && { joinGeneration: String(conv.joinGeneration) }),
+    }),
   };
 }

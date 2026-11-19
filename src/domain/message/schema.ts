@@ -73,12 +73,31 @@ export const messages = pgTable(
     uniqueIndex("messages_client_msg_uq")
       .on(table.conversationId, table.senderId, table.clientMsgId)
       .where(sql`${table.clientMsgId} IS NOT NULL`),
-    index("messages_timeline_idx")
-      .on(table.conversationId, table.createdAt.desc(), table.id.desc())
-      .where(sql`${table.deletedAt} IS NULL`),
+    index("messages_timeline_idx").on(
+      table.conversationId,
+      table.createdAt.desc(),
+      table.id.desc(),
+    ),
     index("messages_sender_idx").on(table.senderId, table.id.desc()),
     index("messages_reply_idx").on(table.replyToId),
     index("messages_story_idx").on(table.storyId),
+  ],
+);
+
+export const messageHiddenForUsers = pgTable(
+  "message_hidden_for_users",
+  {
+    messageId: uuid("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    hiddenAt: created("hidden_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.messageId, table.userId] }),
+    index("message_hidden_user_idx").on(table.userId),
   ],
 );
 

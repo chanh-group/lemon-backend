@@ -97,6 +97,31 @@ export class S3StorageService implements StorageService {
     }
   }
 
+  async getObject(
+    objectKey: string,
+  ): Promise<{ body: Uint8Array; contentType: string; contentLength: number } | null> {
+    try {
+      const response = await this.client.send(
+        new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: objectKey,
+        }),
+      );
+      if (!response.Body) return null;
+      const body = await response.Body.transformToByteArray();
+      return {
+        body,
+        contentType: response.ContentType ?? "application/octet-stream",
+        contentLength: response.ContentLength ?? body.byteLength,
+      };
+    } catch (err) {
+      if (err instanceof NotFound || (err as { name?: string })?.name === "NoSuchKey") {
+        return null;
+      }
+      throw new StorageError("Failed to get object", err);
+    }
+  }
+
   async presignGet(params: PresignGetParams): Promise<{ downloadUrl: string }> {
     const disposition = params.disposition ?? "inline";
     const expiresInSecs = params.expiresInSecs ?? this.presignTtlSecs;

@@ -70,6 +70,26 @@ describe("UserPgRepository", () => {
     });
   });
 
+  describe("findByIds", () => {
+    it("returns early for an empty id list", async () => {
+      await expect(repository.findByIds([])).resolves.toEqual([]);
+      expect((mockDb as { select: ReturnType<typeof vi.fn> }).select).not.toHaveBeenCalled();
+    });
+
+    it("queries unique user IDs in one batch", async () => {
+      const where = vi.fn().mockResolvedValueOnce([mockUser]);
+      const selectChain = { from: vi.fn().mockReturnThis(), where };
+      vi.mocked((mockDb as { select: ReturnType<typeof vi.fn> }).select).mockReturnValueOnce(
+        selectChain,
+      );
+
+      await expect(repository.findByIds([mockUser.id, mockUser.id])).resolves.toEqual([mockUser]);
+      const condition = where.mock.calls[0][0] as SQL;
+      const query = new PgDialect().sqlToQuery(condition);
+      expect(query.params).toContain(mockUser.id);
+    });
+  });
+
   describe("findByEmail", () => {
     it("lowercases email and queries db", async () => {
       const selectChain = {

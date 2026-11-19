@@ -148,6 +148,48 @@
       "when": 1794992923288,
       "tag": "0020_organic_klaw",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794808534802,
+      "tag": "0021_chubby_stingray",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794825258709,
+      "tag": "0022_broad_korvac",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794826014693,
+      "tag": "0023_mean_black_tom",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794834008281,
+      "tag": "0024_majestic_darkstar",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1794924171714,
+      "tag": "0025_fine_jasper_sitwell",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795006499622,
+      "tag": "0026_chubby_enchantress",
+      "breakpoints": true
     }
   ]
 }

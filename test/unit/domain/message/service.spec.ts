@@ -17,23 +17,31 @@ describe("MessageService", () => {
   let findReplyTargetsMock: Mock;
   let updateBodyMock: Mock;
   let softDeleteMock: Mock;
+  let hideForUserMock: Mock;
   let resolveWriteMissMock: Mock;
   let reactMessageMock: Mock;
+  let findSenderProfilesMock: Mock;
+  let canAccessMessageMock: Mock;
+  let getGroupMembershipMock: Mock;
   let emitMessageReactionMock: Mock;
 
   let getParticipantUserIdsMock: Mock;
+  let getMessageRecipientUserIdsMock: Mock;
   let isMessageInConversationMock: Mock;
+  let isParticipantMock: Mock;
   let findConversationByIdMock: Mock;
   let assertCanChatMock: Mock;
   let emitNewMessageMock: Mock;
   let emitMessageUpdatedMock: Mock;
   let emitMessageRevokedMock: Mock;
+  let emitMessageHiddenMock: Mock;
 
   const userA = "0193a2b1-0000-7000-8000-000000000001";
   const userB = "0193a2b1-0000-7000-8000-000000000002";
   const outsider = "0193a2b1-0000-7000-8000-000000000099";
   const convId = "0193a2b1-0000-7000-8000-000000000010";
   const msgId = "0193a2b1-0000-7000-8000-000000000020";
+  const defaultClientMsgId = "0193259e-7bd8-7d43-902a-c71d6d84351b";
 
   const mockMessage: Message = {
     id: msgId,
@@ -58,33 +66,50 @@ describe("MessageService", () => {
     findReplyTargetsMock = vi.fn();
     updateBodyMock = vi.fn();
     softDeleteMock = vi.fn();
+    hideForUserMock = vi.fn().mockResolvedValue({ conversationId: convId, inserted: true });
     resolveWriteMissMock = vi.fn();
     reactMessageMock = vi.fn();
+    findSenderProfilesMock = vi.fn().mockResolvedValue([]);
+    canAccessMessageMock = vi.fn().mockResolvedValue(true);
+    getGroupMembershipMock = vi.fn().mockResolvedValue(null);
 
     getParticipantUserIdsMock = vi.fn().mockResolvedValue([userA, userB]);
+    getMessageRecipientUserIdsMock = vi.fn().mockResolvedValue([userA, userB]);
     isMessageInConversationMock = vi.fn().mockResolvedValue(true);
-    findConversationByIdMock = vi.fn().mockResolvedValue({ kind: "GROUP" });
+    isParticipantMock = vi.fn().mockResolvedValue(true);
+    findConversationByIdMock = vi
+      .fn()
+      .mockImplementation((_conversationId: string, userId: string) =>
+        userId === outsider ? null : { kind: "GROUP" },
+      );
     assertCanChatMock = vi.fn().mockResolvedValue(undefined);
     emitNewMessageMock = vi.fn();
     emitMessageUpdatedMock = vi.fn();
     emitMessageRevokedMock = vi.fn();
+    emitMessageHiddenMock = vi.fn();
     emitMessageReactionMock = vi.fn();
 
     const mockMessageRepo = {
       createMessageWithConversationUpdate: createMessageMock,
+      findSenderProfiles: findSenderProfilesMock,
       findById: findByIdMock,
       findTimeline: findTimelineMock,
       findReplyTargets: findReplyTargetsMock,
       updateBody: updateBodyMock,
       softDelete: softDeleteMock,
+      hideForUser: hideForUserMock,
       resolveWriteMiss: resolveWriteMissMock,
       reactMessage: reactMessageMock,
     } as unknown as MessageRepository;
 
     const mockConvRepo = {
       getParticipantUserIds: getParticipantUserIdsMock,
+      getMessageRecipientUserIds: getMessageRecipientUserIdsMock,
       isMessageInConversation: isMessageInConversationMock,
+      isParticipant: isParticipantMock,
       findById: findConversationByIdMock,
+      canAccessMessage: canAccessMessageMock,
+      getGroupMembership: getGroupMembershipMock,
     } as unknown as ConversationRepository;
     const mockFriendService = {
       assertCanChat: assertCanChatMock,
@@ -94,6 +119,7 @@ describe("MessageService", () => {
       emitNewMessage: emitNewMessageMock,
       emitMessageUpdated: emitMessageUpdatedMock,
       emitMessageRevoked: emitMessageRevokedMock,
+      emitMessageHidden: emitMessageHiddenMock,
       emitMessageReaction: emitMessageReactionMock,
     } as unknown as RealtimeService;
 
@@ -105,13 +131,21 @@ describe("MessageService", () => {
       findConversationByIdMock.mockResolvedValueOnce(null);
 
       await expect(
-        service.sendMessage(outsider, convId, { body: "Hello", kind: "TEXT" }),
+        service.sendMessage(outsider, convId, {
+          body: "Hello",
+          kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
+        }),
       ).rejects.toThrow(expect.objectContaining({ code: "NOT_PARTICIPANT" }));
     });
 
     it("throws BAD_REQUEST if TEXT message body is empty", async () => {
       await expect(
-        service.sendMessage(userA, convId, { body: "   ", kind: "TEXT" }),
+        service.sendMessage(userA, convId, {
+          body: "   ",
+          kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
+        }),
       ).rejects.toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
     });
 
@@ -123,7 +157,11 @@ describe("MessageService", () => {
       assertCanChatMock.mockRejectedValue(new BusinessError("FRIENDSHIP_REQUIRED"));
 
       await expect(
-        service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" }),
+        service.sendMessage(userA, convId, {
+          body: "Hello",
+          kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
+        }),
       ).rejects.toMatchObject({ code: "FRIENDSHIP_REQUIRED" });
       expect(createMessageMock).not.toHaveBeenCalled();
     });
@@ -132,7 +170,11 @@ describe("MessageService", () => {
       findConversationByIdMock.mockResolvedValue({ kind: "DIRECT", partner: { id: userB } });
       createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
 
-      await service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" });
+      await service.sendMessage(userA, convId, {
+        body: "Hello",
+        kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
+      });
 
       expect(createMessageMock).toHaveBeenCalledWith(
         expect.objectContaining({ requiredFriendship: { userAId: userA, userBId: userB } }),
@@ -141,20 +183,61 @@ describe("MessageService", () => {
 
     it("throws BAD_REQUEST if message body exceeds 4000 characters", async () => {
       await expect(
-        service.sendMessage(userA, convId, { body: "a".repeat(4001), kind: "TEXT" }),
+        service.sendMessage(userA, convId, {
+          body: "a".repeat(4001),
+          kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
+        }),
       ).rejects.toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
     });
 
     it("successfully creates a message and emits a realtime event", async () => {
       createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
 
-      const res = await service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" });
+      const res = await service.sendMessage(userA, convId, {
+        body: "Hello",
+        kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
+      });
 
       expect(res).not.toBe(mockMessage);
       expect(res.id).toBe(msgId);
       expect(res.body).toBe("Hello");
       expect(res).not.toHaveProperty("clientMsgId");
-      expect(emitNewMessageMock).toHaveBeenCalledWith(convId, res);
+      expect(emitNewMessageMock).toHaveBeenCalledWith(
+        convId,
+        { ...res, replyTarget: null },
+        expect.any(Array),
+      );
+    });
+
+    it("redacts a reply target per recipient instead of broadcasting the sender view", async () => {
+      const replyTargetId = "0193a2b1-0000-7000-8000-000000000021";
+      const message = { ...mockMessage, replyToId: replyTargetId };
+      createMessageMock.mockResolvedValue({ message, isNew: true });
+      canAccessMessageMock.mockResolvedValue(true);
+      getMessageRecipientUserIdsMock.mockResolvedValue([userA]);
+      findByIdMock.mockResolvedValue({ ...mockMessage, id: replyTargetId });
+
+      await service.sendMessage(userA, convId, {
+        body: "Reply",
+        kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
+        replyToId: replyTargetId,
+      });
+
+      const [, broadcastPayload, payloads] = emitNewMessageMock.mock.calls[0];
+      expect(broadcastPayload).toEqual(expect.objectContaining({ replyTarget: null }));
+      expect(payloads).toEqual([
+        expect.objectContaining({
+          userId: userA,
+          payload: expect.objectContaining({ replyTarget: null }),
+        }),
+        expect.objectContaining({
+          userId: userB,
+          payload: expect.objectContaining({ replyTarget: null }),
+        }),
+      ]);
     });
 
     it("stores a story message with the server decided kind and snapshot", async () => {
@@ -178,7 +261,7 @@ describe("MessageService", () => {
       await service.sendMessage(
         userA,
         convId,
-        { body: "🔥", kind: "TEXT" },
+        { body: "🔥", kind: "TEXT", clientMsgId: defaultClientMsgId },
         {
           kind: "STORY_REACTION",
           storyId,
@@ -198,7 +281,11 @@ describe("MessageService", () => {
     it("does not emit for idempotent retries", async () => {
       createMessageMock.mockResolvedValue({ message: mockMessage, isNew: false });
 
-      const res = await service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" });
+      const res = await service.sendMessage(userA, convId, {
+        body: "Hello",
+        kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
+      });
 
       expect(res.id).toBe(msgId);
       expect(res).not.toHaveProperty("clientMsgId");
@@ -214,7 +301,12 @@ describe("MessageService", () => {
       });
 
       await expect(
-        service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT", replyToId: otherMsgId }),
+        service.sendMessage(userA, convId, {
+          body: "Hello",
+          kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
+          replyToId: otherMsgId,
+        }),
       ).rejects.toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
       expect(createMessageMock).not.toHaveBeenCalled();
     });
@@ -223,7 +315,12 @@ describe("MessageService", () => {
       findByIdMock.mockResolvedValue(null);
 
       await expect(
-        service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT", replyToId: msgId }),
+        service.sendMessage(userA, convId, {
+          body: "Hello",
+          kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
+          replyToId: msgId,
+        }),
       ).rejects.toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
       expect(createMessageMock).not.toHaveBeenCalled();
     });
@@ -232,7 +329,12 @@ describe("MessageService", () => {
       findByIdMock.mockResolvedValue({ ...mockMessage, deletedAt: new Date() });
 
       await expect(
-        service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT", replyToId: msgId }),
+        service.sendMessage(userA, convId, {
+          body: "Hello",
+          kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
+          replyToId: msgId,
+        }),
       ).rejects.toThrow(expect.objectContaining({ code: "MESSAGE_REVOKED" }));
       expect(createMessageMock).not.toHaveBeenCalled();
     });
@@ -244,6 +346,7 @@ describe("MessageService", () => {
       const res = await service.sendMessage(userA, convId, {
         body: "Hello",
         kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
         replyToId: msgId,
       });
 
@@ -252,7 +355,7 @@ describe("MessageService", () => {
       expect(createMessageMock).toHaveBeenCalledWith(expect.objectContaining({ replyToId: msgId }));
     });
 
-    it("builds the reply target from the validated lookup without re-fetching", async () => {
+    it("refreshes the reply target after persistence", async () => {
       findByIdMock.mockResolvedValue(mockMessage);
       createMessageMock.mockResolvedValue({
         message: { ...mockMessage, replyToId: msgId },
@@ -262,18 +365,57 @@ describe("MessageService", () => {
       const res = await service.sendMessage(userA, convId, {
         body: "Hello",
         kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
         replyToId: msgId,
       });
 
-      expect(findByIdMock).toHaveBeenCalledTimes(1);
+      expect(findByIdMock).toHaveBeenCalledTimes(2);
       expect(findByIdMock).toHaveBeenCalledWith(msgId, false);
       expect(res.replyTarget).toMatchObject({ id: msgId, body: "Hello", deletedAt: null });
+    });
+
+    it("redacts a reply target revoked after validation from the response and event", async () => {
+      const deletedAt = new Date();
+      findByIdMock
+        .mockResolvedValueOnce(mockMessage)
+        .mockResolvedValueOnce({ ...mockMessage, deletedAt, body: "private old text" });
+      createMessageMock.mockResolvedValue({
+        message: { ...mockMessage, id: "reply", replyToId: msgId },
+        isNew: true,
+      });
+
+      const res = await service.sendMessage(userA, convId, {
+        body: "Hello",
+        kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
+        replyToId: msgId,
+      });
+
+      expect(res.replyTarget).toMatchObject({
+        id: msgId,
+        body: null,
+        storyPreview: null,
+        deletedAt,
+      });
+      expect(emitNewMessageMock).toHaveBeenCalledWith(
+        convId,
+        expect.objectContaining({ replyTarget: null }),
+        expect.arrayContaining([
+          expect.objectContaining({
+            payload: expect.objectContaining({ replyTarget: null }),
+          }),
+        ]),
+      );
     });
 
     it("does not look up a reply message when replyToId is absent", async () => {
       createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
 
-      await service.sendMessage(userA, convId, { body: "Hello", kind: "TEXT" });
+      await service.sendMessage(userA, convId, {
+        body: "Hello",
+        kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
+      });
 
       expect(findByIdMock).not.toHaveBeenCalled();
     });
@@ -286,7 +428,7 @@ describe("MessageService", () => {
       findTimelineMock.mockResolvedValue({ items: [reply], hasMore: false });
       findReplyTargetsMock.mockResolvedValue([target]);
       const result = await service.getTimeline(userA, convId);
-      expect(findReplyTargetsMock).toHaveBeenCalledWith(convId, [msgId]);
+      expect(findReplyTargetsMock).toHaveBeenCalledWith(convId, [msgId], userA);
       expect(result.items[0].replyTarget).toMatchObject({
         id: msgId,
         body: null,
@@ -301,7 +443,7 @@ describe("MessageService", () => {
     });
 
     it("throws MESSAGE_NOT_FOUND when the cursor is outside the conversation", async () => {
-      isMessageInConversationMock.mockResolvedValueOnce(false);
+      canAccessMessageMock.mockResolvedValueOnce(false);
 
       await expect(service.getTimeline(userA, convId, msgId)).rejects.toMatchObject({
         code: "MESSAGE_NOT_FOUND",
@@ -310,7 +452,7 @@ describe("MessageService", () => {
     });
 
     it("throws MESSAGE_NOT_FOUND when the after anchor is outside the conversation", async () => {
-      isMessageInConversationMock.mockResolvedValueOnce(false);
+      canAccessMessageMock.mockResolvedValueOnce(false);
 
       await expect(
         service.getTimeline(userA, convId, undefined, undefined, msgId),
@@ -323,7 +465,7 @@ describe("MessageService", () => {
 
       await service.getTimeline(userA, convId);
 
-      expect(isMessageInConversationMock).not.toHaveBeenCalled();
+      expect(canAccessMessageMock).not.toHaveBeenCalled();
     });
 
     it("returns message timeline for member", async () => {
@@ -335,7 +477,7 @@ describe("MessageService", () => {
       expect(res.items[0].id).toBe(msgId);
       expect(res.items[0]).not.toHaveProperty("clientMsgId");
       expect(res.hasMore).toBe(false);
-      expect(findTimelineMock).toHaveBeenCalledWith(convId, undefined, undefined, undefined);
+      expect(findTimelineMock).toHaveBeenCalledWith(convId, userA, undefined, undefined, undefined);
       expect(getParticipantUserIdsMock).not.toHaveBeenCalled();
       expect(findConversationByIdMock).toHaveBeenCalledWith(convId, userA);
     });
@@ -383,7 +525,7 @@ describe("MessageService", () => {
 
       expect(res.body).toBe("Updated");
       expect(res).not.toHaveProperty("clientMsgId");
-      expect(emitMessageUpdatedMock).toHaveBeenCalledWith(convId, res);
+      expect(emitMessageUpdatedMock).toHaveBeenCalledWith(convId, res, expect.any(Array));
       expect(resolveWriteMissMock).not.toHaveBeenCalled();
     });
 
@@ -455,7 +597,11 @@ describe("MessageService", () => {
       expect(res.deletedAt).toBe(deletedAt);
       expect(res.body).toBeNull();
       expect(res).not.toHaveProperty("clientMsgId");
-      expect(emitMessageRevokedMock).toHaveBeenCalledWith(convId, { id: msgId, deletedAt });
+      expect(emitMessageRevokedMock).toHaveBeenCalledWith(
+        convId,
+        { id: msgId, deletedAt },
+        expect.any(Array),
+      );
       expect(resolveWriteMissMock).not.toHaveBeenCalled();
     });
 
@@ -506,11 +652,14 @@ describe("MessageService", () => {
       const serviceWithStorage = new MessageService(
         {
           createMessageWithConversationUpdate: createMessageMock,
+          findSenderProfiles: findSenderProfilesMock,
           findById: findByIdMock,
         } as any,
         {
           getParticipantUserIds: getParticipantUserIdsMock,
           findById: findConversationByIdMock,
+          canAccessMessage: canAccessMessageMock,
+          getGroupMembership: getGroupMembershipMock,
         } as any,
         { assertCanChat: assertCanChatMock } as any,
         { emitNewMessage: emitNewMessageMock } as any,
@@ -551,6 +700,7 @@ describe("MessageService", () => {
 
       const res = await serviceWithStorage.sendMessage(userA, convId, {
         kind: "FILE",
+        clientMsgId: defaultClientMsgId,
         attachments: [
           {
             objectKey: `chat/${convId}/${userA}/report.pdf`,
@@ -579,9 +729,15 @@ describe("MessageService", () => {
         headObject: vi.fn().mockResolvedValue({ contentLength: 1024 }),
       };
       const serviceWithStorage = new MessageService(
-        { createMessageWithConversationUpdate: createMessageMock, findById: findByIdMock } as any,
+        {
+          createMessageWithConversationUpdate: createMessageMock,
+          findById: findByIdMock,
+          findSenderProfiles: findSenderProfilesMock,
+        } as any,
         {
           getParticipantUserIds: getParticipantUserIdsMock,
+          getMessageRecipientUserIds: getMessageRecipientUserIdsMock,
+          canAccessMessage: canAccessMessageMock,
           findById: findConversationByIdMock,
         } as any,
         { assertCanChat: assertCanChatMock } as any,
@@ -593,6 +749,7 @@ describe("MessageService", () => {
       createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
       const request = serviceWithStorage.sendMessage(userA, convId, {
         kind: "FILE",
+        clientMsgId: defaultClientMsgId,
         replyToId: msgId,
         attachments: [
           {
@@ -635,11 +792,14 @@ describe("MessageService", () => {
       const serviceWithStorage = new MessageService(
         {
           createMessageWithConversationUpdate: createMessageMock,
+          findSenderProfiles: findSenderProfilesMock,
           findById: findByIdMock,
         } as any,
         {
           getParticipantUserIds: getParticipantUserIdsMock,
           findById: findConversationByIdMock,
+          canAccessMessage: canAccessMessageMock,
+          getGroupMembership: getGroupMembershipMock,
         } as any,
         { assertCanChat: assertCanChatMock } as any,
         { emitNewMessage: emitNewMessageMock } as any,
@@ -675,6 +835,7 @@ describe("MessageService", () => {
 
       const res = await serviceWithStorage.sendMessage(userA, convId, {
         kind: "TEXT",
+        clientMsgId: defaultClientMsgId,
         isForwarded: true,
         sourceMessageId: msgId,
         attachments: [
@@ -705,11 +866,36 @@ describe("MessageService", () => {
       await expect(
         service.sendMessage(userA, convId, {
           kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
           isForwarded: true,
           sourceMessageId: msgId,
         }),
       ).rejects.toMatchObject({ code: "NOT_PARTICIPANT" });
       expect(createMessageMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("hideMessageForMe", () => {
+    it("hides an incoming message for only the current participant", async () => {
+      await service.hideMessageForMe(userB, msgId);
+
+      expect(hideForUserMock).toHaveBeenCalledWith(msgId, userB);
+      expect(emitMessageHiddenMock).toHaveBeenCalledWith(userB, convId, msgId);
+      expect(emitMessageRevokedMock).not.toHaveBeenCalled();
+    });
+
+    it("does not emit or invalidate for an already hidden message", async () => {
+      hideForUserMock.mockResolvedValue({ conversationId: convId, inserted: false });
+      await service.hideMessageForMe(userB, msgId);
+      expect(emitMessageHiddenMock).not.toHaveBeenCalled();
+    });
+
+    it("propagates a not-found result from the transactional permission check", async () => {
+      hideForUserMock.mockRejectedValue(new BusinessError("MESSAGE_NOT_FOUND"));
+      await expect(service.hideMessageForMe(outsider, msgId)).rejects.toThrow(
+        expect.objectContaining({ code: "MESSAGE_NOT_FOUND" }),
+      );
+      expect(emitMessageHiddenMock).not.toHaveBeenCalled();
     });
   });
 
@@ -724,13 +910,16 @@ describe("MessageService", () => {
       const result = await service.reactToMessage(userA, msgId, "❤️");
 
       expect(reactMessageMock).toHaveBeenCalledWith(userA, msgId, "❤️");
-      expect(findByIdMock).not.toHaveBeenCalled();
-      expect(emitMessageReactionMock).toHaveBeenCalledWith(convId, {
-        messageId: msgId,
-        userId: userA,
-        emoji: "❤️",
-        reactions: [{ emoji: "❤️", count: 1, userIds: [userA] }],
-      });
+      expect(emitMessageReactionMock).toHaveBeenCalledWith(
+        convId,
+        {
+          messageId: msgId,
+          userId: userA,
+          emoji: "❤️",
+          reactions: [{ emoji: "❤️", count: 1, userIds: [userA] }],
+        },
+        expect.any(Array),
+      );
       expect(result).toEqual({
         messageId: msgId,
         reactions: [{ emoji: "❤️", count: 1, userIds: [userA] }],
@@ -738,12 +927,54 @@ describe("MessageService", () => {
     });
 
     it("propagates USER_BLOCKED from the reaction transaction without emitting", async () => {
+      findByIdMock.mockResolvedValue(mockMessage);
       reactMessageMock.mockRejectedValue(new BusinessError("USER_BLOCKED"));
 
       await expect(service.reactToMessage(userA, msgId, "❤️")).rejects.toMatchObject({
         code: "USER_BLOCKED",
       });
       expect(emitMessageReactionMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getReplyTarget", () => {
+    it("throws NOT_PARTICIPANT if viewer is not in conversation", async () => {
+      isParticipantMock.mockResolvedValueOnce(false);
+      await expect(service.getReplyTarget(outsider, convId, msgId)).rejects.toMatchObject({
+        code: "NOT_PARTICIPANT",
+      });
+    });
+
+    it("throws MESSAGE_NOT_FOUND if message is not visible / outside boundary", async () => {
+      isParticipantMock.mockResolvedValueOnce(true);
+      findReplyTargetsMock.mockResolvedValueOnce([]);
+      await expect(service.getReplyTarget(userA, convId, msgId)).rejects.toMatchObject({
+        code: "MESSAGE_NOT_FOUND",
+      });
+    });
+
+    it("returns the reply target with sender profile if viewer has access", async () => {
+      isParticipantMock.mockResolvedValueOnce(true);
+      findReplyTargetsMock.mockResolvedValueOnce([
+        {
+          id: msgId,
+          senderId: userB,
+          kind: "TEXT",
+          body: "Hello",
+          deletedAt: null,
+          storyPreview: null,
+        },
+      ]);
+      findSenderProfilesMock.mockResolvedValueOnce([
+        { id: userB, username: "bob", fullName: "Bob", avatarUrl: null },
+      ]);
+
+      const res = await service.getReplyTarget(userA, convId, msgId);
+      expect(res).toMatchObject({
+        id: msgId,
+        body: "Hello",
+        sender: { id: userB, username: "bob" },
+      });
     });
   });
 });

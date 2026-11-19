@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Inject,
+  Logger,
   Param,
   ParseUUIDPipe,
   Post,
@@ -39,6 +40,7 @@ import { UploadRateLimitInterceptor } from "./upload-rate-limit.interceptor.js";
 import { FileService } from "./service.js";
 import { Public } from "../../utils/decorators.js";
 import { UserService } from "../user/service.js";
+import { ConversationService } from "../conversation/service.js";
 
 interface UploadedMulterFile {
   buffer: Buffer;
@@ -49,11 +51,14 @@ interface UploadedMulterFile {
 
 @Controller("files")
 export class FileController {
+  private readonly logger = new Logger(FileController.name);
+
   constructor(
     private readonly fileService: FileService,
     @Inject(RATE_LIMITER)
     private readonly rateLimiter: RateLimiter,
     private readonly userService: UserService,
+    private readonly conversationService: ConversationService,
   ) {}
 
   @Get("avatars/:userId/:fileName")
@@ -67,6 +72,69 @@ export class FileController {
     const user = await this.userService.findById(userId);
     const url = await this.fileService.getAvatarDownloadUrl(userId, fileName, user?.avatarUrl);
     return response.redirect(HttpStatus.FOUND, url);
+  }
+
+  @Get("group-avatars/:groupId/:fileName")
+  @Header("Cache-Control", "private, no-store")
+  async getGroupAvatar(
+    @Req() req: { user?: unknown },
+    @Param("groupId", ParseUUIDPipe) groupId: string,
+    @Param("fileName") fileName: string,
+    @Res() response: Response,
+  ) {
+    const userId = getAuthUser(req).id;
+    const object = await this.fileService.getGroupAvatar(userId, groupId, fileName);
+    response.setHeader("Content-Type", object.contentType);
+    response.setHeader("Content-Length", object.contentLength);
+    response.setHeader("Cache-Control", "private, no-store");
+    return response.end(Buffer.from(object.body));
+  }
+
+  @Post("group-avatars/:groupId/upload")
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(
+    UploadRateLimitInterceptor,
+    FileInterceptor("file", {
+      limits: { fileSize: USER_AVATAR_MAX_BYTES, files: 1, fields: 2, fieldSize: 256, parts: 3 },
+    }),
+  )
+  async uploadGroupAvatar(
+    @Req() req: { user?: unknown },
+    @Param("groupId", ParseUUIDPipe) groupId: string,
+    @UploadedFile() file: UploadedMulterFile | undefined,
+  ) {
+    if (!file) throw new BusinessError("BAD_REQUEST");
+    const actorId = getAuthUser(req).id;
+    const current = await this.conversationService.getById(groupId, actorId);
+    if (current.myRole !== "ADMIN") throw new BusinessError("FORBIDDEN");
+    const avatarUrl = await this.fileService.uploadGroupAvatar(actorId, groupId, file);
+    try {
+      await this.conversationService.updateGroupAvatar(groupId, actorId, avatarUrl);
+    } catch (error) {
+      let currentAvatarUrl: string | null | undefined;
+      try {
+        const check = await this.conversationService.getById(groupId, actorId);
+        currentAvatarUrl = check.avatarUrl;
+      } catch (checkError) {
+        this.logger.warn("Group avatar write outcome could not be verified; retaining object", {
+          err: checkError,
+          groupId,
+        });
+        throw error;
+      }
+      if (currentAvatarUrl !== avatarUrl) {
+        try {
+          await this.fileService.deleteGroupAvatarObject(groupId, avatarUrl);
+        } catch (cleanupError) {
+          this.logger.warn("Failed to remove unreferenced group avatar object", {
+            err: cleanupError,
+            groupId,
+          });
+        }
+      }
+      throw error;
+    }
+    return ok(await this.conversationService.getById(groupId, actorId));
   }
 
   @Post("presign")

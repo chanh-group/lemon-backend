@@ -18,6 +18,9 @@ export interface StorageService {
     body: Buffer | Uint8Array;
     mimeType: string;
   }): Promise<void>;
+  getObject(
+    objectKey: string,
+  ): Promise<{ body: Uint8Array; contentType: string; contentLength: number } | null>;
   headObject(objectKey: string): Promise<{ contentLength: number; contentType: string } | null>;
   // Batched delete; S3 reports missing keys as deleted, so re-running is idempotent.
   deleteObjects(objectKeys: string[]): Promise<{ deleted: string[]; failed: string[] }>;

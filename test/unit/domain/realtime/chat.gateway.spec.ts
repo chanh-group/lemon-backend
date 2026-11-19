@@ -16,17 +16,18 @@ describe("ChatGateway", () => {
   let updateSetMock: Mock;
   let updateWhereMock: Mock;
   let redisPipelineMock: Mock;
+  let redisSetMock: Mock;
+  let redisDelMock: Mock;
   let pipelineSetMock: Mock;
   let pipelineZaddMock: Mock;
   let pipelineZremMock: Mock;
   let pipelineExpireMock: Mock;
   let redisTtlMock: Mock;
-  let redisSetMock: Mock;
-  let redisDelMock: Mock;
   let mockJwt: JwtConfig;
   let mockRedis: Redis;
   let activeConversationIdsMock: Mock;
   let isParticipantMock: Mock;
+  let getParticipantUserIdsMock: Mock;
   let updateLastSeenMock: Mock;
   let findAuthUserMock: Mock;
   let sessionActiveMock: Mock;
@@ -64,6 +65,7 @@ describe("ChatGateway", () => {
     dbSelectMock = vi.fn().mockImplementation(() => makeDb());
     activeConversationIdsMock = vi.fn().mockResolvedValue([mockConvId, mockConvId2]);
     isParticipantMock = vi.fn().mockResolvedValue(true);
+    getParticipantUserIdsMock = vi.fn().mockResolvedValue([mockUserId, "other-user"]);
     updateLastSeenMock = vi.fn().mockResolvedValue(undefined);
     findAuthUserMock = vi.fn().mockResolvedValue({ authVersion: 0, isActive: true });
     sessionActiveMock = vi.fn().mockResolvedValue(true);
@@ -101,6 +103,7 @@ describe("ChatGateway", () => {
       {
         getActiveConversationIds: activeConversationIdsMock,
         isParticipant: isParticipantMock,
+        getParticipantUserIds: getParticipantUserIdsMock,
       } as unknown as import("../../../../src/domain/conversation/pg.js").ConversationPgRepository,
       {
         updateLastSeen: updateLastSeenMock,
@@ -124,6 +127,7 @@ describe("ChatGateway", () => {
     disconnectMock: ReturnType<typeof vi.fn>;
     emitMock: ReturnType<typeof vi.fn>;
     toMock: ReturnType<typeof vi.fn>;
+    roomEmitMock: ReturnType<typeof vi.fn>;
   }
 
   function createMockSocket(overrides: {
@@ -134,8 +138,9 @@ describe("ChatGateway", () => {
     const leaveMock = vi.fn().mockResolvedValue(undefined);
     const disconnectMock = vi.fn();
     const emitMock = vi.fn();
+    const roomEmitMock = vi.fn();
     const toMock = vi.fn().mockReturnValue({
-      emit: vi.fn(),
+      emit: roomEmitMock,
     });
 
     const client = {
@@ -161,6 +166,7 @@ describe("ChatGateway", () => {
       disconnectMock,
       emitMock,
       toMock,
+      roomEmitMock,
     };
   }
 
@@ -802,25 +808,108 @@ describe("ChatGateway", () => {
       );
       expect(res).toEqual({ success: false, conversationId: mockConvId });
     });
+
+    it("leaves the room when membership is revoked while join is pending", async () => {
+      let finishJoin!: () => void;
+      const joinPending = new Promise<void>((resolve) => {
+        finishJoin = resolve;
+      });
+      const { client, joinMock, leaveMock, emitMock } = createMockSocket({});
+      client.data = { userId: mockUserId };
+      joinMock.mockImplementationOnce(() => joinPending);
+      isParticipantMock.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+      const result = gateway.handleJoinConversation(client, { conversationId: mockConvId });
+      await vi.waitFor(() => expect(joinMock).toHaveBeenCalledWith(`conv:${mockConvId}`));
+      finishJoin();
+
+      await expect(result).resolves.toEqual({ success: false, conversationId: mockConvId });
+      expect(leaveMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
+      expect(emitMock).toHaveBeenCalledWith("error", { code: "NOT_PARTICIPANT" });
+    });
   });
 
   describe("typing:start and typing:stop", () => {
+    it.each(["start", "stop"] as const)(
+      "broadcasts %s once to active recipients only",
+      async (event) => {
+        getParticipantUserIdsMock.mockResolvedValue([mockUserId, "other-user", "third-user"]);
+        const { client, toMock, roomEmitMock } = createMockSocket({});
+        client.data = { userId: mockUserId };
+
+        await (event === "start"
+          ? gateway.handleTypingStart(client, { conversationId: mockConvId })
+          : gateway.handleTypingStop(client, { conversationId: mockConvId }));
+
+        expect(toMock).toHaveBeenCalledExactlyOnceWith(["user:other-user", "user:third-user"]);
+        expect(roomEmitMock).toHaveBeenCalledOnce();
+        expect(isParticipantMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(["start", "stop"] as const)("rejects removed senders for %s", async (event) => {
+      getParticipantUserIdsMock.mockResolvedValue(["other-user"]);
+      const { client, toMock, leaveMock } = createMockSocket({});
+      client.data = { userId: mockUserId };
+      client.rooms.add(`conv:${mockConvId}`);
+
+      await (event === "start"
+        ? gateway.handleTypingStart(client, { conversationId: mockConvId })
+        : gateway.handleTypingStop(client, { conversationId: mockConvId }));
+
+      expect(leaveMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
+      expect(toMock).not.toHaveBeenCalled();
+      expect(redisSetMock).not.toHaveBeenCalled();
+      expect(redisDelMock).not.toHaveBeenCalled();
+    });
+
+    it.each(["start", "stop"] as const)(
+      "does not broadcast %s to an empty recipient set",
+      async (event) => {
+        getParticipantUserIdsMock.mockResolvedValue([mockUserId]);
+        const { client, toMock } = createMockSocket({});
+        client.data = { userId: mockUserId };
+
+        await (event === "start"
+          ? gateway.handleTypingStart(client, { conversationId: mockConvId })
+          : gateway.handleTypingStop(client, { conversationId: mockConvId }));
+
+        expect(toMock).not.toHaveBeenCalled();
+      },
+    );
     it("broadcasts typing:start to room excluding sender", async () => {
-      const { client, toMock } = createMockSocket({});
+      const { client, toMock, roomEmitMock } = createMockSocket({});
       client.data = { userId: mockUserId };
 
       await gateway.handleTypingStart(client, { conversationId: mockConvId });
 
-      expect(toMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
+      expect(toMock).toHaveBeenCalledWith(["user:other-user"]);
+      expect(redisSetMock).toHaveBeenCalledWith(
+        `typing:${mockConvId}:${mockUserId}`,
+        "1",
+        "EX",
+        TYPING_TTL_SECS,
+      );
+      expect(roomEmitMock).toHaveBeenCalledWith("typing", {
+        conversationId: mockConvId,
+        userId: mockUserId,
+        isTyping: true,
+      });
     });
 
     it("broadcasts typing:stop to room excluding sender", async () => {
-      const { client, toMock } = createMockSocket({});
+      const { client, toMock, roomEmitMock } = createMockSocket({});
       client.data = { userId: mockUserId };
 
       await gateway.handleTypingStop(client, { conversationId: mockConvId });
 
-      expect(toMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
+      expect(toMock).toHaveBeenCalledWith(["user:other-user"]);
+      expect(redisDelMock).toHaveBeenCalledWith(`typing:${mockConvId}:${mockUserId}`);
+      expect(roomEmitMock).toHaveBeenCalledWith("typing", {
+        conversationId: mockConvId,
+        userId: mockUserId,
+        isTyping: false,
+      });
     });
 
     it("emits typing:start without waiting for the redis write", async () => {
@@ -836,7 +925,7 @@ describe("ChatGateway", () => {
       // Resolves while the Redis write is still pending — the handler must not await it
       await gateway.handleTypingStart(client, { conversationId: mockConvId });
 
-      expect(toMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
+      expect(toMock).toHaveBeenCalledWith(["user:other-user"]);
       expect(redisSetMock).toHaveBeenCalledWith(
         `typing:${mockConvId}:${mockUserId}`,
         "1",
@@ -858,7 +947,7 @@ describe("ChatGateway", () => {
 
       await gateway.handleTypingStop(client, { conversationId: mockConvId });
 
-      expect(toMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
+      expect(toMock).toHaveBeenCalledWith(["user:other-user"]);
       expect(redisDelMock).toHaveBeenCalledWith(`typing:${mockConvId}:${mockUserId}`);
       releaseDelete();
     });
@@ -874,8 +963,8 @@ describe("ChatGateway", () => {
       await gateway.handleTypingStart(startClient, { conversationId: mockConvId });
       await gateway.handleTypingStop(stopClient, { conversationId: mockConvId });
 
-      expect(startTo).toHaveBeenCalledWith(`conv:${mockConvId}`);
-      expect(stopTo).toHaveBeenCalledWith(`conv:${mockConvId}`);
+      expect(startTo).toHaveBeenCalledWith(["user:other-user"]);
+      expect(stopTo).toHaveBeenCalledWith(["user:other-user"]);
     });
   });
 

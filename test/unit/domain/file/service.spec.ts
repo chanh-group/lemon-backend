@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import { FileService } from "../../../../src/domain/file/service.js";
 import type { StorageService } from "../../../../src/utils/storage/store.js";
 import { StorageError } from "../../../../src/utils/storage/error.js";
-import { avatarUrlForObjectKey } from "../../../../src/utils/storage/avatar.js";
+import {
+  avatarUrlForObjectKey,
+  groupAvatarUrlForObjectKey,
+} from "../../../../src/utils/storage/avatar.js";
+import type { ConversationRepository } from "../../../../src/domain/conversation/repository.js";
 
 describe("FileService", () => {
   let service: FileService;
@@ -17,25 +21,132 @@ describe("FileService", () => {
     (params: { objectKey: string; body: Buffer; mimeType: string }) => Promise<void>
   >;
   let headObjectMock: Mock;
+  let getObjectMock: Mock;
   let presignGetMock: Mock;
+  let isParticipantMock: Mock;
+  let findByIdMock: Mock;
+  let getGroupAvatarUrlMock: Mock;
+  let getAccessibleGroupAvatarUrlMock: Mock;
+  let deleteObjectsMock: Mock;
 
   const storage = () =>
     ({
       presignPut: presignPutMock,
       putObject: putObjectMock,
       headObject: headObjectMock,
+      getObject: getObjectMock,
       presignGet: presignGetMock,
+      deleteObjects: deleteObjectsMock,
     }) as unknown as StorageService;
 
   beforeEach(() => {
     presignPutMock = vi.fn().mockResolvedValue({ uploadUrl: "https://s3.example/signed" });
     putObjectMock = vi.fn().mockResolvedValue(undefined);
     headObjectMock = vi.fn().mockResolvedValue({ contentLength: 1024, contentType: "image/png" });
+    getObjectMock = vi.fn().mockResolvedValue({
+      body: new Uint8Array([1, 2, 3]),
+      contentLength: 3,
+      contentType: "image/png",
+    });
     presignGetMock = vi.fn().mockResolvedValue({ downloadUrl: "https://s3.example/avatar" });
-    service = new FileService(storage());
+    isParticipantMock = vi.fn().mockResolvedValue(true);
+    findByIdMock = vi.fn().mockResolvedValue({ kind: "GROUP", myRole: "ADMIN" });
+    getGroupAvatarUrlMock = vi.fn();
+    getAccessibleGroupAvatarUrlMock = vi.fn();
+    deleteObjectsMock = vi.fn().mockResolvedValue({ deleted: [], failed: [] });
+    service = new FileService(storage(), {
+      isParticipant: isParticipantMock,
+      findById: findByIdMock,
+      getGroupAvatarUrl: getGroupAvatarUrlMock,
+      getAccessibleGroupAvatarUrl: getAccessibleGroupAvatarUrlMock,
+    } as unknown as ConversationRepository);
   });
 
   afterEach(() => vi.unstubAllEnvs());
+
+  it("uploads an avatar for an active group admin and gives it a group-scoped URL", async () => {
+    vi.stubEnv("API_PUBLIC_URL", "https://api.example.com");
+    findByIdMock.mockResolvedValueOnce({ kind: "GROUP", myRole: "ADMIN" });
+    const groupId = "0193a2b1-0000-7000-8000-000000000010";
+    const file = { buffer: Buffer.from("image"), size: 5, mimetype: "image/png" };
+
+    const url = await service.uploadGroupAvatar("user-1", groupId, file);
+
+    const objectKey = putObjectMock.mock.calls[0][0].objectKey;
+    expect(objectKey).toMatch(new RegExp(`^group-avatars/${groupId}/[0-9a-f-]+\\.png$`));
+    expect(url).toBe(groupAvatarUrlForObjectKey(groupId, objectKey));
+    expect(findByIdMock).toHaveBeenCalledWith(groupId, "user-1");
+  });
+
+  it("rejects group avatar upload for a regular member", async () => {
+    findByIdMock.mockResolvedValueOnce({ kind: "GROUP", myRole: "MEMBER" });
+    const groupId = "0193a2b1-0000-7000-8000-000000000010";
+    const file = { buffer: Buffer.from("image"), size: 5, mimetype: "image/png" };
+
+    await expect(service.uploadGroupAvatar("user-1", groupId, file)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
+
+  it("does not store a group avatar for a nonmember", async () => {
+    findByIdMock.mockResolvedValueOnce(null);
+    await expect(
+      service.uploadGroupAvatar("user-1", "group-1", {
+        buffer: Buffer.from("image"),
+        size: 5,
+        mimetype: "image/png",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_PARTICIPANT" });
+    expect(putObjectMock).not.toHaveBeenCalled();
+  });
+
+  it("serves only the currently attached group avatar to active participants", async () => {
+    vi.stubEnv("API_PUBLIC_URL", "https://api.example.com");
+    const groupId = "0193a2b1-0000-7000-8000-000000000010";
+    const fileName = "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b.png";
+    const objectKey = `group-avatars/${groupId}/${fileName}`;
+
+    getAccessibleGroupAvatarUrlMock.mockResolvedValueOnce(null);
+    await expect(service.getGroupAvatar("user-1", groupId, fileName)).rejects.toMatchObject({
+      code: "NOT_PARTICIPANT",
+    });
+
+    getAccessibleGroupAvatarUrlMock.mockResolvedValueOnce({ avatarUrl: null });
+    await expect(service.getGroupAvatar("user-1", groupId, fileName)).rejects.toMatchObject({
+      code: "CONVERSATION_NOT_FOUND",
+    });
+
+    const newerFileName = "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6c.png";
+    getAccessibleGroupAvatarUrlMock.mockResolvedValueOnce({
+      avatarUrl: groupAvatarUrlForObjectKey(groupId, `group-avatars/${groupId}/${newerFileName}`),
+    });
+    await expect(service.getGroupAvatar("user-1", groupId, fileName)).rejects.toMatchObject({
+      code: "CONVERSATION_NOT_FOUND",
+    });
+
+    getAccessibleGroupAvatarUrlMock.mockResolvedValueOnce({
+      avatarUrl: groupAvatarUrlForObjectKey(groupId, objectKey),
+    });
+    const result = await service.getGroupAvatar("user-1", groupId, fileName);
+    expect(result.contentType).toBe("image/png");
+    expect(getObjectMock).toHaveBeenCalledWith(objectKey);
+    expect(isParticipantMock).not.toHaveBeenCalled();
+    expect(getGroupAvatarUrlMock).not.toHaveBeenCalled();
+  });
+
+  it("does not treat an unconfirmed avatar deletion as successful", async () => {
+    const groupId = "0193a2b1-0000-7000-8000-000000000010";
+    vi.stubEnv("API_PUBLIC_URL", "https://api.example.com");
+    const key = `group-avatars/${groupId}/0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b.png`;
+    const avatarUrl = groupAvatarUrlForObjectKey(groupId, key);
+    deleteObjectsMock.mockResolvedValueOnce({ deleted: [], failed: [key] });
+
+    await expect(service.deleteGroupAvatarObject(groupId, avatarUrl)).rejects.toBeInstanceOf(
+      StorageError,
+    );
+    deleteObjectsMock.mockResolvedValueOnce({ deleted: [key], failed: [] });
+    await expect(service.deleteGroupAvatarObject(groupId, avatarUrl)).resolves.toBeUndefined();
+  });
 
   it("presigns an image upload with a server-generated user-scoped key", async () => {
     const result = await service.presign("user-1", {
@@ -177,6 +288,20 @@ describe("FileService", () => {
     expect(result.uploadUrl).toBe("https://s3.example/signed");
     expect(result.objectKey).toContain("chat/0193a2b1-0000-7000-8000-000000000001/");
     expect(result.objectKey).toContain("T_i_li_u_B_o_C_o.pdf");
+  });
+
+  it("rejects chat uploads when the user is not an active conversation member", async () => {
+    isParticipantMock.mockResolvedValue(false);
+    await expect(
+      service.presign("user-1", {
+        kind: "CHAT_FILE",
+        conversationId: "0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b",
+        sizeBytes: 1024,
+        mimeType: "application/pdf",
+        fileName: "notes.pdf",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_PARTICIPANT" });
+    expect(presignPutMock).not.toHaveBeenCalled();
   });
 
   it("rejects chat files exceeding 25MB", async () => {

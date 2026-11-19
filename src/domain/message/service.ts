@@ -10,7 +10,6 @@ import {
   type MessageRepository,
   type ReplyTargetMessage,
 } from "./repository.js";
-import type { Message } from "./schema.js";
 import type { SendMessageDto } from "./dto/request.js";
 import type {
   MessageReactionSummary,
@@ -75,6 +74,12 @@ export class MessageService {
     };
   }
 
+  private async attachSender<T extends MessageResponse>(response: T): Promise<T> {
+    const [sender] = await this.messageRepo.findSenderProfiles([response.senderId]);
+    if (sender) response.sender = sender;
+    return response;
+  }
+
   async sendMessage(
     senderId: string,
     conversationId: string,
@@ -94,6 +99,14 @@ export class MessageService {
       if (!sourceMessage) throw new BusinessError("MESSAGE_NOT_FOUND");
       if (sourceMessage) {
         await this.assertDirectConversationAllowed(sourceMessage.conversationId, senderId);
+        if (
+          !(await this.convRepo.canAccessMessage(
+            sourceMessage.conversationId,
+            senderId,
+            sourceMessage.id,
+          ))
+        )
+          throw new BusinessError("MESSAGE_NOT_FOUND");
         if (sourceMessage.deletedAt) throw new BusinessError("MESSAGE_REVOKED");
         if (!["TEXT", "IMAGE", "VIDEO", "AUDIO", "FILE"].includes(sourceMessage.kind)) {
           throw new BusinessError("BAD_REQUEST");
@@ -160,16 +173,17 @@ export class MessageService {
         throw new BusinessError("INVALID_OBJECT_KEY");
       }
     });
-    await Promise.all(attachmentChecks);
+    const [reply] = await Promise.all([replyPromise, Promise.all(attachmentChecks)]);
 
-    let validatedReplyTarget: Message | null = null;
     if (dto.replyToId) {
-      const reply = await replyPromise;
-      if (!reply || reply.conversationId !== conversationId) {
+      if (
+        !reply ||
+        reply.conversationId !== conversationId ||
+        !(await this.convRepo.canAccessMessage(conversationId, senderId, reply.id))
+      ) {
         throw new BusinessError("BAD_REQUEST");
       }
       if (reply.deletedAt) throw new BusinessError("MESSAGE_REVOKED");
-      validatedReplyTarget = reply;
     }
 
     let bucket = "lemon-chat-storage";
@@ -214,23 +228,41 @@ export class MessageService {
       storyPreview: story?.storyPreview ?? null,
     });
 
-    const staleReplyTargetId =
-      message.replyToId && message.replyToId !== dto.replyToId ? message.replyToId : undefined;
-    const [response, staleReplyTarget] = await Promise.all([
+    const [mapped, target] = await Promise.all([
       toMessageResponseAsync(message, this.storage, senderId),
-      staleReplyTargetId
-        ? this.messageRepo.findById(staleReplyTargetId, false)
+      message.replyToId
+        ? this.messageRepo.findById(message.replyToId, false)
         : Promise.resolve(null),
     ]);
+    const response = await this.attachSender(mapped);
     if (message.replyToId) {
-      const target = staleReplyTargetId ? staleReplyTarget : validatedReplyTarget;
-      response.replyTarget =
-        target && target.conversationId === conversationId ? this.replyTarget(target) : null;
+      if (
+        target &&
+        target.conversationId === conversationId &&
+        (await this.convRepo.canAccessMessage(conversationId, senderId, target.id))
+      ) {
+        const replyTarget = this.replyTarget(target);
+        const [replySender] = await this.messageRepo.findSenderProfiles([target.senderId]);
+        if (replySender) replyTarget.sender = replySender;
+        response.replyTarget = replyTarget;
+      } else response.replyTarget = null;
     }
 
     if (isNew) {
-      // Emit realtime event to the conversation room
-      this.realtimeService.emitNewMessage(conversationId, response);
+      // replyTarget is viewer-dependent: a user can hide a message locally or
+      // be below the group's history boundary. Realtime events broadcast
+      // without replyTarget content to prevent cross-epoch leaks; clients
+      // fetch replyTarget on-demand via the authenticated quote endpoint if not cached.
+      const participantIds = await this.convRepo.getParticipantUserIds(conversationId);
+      const recipientPayloads = participantIds.map((participantId) => ({
+        userId: participantId,
+        payload: { ...response, replyTarget: null },
+      }));
+      this.realtimeService.emitNewMessage(
+        conversationId,
+        { ...response, replyTarget: null },
+        recipientPayloads,
+      );
     }
 
     return response;
@@ -246,30 +278,72 @@ export class MessageService {
     const [, cursorInConversation, afterInConversation] = await Promise.all([
       this.assertDirectConversationAllowed(conversationId, userId),
       cursor
-        ? this.convRepo.isMessageInConversation(conversationId, cursor)
+        ? this.convRepo.canAccessMessage(conversationId, userId, cursor)
         : Promise.resolve(true),
-      after ? this.convRepo.isMessageInConversation(conversationId, after) : Promise.resolve(true),
+      after ? this.convRepo.canAccessMessage(conversationId, userId, after) : Promise.resolve(true),
     ]);
     if (!cursorInConversation || !afterInConversation) {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
 
-    const timeline = await this.messageRepo.findTimeline(conversationId, cursor, limit, after);
-    const response = await toMessageTimelineAsync(timeline, this.storage, userId);
+    const timeline = await this.messageRepo.findTimeline(
+      conversationId,
+      userId,
+      cursor,
+      limit,
+      after,
+    );
+    if (timeline.authorized === false) throw new BusinessError("NOT_PARTICIPANT");
     const ids = [
       ...new Set(timeline.items.flatMap((item) => (item.replyToId ? [item.replyToId] : []))),
     ];
+    const [response, senderProfiles, targets] = await Promise.all([
+      toMessageTimelineAsync(timeline, this.storage, userId),
+      this.messageRepo.findSenderProfiles(timeline.items.map(({ senderId }) => senderId)),
+      ids.length
+        ? this.messageRepo.findReplyTargets(conversationId, ids, userId)
+        : Promise.resolve([]),
+    ]);
+    const sendersById = new Map(senderProfiles.map((sender) => [sender.id, sender]));
+    for (const message of response.items) message.sender = sendersById.get(message.senderId);
     if (ids.length) {
-      const targets = await this.messageRepo.findReplyTargets(conversationId, ids);
       const byId = new Map(targets.map((target) => [target.id, target]));
+      const targetSenders = await this.messageRepo.findSenderProfiles(
+        targets.map(({ senderId }) => senderId),
+      );
+      const targetSendersById = new Map(targetSenders.map((sender) => [sender.id, sender]));
       for (const item of response.items) {
         if (item.replyToId) {
           const target = byId.get(item.replyToId);
-          item.replyTarget = target ? this.replyTarget(target) : null;
+          if (target) {
+            const replyTarget = this.replyTarget(target);
+            const sender = targetSendersById.get(target.senderId);
+            if (sender) replyTarget.sender = sender;
+            item.replyTarget = replyTarget;
+          } else item.replyTarget = null;
         }
       }
     }
     return response;
+  }
+
+  async getReplyTarget(
+    userId: string,
+    conversationId: string,
+    messageId: string,
+  ): Promise<ReplyTargetResponse> {
+    const isMember = await this.convRepo.isParticipant(conversationId, userId);
+    if (!isMember) {
+      throw new BusinessError("NOT_PARTICIPANT");
+    }
+    const [target] = await this.messageRepo.findReplyTargets(conversationId, [messageId], userId);
+    if (!target) {
+      throw new BusinessError("MESSAGE_NOT_FOUND");
+    }
+    const replyTarget = this.replyTarget(target);
+    const [replySender] = await this.messageRepo.findSenderProfiles([target.senderId]);
+    if (replySender) replyTarget.sender = replySender;
+    return replyTarget;
   }
 
   private async assertDirectConversationAllowed(
@@ -290,7 +364,9 @@ export class MessageService {
     if (!msg) {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
-    await this.assertDirectConversationAllowed(msg.conversationId, userId);
+    const directPartnerId = await this.assertDirectConversationAllowed(msg.conversationId, userId);
+    if (!(await this.convRepo.canAccessMessage(msg.conversationId, userId, msg.id)))
+      throw new BusinessError("MESSAGE_NOT_FOUND");
 
     if (msg.deletedAt) {
       throw new BusinessError("MESSAGE_REVOKED");
@@ -317,8 +393,11 @@ export class MessageService {
       return await this.resolveWriteMiss(messageId, userId, msg.conversationId);
     }
 
-    const response = await toMessageResponseAsync(updated, this.storage);
-    this.realtimeService.emitMessageUpdated(response.conversationId, response);
+    const response = await this.attachSender(await toMessageResponseAsync(updated, this.storage));
+    const recipientUserIds = directPartnerId
+      ? undefined
+      : await this.getVisibleGroupRecipients(response.conversationId, response.id);
+    this.realtimeService.emitMessageUpdated(response.conversationId, response, recipientUserIds);
     return response;
   }
 
@@ -327,7 +406,9 @@ export class MessageService {
     if (!msg) {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
-    await this.assertDirectConversationAllowed(msg.conversationId, userId);
+    const directPartnerId = await this.assertDirectConversationAllowed(msg.conversationId, userId);
+    if (!(await this.convRepo.canAccessMessage(msg.conversationId, userId, msg.id)))
+      throw new BusinessError("MESSAGE_NOT_FOUND");
 
     if (msg.deletedAt) {
       throw new BusinessError("MESSAGE_REVOKED");
@@ -342,12 +423,24 @@ export class MessageService {
       return await this.resolveWriteMiss(messageId, userId, msg.conversationId);
     }
 
-    const response = await toMessageResponseAsync(revoked, this.storage);
-    this.realtimeService.emitMessageRevoked(response.conversationId, {
-      id: response.id,
-      deletedAt: response.deletedAt!,
-    });
+    const response = await this.attachSender(await toMessageResponseAsync(revoked, this.storage));
+    const recipientUserIds = directPartnerId
+      ? undefined
+      : await this.getVisibleGroupRecipients(response.conversationId, response.id);
+    this.realtimeService.emitMessageRevoked(
+      response.conversationId,
+      { id: response.id, deletedAt: response.deletedAt! },
+      recipientUserIds,
+    );
     return response;
+  }
+
+  async hideMessageForMe(userId: string, messageId: string): Promise<void> {
+    // The repository checks current membership and history inside the write
+    // transaction. A hidden message must remain eligible for an idempotent retry.
+    const result = await this.messageRepo.hideForUser(messageId, userId);
+    if (result.inserted)
+      this.realtimeService.emitMessageHidden(userId, result.conversationId, messageId);
   }
 
   async reactToMessage(
@@ -355,17 +448,21 @@ export class MessageService {
     messageId: string,
     emoji: string,
   ): Promise<{ messageId: string; reactions: MessageReactionSummary[] }> {
-    const { reactions, conversationId } = await this.messageRepo.reactMessage(
-      userId,
-      messageId,
-      emoji,
+    const message = await this.messageRepo.findById(messageId, false);
+    if (!message || message.deletedAt) throw new BusinessError("MESSAGE_NOT_FOUND");
+    const partnerId = await this.assertDirectConversationAllowed(message.conversationId, userId);
+    if (!(await this.convRepo.canAccessMessage(message.conversationId, userId, message.id)))
+      throw new BusinessError("MESSAGE_NOT_FOUND");
+    const result = await this.messageRepo.reactMessage(userId, messageId, emoji);
+    const { reactions, conversationId } = result;
+    const recipientUserIds = partnerId
+      ? undefined
+      : await this.getVisibleGroupRecipients(conversationId, messageId);
+    this.realtimeService.emitMessageReaction(
+      conversationId,
+      { messageId, userId, emoji, reactions },
+      recipientUserIds,
     );
-    this.realtimeService.emitMessageReaction(conversationId, {
-      messageId,
-      userId,
-      emoji,
-      reactions,
-    });
     return { messageId, reactions };
   }
 
@@ -379,5 +476,12 @@ export class MessageService {
       throw new BusinessError("MESSAGE_NOT_FOUND");
     }
     return await toMessageResponseAsync(missed, this.storage);
+  }
+
+  private async getVisibleGroupRecipients(
+    conversationId: string,
+    messageId: string,
+  ): Promise<string[]> {
+    return this.convRepo.getMessageRecipientUserIds(conversationId, messageId);
   }
 }

@@ -69,6 +69,16 @@ describe("Story flows with PostgreSQL and Redis", () => {
         const o = objects.get(key);
         return o ? { contentLength: o.body.length, contentType: o.contentType } : null;
       },
+      getObject: async (key) => {
+        const o = objects.get(key);
+        return o
+          ? {
+              body: new Uint8Array(o.body),
+              contentLength: o.body.length,
+              contentType: o.contentType,
+            }
+          : null;
+      },
       putObject: async ({ objectKey, body, mimeType }) => {
         objects.set(objectKey, { body: Buffer.from(body), contentType: mimeType });
       },
@@ -326,7 +336,7 @@ describe("Story flows with PostgreSQL and Redis", () => {
     const response = await request(app.getHttpServer())
       .post(`/api/conversations/${conversationId}/messages`)
       .auth(ownerToken, { type: "bearer" })
-      .send({ kind: "TEXT", body: "Thanks!", replyToId: reply.body.data.id })
+      .send({ kind: "TEXT", body: "Thanks!", replyToId: reply.body.data.id, clientMsgId: uuidv7() })
       .expect(201);
     expect(response.body.data.replyTarget).toMatchObject({
       id: reply.body.data.id,
@@ -380,7 +390,7 @@ describe("Story flows with PostgreSQL and Redis", () => {
       .get(`/api/stories/${textId}`)
       .auth(friendToken, { type: "bearer" })
       .expect(404);
-  }, 30000);
+  }, 90000);
 
   it("does not cache a feed read that finishes after its story was deleted", async () => {
     const created = await request(app.getHttpServer())

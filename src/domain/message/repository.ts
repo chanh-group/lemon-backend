@@ -54,6 +54,8 @@ export interface MessageTimelineResult {
   items: MessageResponseSource[];
   nextCursor?: string;
   hasMore: boolean;
+  /** False when viewer had no active membership at the query snapshot. */
+  authorized?: boolean;
 }
 
 export interface CreatedMessageResult {
@@ -62,6 +64,9 @@ export interface CreatedMessageResult {
 }
 
 export interface MessageRepository {
+  findSenderProfiles(
+    senderIds: string[],
+  ): Promise<Array<{ id: string; username: string; fullName: string; avatarUrl: string | null }>>;
   createMessageWithConversationUpdate(messageData: {
     conversationId: string;
     senderId: string;
@@ -77,12 +82,21 @@ export interface MessageRepository {
   }): Promise<CreatedMessageResult>;
   findTimeline(
     conversationId: string,
+    viewerId: string,
     cursor?: string,
     limit?: number,
     after?: string,
   ): Promise<MessageTimelineResult>;
+  hideForUser(
+    messageId: string,
+    userId: string,
+  ): Promise<{ conversationId: string; inserted: boolean }>;
   findById(messageId: string, includeDetails?: boolean): Promise<MessageWithAttachments | null>;
-  findReplyTargets(conversationId: string, messageIds: string[]): Promise<ReplyTargetMessage[]>;
+  findReplyTargets(
+    conversationId: string,
+    messageIds: string[],
+    viewerId: string,
+  ): Promise<ReplyTargetMessage[]>;
   resolveWriteMiss(
     messageId: string,
     userId: string,

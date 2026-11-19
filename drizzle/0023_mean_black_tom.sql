@@ -1,0 +1,1 @@
+ALTER TABLE "conversations" ADD COLUMN "create_request_hash" text;

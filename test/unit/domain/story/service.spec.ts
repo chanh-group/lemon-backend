@@ -215,6 +215,7 @@ describe("StoryService", () => {
       presignGet: presignGetMock,
       putObject: vi.fn(),
       headObject: headObjectMock,
+      getObject: vi.fn(),
       deleteObjects: vi.fn(),
       getBucket: getBucketMock,
     };

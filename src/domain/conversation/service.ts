@@ -1,4 +1,6 @@
 import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
+import { createHash } from "node:crypto";
+import type { CursorPage } from "../shared.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { USER_REPOSITORY, type UserRepository } from "../user/repository.js";
 import {
@@ -12,13 +14,18 @@ import { UNREAD_TTL_SECONDS } from "../../utils/cache/constants.js";
 import { presenceUserKey, unreadCountKey } from "../../utils/cache/keys.js";
 import { RealtimeService } from "../realtime/realtime.service.js";
 import type { ConversationResponse } from "./dto/response.js";
+import type { ConversationMemberResponse } from "./dto/response.js";
 import { toConversationResponse } from "./dto/mapper.js";
 import { FriendService } from "../friend/service.js";
 import { SystemError } from "../../utils/errors/system.js";
 import { RedisHealthService } from "../../configs/redis-health.js";
 import { RedisMetricsService } from "../../configs/redis-metrics.js";
-import type { CursorPage } from "../shared.js";
 import { DEFAULT_PAGE_SIZE } from "../pagination.constants.js";
+import {
+  GROUP_MAX_MEMBERS,
+  GROUP_MAX_NAME_LENGTH,
+  GROUP_MIN_INVITED_MEMBERS,
+} from "./constants.js";
 
 function requireRedisPipelineResults(
   results: [Error | null, unknown][] | null,
@@ -145,6 +152,202 @@ export class ConversationService {
     return toConversationResponse(conversation);
   }
 
+  async createGroup(
+    userId: string,
+    input: { title: string; memberIds: string[]; clientRequestId: string },
+  ): Promise<ConversationResponse> {
+    if (
+      input.title.trim().length < 1 ||
+      input.title.trim().length > GROUP_MAX_NAME_LENGTH ||
+      input.memberIds.length < GROUP_MIN_INVITED_MEMBERS ||
+      input.memberIds.length > GROUP_MAX_MEMBERS - 1 ||
+      new Set(input.memberIds).size !== input.memberIds.length ||
+      input.memberIds.includes(userId)
+    ) {
+      throw new BusinessError("BAD_REQUEST");
+    }
+    const createRequestHash = createHash("sha256")
+      .update(JSON.stringify({ title: input.title.trim(), memberIds: [...input.memberIds].sort() }))
+      .digest("hex");
+    const existing = await this.convRepo.findGroupCreateRequest(userId, input.clientRequestId);
+    const replayExisting = async (match: typeof existing) => {
+      if (!match) return null;
+      if (match.deletedAt || match.createRequestHash !== createRequestHash) {
+        throw new BusinessError("CONFLICT");
+      }
+      const conversation = await this.convRepo.findById(match.id, userId);
+      if (!conversation) throw new BusinessError("NOT_PARTICIPANT");
+      return toConversationResponse(conversation);
+    };
+    const replay = await replayExisting(existing);
+    if (replay) return replay;
+
+    const replayAfterValidationRace = async () => {
+      const raced = await this.convRepo.findGroupCreateRequest(userId, input.clientRequestId);
+      return replayExisting(raced);
+    };
+
+    const [creator, users, accepted] = await Promise.all([
+      this.userRepo.findById(userId),
+      this.userRepo.findByIds(input.memberIds),
+      this.friendService.findAcceptedFriendIds(userId, input.memberIds),
+    ]);
+    if (!creator) {
+      const raced = await replayAfterValidationRace();
+      if (raced) return raced;
+      throw new BusinessError("USER_NOT_FOUND");
+    }
+    if (users.length !== input.memberIds.length || users.some((user) => !user.isActive)) {
+      const raced = await replayAfterValidationRace();
+      if (raced) return raced;
+      throw new BusinessError("USER_NOT_FOUND");
+    }
+    if (accepted.size !== input.memberIds.length) {
+      const raced = await replayAfterValidationRace();
+      if (raced) return raced;
+      throw new BusinessError("FRIENDSHIP_REQUIRED");
+    }
+    const result = await this.convRepo.createGroup({
+      creatorId: userId,
+      ...input,
+      title: input.title.trim(),
+      createRequestHash,
+    });
+    if (result.created) {
+      const participantIds = await this.convRepo.getParticipantUserIds(result.conversation.id);
+      this.realtimeService.emitGroupEvent(participantIds, "conversation:created", {
+        conversationId: result.conversation.id,
+      });
+    }
+    return toConversationResponse(result.conversation);
+  }
+
+  async listGroupMembers(
+    conversationId: string,
+    userId: string,
+  ): Promise<ConversationMemberResponse[]> {
+    await this.requireGroupMember(conversationId, userId);
+    return this.convRepo.listMembers(conversationId);
+  }
+
+  private async requireGroupMember(conversationId: string, userId: string) {
+    const group = await this.convRepo.findById(conversationId, userId);
+    if (!group) throw new BusinessError("NOT_PARTICIPANT");
+    if (group.kind !== "GROUP") throw new BusinessError("BAD_REQUEST");
+    return group;
+  }
+
+  private async requireGroupManager(conversationId: string, userId: string) {
+    const group = await this.requireGroupMember(conversationId, userId);
+    if (group.myRole !== "ADMIN") {
+      throw new BusinessError("FORBIDDEN");
+    }
+    return group;
+  }
+
+  async addGroupMembers(conversationId: string, actorId: string, memberIds: string[]) {
+    await this.requireGroupManager(conversationId, actorId);
+    if (new Set(memberIds).size !== memberIds.length) throw new BusinessError("BAD_REQUEST");
+    const accepted = await this.friendService.findAcceptedFriendIds(actorId, memberIds);
+    if (accepted.size !== memberIds.length) throw new BusinessError("FRIENDSHIP_REQUIRED");
+    const users = await this.userRepo.findByIds(memberIds);
+    if (users.length !== memberIds.length || users.some((user) => !user.isActive)) {
+      throw new BusinessError("USER_NOT_FOUND");
+    }
+    await this.convRepo.addGroupMembers(conversationId, actorId, memberIds);
+    const userIds = await this.convRepo.getParticipantUserIds(conversationId);
+    this.realtimeService.emitGroupEvent(userIds, "conversation:updated", { conversationId });
+    this.realtimeService.emitGroupEvent(userIds, "member:added", { conversationId, memberIds });
+    return this.getById(conversationId, actorId);
+  }
+
+  async removeGroupMember(
+    conversationId: string,
+    actorId: string,
+    targetId: string,
+  ): Promise<void> {
+    await this.requireGroupManager(conversationId, actorId);
+    if (actorId === targetId) throw new BusinessError("BAD_REQUEST");
+    const target = await this.convRepo.getGroupMembership(conversationId, targetId);
+    if (!target) throw new BusinessError("FORBIDDEN");
+    await this.convRepo.removeGroupMember(conversationId, actorId, targetId);
+    this.realtimeService.leaveConversation([targetId], conversationId);
+    this.realtimeService.emitGroupEvent([targetId], "member:removed", {
+      conversationId,
+      userId: targetId,
+      removedBy: actorId,
+    });
+    this.realtimeService.emitGroupEvent(
+      await this.convRepo.getParticipantUserIds(conversationId),
+      "conversation:updated",
+      { conversationId },
+    );
+  }
+
+  async updateGroupTitle(conversationId: string, actorId: string, title: string): Promise<void> {
+    await this.requireGroupManager(conversationId, actorId);
+    await this.convRepo.updateGroup(conversationId, actorId, title);
+    const memberIds = await this.convRepo.getParticipantUserIds(conversationId);
+    this.realtimeService.emitGroupEvent(memberIds, "conversation:updated", { conversationId });
+  }
+
+  async updateGroupAvatar(
+    conversationId: string,
+    actorId: string,
+    avatarUrl: string,
+  ): Promise<void> {
+    await this.requireGroupManager(conversationId, actorId);
+    await this.convRepo.updateGroupAvatar(conversationId, actorId, avatarUrl);
+    try {
+      const memberIds = await this.convRepo.getParticipantUserIds(conversationId);
+      this.realtimeService.emitGroupEvent(memberIds, "conversation:updated", { conversationId });
+    } catch (err) {
+      this.logger.warn("Group avatar saved but realtime notification failed", {
+        err,
+        conversationId,
+      });
+    }
+  }
+
+  async updateGroupRole(
+    conversationId: string,
+    actorId: string,
+    targetId: string,
+    role: "ADMIN" | "MEMBER",
+  ) {
+    await this.requireGroupManager(conversationId, actorId);
+    if (actorId === targetId || !(await this.convRepo.getGroupMembership(conversationId, targetId)))
+      throw new BusinessError("BAD_REQUEST");
+    await this.convRepo.updateMemberRole(conversationId, actorId, targetId, role);
+    this.realtimeService.emitGroupEvent(
+      await this.convRepo.getParticipantUserIds(conversationId),
+      "member:role-changed",
+      { conversationId, userId: targetId, role },
+    );
+  }
+
+  async leaveGroup(conversationId: string, userId: string) {
+    const result = await this.convRepo.leaveGroup(conversationId, userId);
+    this.realtimeService.leaveConversation([userId], conversationId);
+    this.realtimeService.emitGroupEvent([userId], "member:removed", {
+      conversationId,
+      userId,
+      left: true,
+    });
+    this.realtimeService.emitGroupEvent(
+      await this.convRepo.getParticipantUserIds(conversationId),
+      "conversation:updated",
+      { conversationId },
+    );
+    return result;
+  }
+
+  async disbandGroup(conversationId: string, actorId: string): Promise<void> {
+    const memberIds = await this.convRepo.disbandGroup(conversationId, actorId);
+    this.realtimeService.leaveConversation(memberIds, conversationId);
+    this.realtimeService.emitGroupEvent(memberIds, "conversation:disbanded", { conversationId });
+  }
+
   private joinParticipantsBestEffort(conversationId: string, participantIds: string[]): void {
     try {
       this.realtimeService.joinConversation(participantIds, conversationId);
@@ -178,10 +381,7 @@ export class ConversationService {
     // Enrich with unread counts and presence from Redis
     if (list.length > 0) {
       if (!this.redis) {
-        const counts = await this.rebuildUnreadBatch(
-          list.map((conv) => conv.id),
-          userId,
-        );
+        const counts = await this.rebuildUnreadBatch(list, userId);
         for (const conv of list) conv.unreadCount = counts.get(conv.id) ?? 0;
         return { ...page, items: list.map(toConversationResponse) };
       }
@@ -245,8 +445,10 @@ export class ConversationService {
       }
 
       if (missing.length > 0) {
-        const conversationIds = missing.map((i) => list[i].id);
-        const counts = await this.rebuildUnreadBatch(conversationIds, userId);
+        const counts = await this.rebuildUnreadBatch(
+          missing.map((i) => list[i]),
+          userId,
+        );
         await this.cacheUnreadCounts(
           userId,
           missing.map((i) => list[i]),
@@ -391,10 +593,20 @@ export class ConversationService {
   }
 
   private async rebuildUnreadBatch(
-    conversationIds: string[],
+    conversations: ConversationWithPartner[],
     userId: string,
   ): Promise<Map<string, number>> {
-    const key = JSON.stringify([userId, [...conversationIds].sort()]);
+    const conversationIds = conversations.map((conversation) => conversation.id);
+    const key = JSON.stringify([
+      userId,
+      conversations
+        .map((conversation) => [
+          conversation.id,
+          conversation.unreadRevision,
+          conversation.lastReadMessageId ?? null,
+        ])
+        .sort((a, b) => a[0]!.localeCompare(b[0]!)),
+    ]);
     const inFlight = this.unreadRebuildsInFlight.get(key);
     if (inFlight) return inFlight;
     const pending = this.countUnreadFromDatabase(conversationIds, userId).finally(() => {
@@ -444,14 +656,21 @@ export class ConversationService {
     if (!messageBelongsToConversation) {
       throw new BusinessError("BAD_REQUEST");
     }
+    if (!(await this.convRepo.canAccessMessage(conversationId, userId, lastReadMessageId))) {
+      throw new BusinessError("BAD_REQUEST");
+    }
 
     await this.convRepo.updateLastRead(conversationId, userId, lastReadMessageId);
 
     // Broadcast to room
-    this.realtimeService.emitReadUpdated(conversationId, {
-      userId,
-      lastReadMessageId,
-      readAt: new Date(),
-    });
+    const recipientUserIds =
+      conversation.kind === "GROUP"
+        ? await this.convRepo.getMessageRecipientUserIds(conversationId, lastReadMessageId)
+        : undefined;
+    this.realtimeService.emitReadUpdated(
+      conversationId,
+      { userId, lastReadMessageId, readAt: new Date() },
+      recipientUserIds,
+    );
   }
 }

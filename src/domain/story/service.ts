@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
+import { v7 as uuidv7 } from "uuid";
 import {
   STORY_ALLOWED_IMAGE_MIME,
   STORY_ALLOWED_VIDEO_MIME,
@@ -429,7 +430,7 @@ export class StoryService {
       await this.messageService.sendMessage(
         userId,
         conv.id,
-        { kind: "TEXT", body: emoji },
+        { kind: "TEXT", body: emoji, clientMsgId: uuidv7() },
         { kind: "STORY_REACTION", storyId: story.id, storyPreview: toStoryPreview(story) },
       );
     } catch (err) {
@@ -526,7 +527,7 @@ export class StoryService {
     const message = await this.messageService.sendMessage(
       userId,
       conv.id,
-      { kind: "TEXT", body: dto.body },
+      { kind: "TEXT", body: dto.body, clientMsgId: uuidv7() },
       { kind: "STORY_REPLY", storyId: story.id, storyPreview },
     );
 

@@ -21,11 +21,23 @@ describe("ConversationService", () => {
   let existsByIdMock: Mock;
   let findByIdMock: Mock;
   let isMessageInConversationMock: Mock;
+  let canAccessMessageMock: Mock;
   let updateLastReadMock: Mock;
   let countUnreadMock: Mock;
   let countUnreadBatchMock: Mock;
+  let createGroupMock: Mock;
+  let findGroupCreateRequestMock: Mock;
+  let updateGroupAvatarMock: Mock;
+  let updateGroupTitleMock: Mock;
+  let disbandGroupMock: Mock;
+  let leaveConversationMock: Mock;
+  let findAcceptedFriendIdsMock: Mock;
+  let getParticipantUserIdsMock: Mock;
+  let getMessageRecipientUserIdsMock: Mock;
+  let emitGroupEventMock: Mock;
 
   let findUserByIdMock: Mock;
+  let findUsersByIdsMock: Mock;
   let assertCanChatMock: Mock;
   let emitReadUpdatedMock: Mock;
   let joinConversationMock: Mock;
@@ -70,22 +82,42 @@ describe("ConversationService", () => {
     existsByIdMock = vi.fn();
     findByIdMock = vi.fn();
     isMessageInConversationMock = vi.fn().mockResolvedValue(true);
+    canAccessMessageMock = vi.fn().mockResolvedValue(true);
     updateLastReadMock = vi.fn();
     countUnreadMock = vi.fn();
     countUnreadBatchMock = vi.fn().mockResolvedValue(new Map());
+    createGroupMock = vi.fn();
+    findGroupCreateRequestMock = vi.fn().mockResolvedValue(null);
+    updateGroupAvatarMock = vi.fn().mockResolvedValue(undefined);
+    updateGroupTitleMock = vi.fn().mockResolvedValue(undefined);
+    disbandGroupMock = vi.fn().mockResolvedValue([userA, userB]);
+    leaveConversationMock = vi.fn();
+    findAcceptedFriendIdsMock = vi.fn().mockResolvedValue(new Set([userB]));
+    getParticipantUserIdsMock = vi.fn().mockResolvedValue([userA, userB]);
+    getMessageRecipientUserIdsMock = vi.fn().mockResolvedValue([userA, userB]);
+    emitGroupEventMock = vi.fn();
 
     findUserByIdMock = vi.fn();
+    findUsersByIdsMock = vi.fn();
     assertCanChatMock = vi.fn().mockResolvedValue(undefined);
     emitReadUpdatedMock = vi.fn();
     joinConversationMock = vi.fn();
 
     const mockConvRepo = {
       findDirectByParticipants: findDirectByParticipantsMock,
+      createGroup: createGroupMock,
+      findGroupCreateRequest: findGroupCreateRequestMock,
+      updateGroupAvatar: updateGroupAvatarMock,
+      updateGroup: updateGroupTitleMock,
+      disbandGroup: disbandGroupMock,
+      getParticipantUserIds: getParticipantUserIdsMock,
+      getMessageRecipientUserIds: getMessageRecipientUserIdsMock,
       createDirectConversation: createDirectConversationMock,
       findUserConversations: findUserConversationsMock,
       existsById: existsByIdMock,
       findById: findByIdMock,
       isMessageInConversation: isMessageInConversationMock,
+      canAccessMessage: canAccessMessageMock,
       updateLastRead: updateLastReadMock,
       countUnread: countUnreadMock,
       countUnreadByConversationIds: countUnreadBatchMock,
@@ -93,15 +125,18 @@ describe("ConversationService", () => {
 
     const mockUserRepo = {
       findById: findUserByIdMock,
+      findByIds: findUsersByIdsMock,
     } as unknown as UserRepository;
 
     const mockRealtimeService = {
       emitReadUpdated: emitReadUpdatedMock,
       joinConversation: joinConversationMock,
+      leaveConversation: leaveConversationMock,
+      emitGroupEvent: emitGroupEventMock,
     } as unknown as RealtimeService;
     const mockFriendService = {
       assertCanChat: assertCanChatMock,
-      findAcceptedFriendIds: vi.fn().mockResolvedValue(new Set([userB])),
+      findAcceptedFriendIds: findAcceptedFriendIdsMock,
     } as unknown as FriendService;
 
     redisPipelineExecMock = vi
@@ -132,6 +167,123 @@ describe("ConversationService", () => {
       mockRealtimeService,
       mockRedis,
     );
+  });
+
+  describe("updateGroupAvatar", () => {
+    const avatarUrl = "https://api.example.com/api/files/group-avatars/photo.png";
+
+    it("allows a group admin to attach an avatar and notifies members", async () => {
+      findByIdMock.mockResolvedValue({ id: convId, kind: "GROUP", myRole: "ADMIN" });
+      await expect(service.updateGroupAvatar(convId, userA, avatarUrl)).resolves.toBeUndefined();
+      expect(updateGroupAvatarMock).toHaveBeenCalledWith(convId, userA, avatarUrl);
+      expect(emitGroupEventMock).toHaveBeenCalledWith([userA, userB], "conversation:updated", {
+        conversationId: convId,
+      });
+    });
+
+    it("keeps the committed avatar when the notification lookup fails", async () => {
+      findByIdMock.mockResolvedValue({ id: convId, kind: "GROUP", myRole: "ADMIN" });
+      getParticipantUserIdsMock.mockRejectedValueOnce(
+        new Error("database temporarily unavailable"),
+      );
+
+      await expect(service.updateGroupAvatar(convId, userA, avatarUrl)).resolves.toBeUndefined();
+      expect(updateGroupAvatarMock).toHaveBeenCalledWith(convId, userA, avatarUrl);
+    });
+
+    it("rejects a regular member attempting to update the group photo", async () => {
+      findByIdMock.mockResolvedValue({ id: convId, kind: "GROUP", myRole: "MEMBER" });
+
+      await expect(service.updateGroupAvatar(convId, userA, avatarUrl)).rejects.toMatchObject({
+        code: "FORBIDDEN",
+      });
+      expect(updateGroupAvatarMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects a user who is no longer in the group", async () => {
+      findByIdMock.mockResolvedValue(null);
+      await expect(service.updateGroupAvatar(convId, userA, avatarUrl)).rejects.toMatchObject({
+        code: "NOT_PARTICIPANT",
+      });
+      expect(updateGroupAvatarMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it("rejects a regular member attempting to rename the group", async () => {
+    findByIdMock.mockResolvedValue({ id: convId, kind: "GROUP", myRole: "MEMBER" });
+
+    await expect(service.updateGroupTitle(convId, userA, "New title")).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    expect(updateGroupTitleMock).not.toHaveBeenCalled();
+  });
+
+  it("lets an admin rename the group", async () => {
+    findByIdMock.mockResolvedValue({ id: convId, kind: "GROUP", myRole: "ADMIN" });
+
+    await service.updateGroupTitle(convId, userA, "New title");
+
+    expect(updateGroupTitleMock).toHaveBeenCalledWith(convId, userA, "New title");
+    expect(emitGroupEventMock).toHaveBeenCalledWith([userA, userB], "conversation:updated", {
+      conversationId: convId,
+    });
+  });
+
+  it("notifies everyone and removes socket access when an admin disbands a group", async () => {
+    await service.disbandGroup(convId, userA);
+
+    expect(disbandGroupMock).toHaveBeenCalledWith(convId, userA);
+    expect(leaveConversationMock).toHaveBeenCalledWith([userA, userB], convId);
+    expect(emitGroupEventMock).toHaveBeenCalledWith([userA, userB], "conversation:disbanded", {
+      conversationId: convId,
+    });
+  });
+
+  describe("createGroup", () => {
+    it("requires at least two invited friends", async () => {
+      await expect(
+        service.createGroup(userA, {
+          title: "Project",
+          memberIds: [userB],
+          clientRequestId: "0193a2b1-0000-7000-8000-000000000030",
+        }),
+      ).rejects.toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
+      expect(createGroupMock).not.toHaveBeenCalled();
+    });
+
+    it("creates a group only with active friends and joins their realtime room", async () => {
+      const userC = "0193a2b1-0000-7000-8000-000000000003";
+      findUserByIdMock.mockResolvedValue({ isActive: true });
+      findUsersByIdsMock.mockResolvedValue([{ isActive: true }, { isActive: true }]);
+      findAcceptedFriendIdsMock.mockResolvedValue(new Set([userB, userC]));
+      const group: ConversationWithPartner = {
+        ...mockConvWithPartner,
+        kind: "GROUP",
+        directKey: null,
+        title: "Project",
+        memberCount: 3,
+        myRole: "ADMIN",
+        partner: undefined,
+      };
+      createGroupMock.mockResolvedValue({ conversation: group, created: true });
+
+      const response = await service.createGroup(userA, {
+        title: " Project ",
+        memberIds: [userB, userC],
+        clientRequestId: "0193a2b1-0000-7000-8000-000000000030",
+      });
+
+      expect(createGroupMock).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Project", creatorId: userA }),
+      );
+      expect(joinConversationMock).not.toHaveBeenCalled();
+      expect(emitGroupEventMock).toHaveBeenCalledWith(
+        [userA, userB],
+        "conversation:created",
+        expect.objectContaining({ conversationId: group.id }),
+      );
+      expect(response.kind).toBe("GROUP");
+    });
   });
 
   describe("getOrCreateDirect", () => {
@@ -403,6 +555,42 @@ describe("ConversationService", () => {
       expect(secondPage.items[0].unreadCount).toBe(3);
     });
 
+    it("does not share a rebuild across unread revisions", async () => {
+      findUserConversationsMock
+        .mockResolvedValueOnce({ items: [{ ...mockConvWithPartner }], hasMore: false })
+        .mockResolvedValueOnce({
+          items: [{ ...mockConvWithPartner, unreadRevision: "2" }],
+          hasMore: false,
+        });
+      redisPipelineExecMock
+        .mockResolvedValueOnce([[null, null], presenceOnline])
+        .mockResolvedValueOnce([[null, null], presenceOnline])
+        .mockResolvedValue([[null, "OK"]]);
+      let releaseRebuild!: (counts: Map<string, number>) => void;
+      countUnreadBatchMock
+        .mockImplementationOnce(
+          () =>
+            new Promise<Map<string, number>>((resolve) => {
+              releaseRebuild = resolve;
+            }),
+        )
+        .mockResolvedValueOnce(new Map([[convId, 4]]));
+
+      const first = service.listConversations(userA);
+      await vi.waitFor(() => expect(countUnreadBatchMock).toHaveBeenCalledOnce());
+      const second = service.listConversations(userA);
+      await vi.waitFor(() => expect(countUnreadBatchMock).toHaveBeenCalledTimes(2));
+      expect((await second).items[0].unreadCount).toBe(4);
+      expect(redisPipelineSetMock).toHaveBeenCalledWith(
+        unreadCountKey(userA, convId),
+        JSON.stringify({ revision: "2", lastRead: null, count: 4 }),
+        "EX",
+        604800,
+      );
+      releaseRebuild(new Map([[convId, 3]]));
+      expect((await first).items[0].unreadCount).toBe(3);
+    });
+
     it("rejects every coalesced caller when the shared rebuild fails and retries afterwards", async () => {
       findUserConversationsMock.mockResolvedValue({
         items: [{ ...mockConvWithPartner }],
@@ -565,6 +753,7 @@ describe("ConversationService", () => {
       expect(emitReadUpdatedMock).toHaveBeenCalledWith(
         convId,
         expect.objectContaining({ userId: userA, lastReadMessageId: "msg-123" }),
+        undefined,
       );
     });
 

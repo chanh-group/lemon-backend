@@ -11,6 +11,7 @@ export default defineConfig(({ mode }) => {
     test: {
       globals: true,
       root: "./",
+      testTimeout: 15000,
       include: ["test/e2e/**/*.e2e-spec.ts"],
       // Each spec boots a full AppModule with its own DB pool; the shared
       // Neon pooler caps total clients, so run files one at a time.

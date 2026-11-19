@@ -322,7 +322,7 @@ describe("Realtime chat gateway over socket.io (E2E)", () => {
         const res = await request(app.getHttpServer())
           .post(`/api/conversations/${conversationId}/messages`)
           .set("Authorization", `Bearer ${tokenA}`)
-          .send({ body })
+          .send({ body, clientMsgId: uuidv7() })
           .expect(201);
 
         await delay(MESSAGE_FANOUT_WINDOW_MS);
@@ -426,7 +426,7 @@ describe("Realtime chat gateway over socket.io (E2E)", () => {
         const sendRes = await request(app.getHttpServer())
           .post(`/api/conversations/${conversationId}/messages`)
           .set("Authorization", `Bearer ${tokenA}`)
-          .send({ body: `socket revoke ${Date.now()}` })
+          .send({ body: `socket revoke ${Date.now()}`, clientMsgId: uuidv7() })
           .expect(201);
 
         const messageId = sendRes.body.data.id;
@@ -497,7 +497,7 @@ describe("Realtime chat gateway over socket.io (E2E)", () => {
         const sendRes = await request(app.getHttpServer())
           .post(`/api/conversations/${createdConversationId}/messages`)
           .set("Authorization", `Bearer ${tokenA}`)
-          .send({ body })
+          .send({ body, clientMsgId: uuidv7() })
           .expect(201);
 
         await delay(MESSAGE_FANOUT_WINDOW_MS);

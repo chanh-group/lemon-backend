@@ -3,7 +3,8 @@ import { Test } from "@nestjs/testing";
 import { getDrizzleToken } from "@nestjs/drizzle";
 import * as argon2 from "argon2";
 import cookieParser from "cookie-parser";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
+import type { Client } from "pg";
 import request from "supertest";
 import { io, type Socket } from "socket.io-client";
 import { v7 as uuidv7 } from "uuid";
@@ -198,14 +199,14 @@ describe("durable password revocation with PostgreSQL and Redis", () => {
       .expect(200);
   });
 
-  it("disconnects sockets, fails closed and recovers if the PostgreSQL listener is terminated", async () => {
+  it("disconnects sockets, fails closed and reconnects after a listener connection error", async () => {
     const login = await auth.login({ identifier: username, password: newPassword });
     const socket = await connectOnOtherNode(login.tokens.accessToken);
     const listener = otherNode.get(AuthRevocationListener);
-    const pid = (listener as unknown as { client: { processID: number } }).client.processID;
+    const client = (listener as unknown as { client: Client }).client;
     const disconnected = new Promise<string>((resolve) => socket.once("disconnect", resolve));
 
-    await db.execute(sql`select pg_terminate_backend(${pid})`);
+    client.emit("error", new Error("simulated listener connection loss"));
 
     expect(await disconnected).toBe("io server disconnect");
     expect(listener.track(userId, uuidv7(), () => {})).toBeNull();

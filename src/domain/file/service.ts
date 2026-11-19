@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { v7 as uuidv7 } from "uuid";
 import {
   CHAT_ALLOWED_AUDIO_MIME,
@@ -15,11 +15,17 @@ import {
   USER_AVATAR_MAX_BYTES,
 } from "../../utils/cache/constants.js";
 import { BusinessError } from "../../utils/errors/business.js";
+import {
+  CONVERSATION_REPOSITORY,
+  type ConversationRepository,
+} from "../conversation/repository.js";
 import { StorageError } from "../../utils/storage/error.js";
 import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.js";
 import {
   avatarObjectKeyFromUrl,
   avatarUrlForObjectKey,
+  groupAvatarObjectKeyFromUrl,
+  groupAvatarUrlForObjectKey,
   isAvatarFileName,
 } from "../../utils/storage/avatar.js";
 import type { PresignFileDto } from "./dto/request.js";
@@ -84,7 +90,27 @@ function createObjectKey(
 export class FileService {
   private readonly logger = new Logger(FileService.name);
 
-  constructor(@Inject(STORAGE_SERVICE) private readonly storage: StorageService) {}
+  constructor(
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
+    @Optional()
+    @Inject(CONVERSATION_REPOSITORY)
+    private readonly conversations?: ConversationRepository,
+  ) {}
+
+  private async assertChatMember(
+    userId: string,
+    kind: string,
+    conversationId?: string,
+  ): Promise<void> {
+    if (!kind.startsWith("CHAT_")) return;
+    if (
+      !conversationId ||
+      !this.conversations ||
+      !(await this.conversations.isParticipant(conversationId, userId))
+    ) {
+      throw new BusinessError("NOT_PARTICIPANT");
+    }
+  }
 
   async presign(userId: string, dto: PresignFileDto): Promise<PresignFileResponse> {
     validateUpload(dto.kind, dto.sizeBytes, dto.mimeType);
@@ -95,6 +121,7 @@ export class FileService {
       dto.fileName ?? "",
       dto.conversationId,
     );
+    await this.assertChatMember(userId, dto.kind, dto.conversationId);
 
     try {
       const avatarUrl =
@@ -144,6 +171,70 @@ export class FileService {
     return downloadUrl;
   }
 
+  async getGroupAvatar(
+    userId: string,
+    groupId: string,
+    fileName: string,
+  ): Promise<{ body: Uint8Array; contentType: string; contentLength: number }> {
+    if (!isAvatarFileName(fileName) || !this.conversations) {
+      throw new BusinessError("CONVERSATION_NOT_FOUND");
+    }
+    const group = await this.conversations.getAccessibleGroupAvatarUrl(groupId, userId);
+    if (!group) {
+      throw new BusinessError("NOT_PARTICIPANT");
+    }
+    const objectKey = groupAvatarObjectKeyFromUrl(group.avatarUrl ?? "", groupId);
+    if (objectKey !== `group-avatars/${groupId}/${fileName}`) {
+      throw new BusinessError("CONVERSATION_NOT_FOUND");
+    }
+    const object = await this.storage.getObject(objectKey);
+    if (!object) throw new BusinessError("CONVERSATION_NOT_FOUND");
+    validateUpload("USER_AVATAR", object.contentLength, object.contentType);
+    if (object.contentLength < 1) throw new BusinessError("FILE_TYPE_NOT_ALLOWED");
+    return object;
+  }
+
+  async uploadGroupAvatar(
+    userId: string,
+    groupId: string,
+    file: { buffer: Buffer; size: number; mimetype: string },
+  ): Promise<string> {
+    if (!this.conversations) throw new BusinessError("FORBIDDEN");
+    const group = await this.conversations.findById(groupId, userId);
+    if (!group || group.kind !== "GROUP") throw new BusinessError("NOT_PARTICIPANT");
+    if (group.myRole !== "ADMIN") throw new BusinessError("FORBIDDEN");
+    if (file.size < 1) throw new BusinessError("FILE_TYPE_NOT_ALLOWED");
+    validateUpload("USER_AVATAR", file.size, file.mimetype);
+    const ext = MIME_EXTENSION_MAP[file.mimetype];
+    if (!ext) throw new BusinessError("FILE_TYPE_NOT_ALLOWED");
+    const objectKey = `group-avatars/${groupId}/${uuidv7()}.${ext}`;
+    try {
+      await this.storage.putObject({
+        objectKey,
+        body: file.buffer,
+        mimeType: file.mimetype,
+      });
+      this.logger.log("Uploaded group avatar", { userId, groupId, objectKey });
+      return groupAvatarUrlForObjectKey(groupId, objectKey);
+    } catch (err) {
+      if (err instanceof StorageError) throw new BusinessError("PRESIGN_FAILED");
+      throw err;
+    }
+  }
+
+  async deleteGroupAvatarObject(
+    groupId: string,
+    avatarUrl: string | null | undefined,
+  ): Promise<void> {
+    if (!avatarUrl) return;
+    const objectKey = groupAvatarObjectKeyFromUrl(avatarUrl, groupId);
+    if (!objectKey) return;
+    const result = await this.storage.deleteObjects([objectKey]);
+    if (!result.deleted.includes(objectKey)) {
+      throw new StorageError("Group avatar object deletion was not confirmed");
+    }
+  }
+
   async upload(
     userId: string,
     file: { buffer: Buffer; size: number; mimetype: string; originalname: string },
@@ -158,6 +249,7 @@ export class FileService {
       file.originalname,
       conversationId,
     );
+    await this.assertChatMember(userId, kind, conversationId);
     const avatarUrl = kind === "USER_AVATAR" ? avatarUrlForObjectKey(userId, objectKey) : undefined;
 
     try {

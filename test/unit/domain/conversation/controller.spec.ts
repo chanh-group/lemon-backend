@@ -76,6 +76,17 @@ describe("ConversationController", () => {
     controller = new ConversationController(mockService);
   });
 
+  it("allows the authenticated actor to request group disbanding", async () => {
+    const disbandGroup = vi.fn().mockResolvedValue(undefined);
+    const groupController = new ConversationController({
+      disbandGroup,
+    } as unknown as ConversationService);
+
+    await groupController.disbandGroup({ user: { id: mockUserId } }, mockConvId);
+
+    expect(disbandGroup).toHaveBeenCalledWith(mockConvId, mockUserId);
+  });
+
   describe("createDirect", () => {
     it("POST /conversations/direct - wraps the conversation in the localized created envelope (vi)", async () => {
       const res = await controller.createDirect(
