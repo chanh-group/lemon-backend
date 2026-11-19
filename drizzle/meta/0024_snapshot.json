@@ -1,6 +1,6 @@
 {
-  "id": "5e3a641f-d705-467f-83f4-a9dd46bc711d",
-  "prevId": "288ab181-7eb4-4a2d-8c2f-67baf26ce2d4",
+  "id": "288ab181-7eb4-4a2d-8c2f-67baf26ce2d4",
+  "prevId": "d5cb3f09-7057-49dd-bc89-01cba4c06357",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -366,21 +366,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "participants_history_boundary_idx": {
-          "name": "participants_history_boundary_idx",
-          "columns": [
-            {
-              "expression": "history_boundary_message_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -420,7 +405,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "restrict",
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -1015,23 +1000,7 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "message_hidden_user_idx": {
-          "name": "message_hidden_user_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "message_hidden_for_users_message_id_messages_id_fk": {
           "name": "message_hidden_for_users_message_id_messages_id_fk",

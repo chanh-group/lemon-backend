@@ -1,6 +1,6 @@
 {
-  "id": "288ab181-7eb4-4a2d-8c2f-67baf26ce2d4",
-  "prevId": "d5cb3f09-7057-49dd-bc89-01cba4c06357",
+  "id": "d5cb3f09-7057-49dd-bc89-01cba4c06357",
+  "prevId": "aef900f8-004d-447a-86b8-7b2a0eed267b",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2540,7 +2540,8 @@
       "schema": "public",
       "values": [
         "MEMBER",
-        "ADMIN"
+        "ADMIN",
+        "OWNER"
       ]
     },
     "public.story_audience_mode": {

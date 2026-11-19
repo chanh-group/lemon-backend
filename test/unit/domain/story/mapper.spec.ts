@@ -15,6 +15,7 @@ function makeStory(overrides: Partial<Story> & { id: string; userId: string }): 
     bucket: "lemon-stories",
     objectKey: "stories/u/a.jpg",
     mimeType: "image/jpeg",
+    mediaSizeBytes: 1024,
     width: 1080,
     height: 1920,
     durationMs: null,

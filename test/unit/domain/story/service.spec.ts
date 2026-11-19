@@ -69,6 +69,7 @@ describe("StoryService", () => {
     bucket: "lemon-stories",
     objectKey: "stories/user-owner-1/photo.jpg",
     mimeType: "image/jpeg",
+    mediaSizeBytes: 1024,
     width: 1080,
     height: 1920,
     durationMs: null,
@@ -221,6 +222,9 @@ describe("StoryService", () => {
 
     const mockRepo: StoryRepository = {
       create: createStoryMock,
+      findUnmeasuredMedia: vi.fn().mockResolvedValue([]),
+      setMediaSize: vi.fn().mockResolvedValue(undefined),
+      getStorageUsage: vi.fn().mockResolvedValue(0),
       updateActive: updateActiveMock,
       findById: findByIdMock,
       findActiveById: findActiveByIdMock,
@@ -483,6 +487,66 @@ describe("StoryService", () => {
         }),
       ).rejects.toMatchObject({ code: "FILE_TOO_LARGE", params: { maxMb: "25" } });
       expect(createStoryMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("measureLegacyMedia", () => {
+    it("records zero size for missing legacy objects instead of blocking", async () => {
+      const findUnmeasuredMock = vi.fn().mockResolvedValue([
+        { id: "s1", objectKey: "stories/u/gone.jpg" },
+        { id: "s2", objectKey: "stories/u/exists.jpg" },
+      ]);
+      const setMediaSizeMock = vi.fn().mockResolvedValue(undefined);
+      headObjectMock
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ contentLength: 500, contentType: "image/jpeg" });
+
+      const repo = {
+        findUnmeasuredMedia: findUnmeasuredMock,
+        setMediaSize: setMediaSizeMock,
+      };
+      const svc = new StoryService(
+        repo as never,
+        {} as never,
+        storageMock,
+        conversationServiceMock,
+        messageServiceMock,
+        realtimeServiceMock,
+      );
+
+      await (
+        svc as unknown as { measureLegacyMedia(id: string): Promise<void> }
+      ).measureLegacyMedia("user-1");
+
+      expect(setMediaSizeMock).toHaveBeenCalledWith("s1", 0);
+      expect(setMediaSizeMock).toHaveBeenCalledWith("s2", 500);
+    });
+  });
+
+  describe("getStorageUsage", () => {
+    it("returns usage and limit after measuring legacy media", async () => {
+      const getStorageUsageMock = vi.fn().mockResolvedValue(12345);
+      const findUnmeasuredMock = vi.fn().mockResolvedValue([]);
+      const setMediaSizeMock = vi.fn().mockResolvedValue(undefined);
+
+      const repo = {
+        findUnmeasuredMedia: findUnmeasuredMock,
+        setMediaSize: setMediaSizeMock,
+        getStorageUsage: getStorageUsageMock,
+      };
+      const svc = new StoryService(
+        repo as never,
+        {} as never,
+        storageMock,
+        conversationServiceMock,
+        messageServiceMock,
+        realtimeServiceMock,
+      );
+
+      const result = await svc.getStorageUsage("user-1");
+
+      expect(result.usedBytes).toBe(12345);
+      expect(result.limitBytes).toBe(512 * 1024 * 1024);
     });
   });
 

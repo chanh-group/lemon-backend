@@ -299,7 +299,7 @@ describe("ChatGateway", () => {
         authVersion: 0,
         exp: Math.floor(Date.now() / 1000) + 900,
       }));
-      const { client, joinMock, disconnectMock } = createMockSocket({
+      const { client, joinMock, disconnectMock, emitMock } = createMockSocket({
         auth: { token: "valid-jwt" },
       });
 
@@ -309,6 +309,77 @@ describe("ChatGateway", () => {
       expect(joinMock).toHaveBeenCalledWith(`user:${mockUserId}`);
       expect(client.data.userId).toBe(mockUserId);
       expect(disconnectMock).not.toHaveBeenCalled();
+      expect(emitMock).toHaveBeenCalledWith("ready", { userId: mockUserId });
+    });
+
+    it("emits ready event only after joining the user room and active conversations", async () => {
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
+      const { client, joinMock, emitMock } = createMockSocket({ auth: { token: "valid-jwt" } });
+      const callOrder: string[] = [];
+      joinMock.mockImplementation(async (room: string | string[]) => {
+        callOrder.push(`join:${Array.isArray(room) ? room.join(",") : room}`);
+      });
+      emitMock.mockImplementation((event: string) => {
+        callOrder.push(`emit:${event}`);
+      });
+
+      await gateway.handleConnection(client);
+
+      expect(callOrder).toEqual([
+        `join:user:${mockUserId}`,
+        `join:conv:${mockConvId},conv:${mockConvId2}`,
+        "emit:ready",
+      ]);
+      expect(emitMock).toHaveBeenCalledWith("ready", { userId: mockUserId });
+      await gateway.handleDisconnect(client);
+      gateway.onApplicationShutdown();
+    });
+
+    it("does not emit ready event before user room join resolves", async () => {
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
+      const { client, joinMock, emitMock } = createMockSocket({ auth: { token: "valid-jwt" } });
+      let finishJoin!: () => void;
+      joinMock.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          finishJoin = resolve;
+        }),
+      );
+
+      const connection = gateway.handleConnection(client);
+      await vi.waitFor(() => {
+        expect(joinMock).toHaveBeenCalledWith(`user:${mockUserId}`);
+      });
+      expect(emitMock).not.toHaveBeenCalledWith("ready", expect.anything());
+
+      finishJoin();
+      await connection;
+      expect(emitMock).toHaveBeenCalledWith("ready", { userId: mockUserId });
+      await gateway.handleDisconnect(client);
+      gateway.onApplicationShutdown();
+    });
+
+    it("does not emit ready event if client disconnects before initialization completes", async () => {
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
+      const { client, joinMock, emitMock } = createMockSocket({ auth: { token: "valid-jwt" } });
+      joinMock.mockImplementationOnce(async () => {
+        Object.defineProperty(client, "disconnected", { value: true, configurable: true });
+      });
+
+      await gateway.handleConnection(client);
+      expect(emitMock).not.toHaveBeenCalledWith("ready", expect.anything());
+      gateway.onApplicationShutdown();
     });
 
     it("joins all active conversation rooms on connect", async () => {
@@ -391,6 +462,7 @@ describe("ChatGateway", () => {
         "error",
         expect.objectContaining({ code: "UNAUTHORIZED" }),
       );
+      expect(emitMock).not.toHaveBeenCalledWith("ready", expect.anything());
     });
 
     it("rejects connection immediately when JWT verification fails", async () => {
@@ -406,6 +478,7 @@ describe("ChatGateway", () => {
         "error",
         expect.objectContaining({ code: "UNAUTHORIZED" }),
       );
+      expect(emitMock).not.toHaveBeenCalledWith("ready", expect.anything());
     });
   });
 

@@ -139,7 +139,9 @@ describe("FriendService", () => {
       createdAt: new Date("2026-01-01T00:00:00Z"),
     };
     const joinConversation = vi.fn();
+    const emitFriendRequestAccepted = vi.fn();
     friendRepo.acceptRequest.mockResolvedValue({
+      id: "request-id",
       requesterId: userId,
       addresseeId: otherId,
       conversation,
@@ -147,12 +149,16 @@ describe("FriendService", () => {
     service = new FriendService(
       friendRepo as never,
       userRepo as never,
-      { emitFriendRequestReceived: vi.fn(), joinConversation } as never,
+      { emitFriendRequestReceived: vi.fn(), joinConversation, emitFriendRequestAccepted } as never,
       cache as never,
     );
 
     await expect(service.acceptRequest("request-id", otherId)).resolves.toBe(conversation);
     expect(joinConversation).toHaveBeenCalledWith([userId, otherId], conversation.id);
+    expect(emitFriendRequestAccepted).toHaveBeenCalledWith(userId, {
+      requestId: "request-id",
+      addresseeId: otherId,
+    });
     expect(cache.invalidateFeedsBestEffort).toHaveBeenCalled();
   });
 
@@ -201,6 +207,70 @@ describe("FriendService", () => {
       expect(friendRepo.deleteAcceptedPair).toHaveBeenCalledWith(userId, otherId);
       expect(cache.invalidateFeedsBestEffort).toHaveBeenCalled();
       expect(emitFriendRemoved).toHaveBeenCalledWith(userId, otherId);
+    });
+  });
+
+  describe("declineRequest", () => {
+    it("throws FRIEND_REQUEST_NOT_FOUND when incoming request does not exist", async () => {
+      friendRepo.deleteIncomingRequest.mockResolvedValue(null);
+
+      await expect(service.declineRequest("missing-request", userId)).rejects.toMatchObject({
+        code: "FRIEND_REQUEST_NOT_FOUND",
+      });
+    });
+
+    it("deletes incoming request and emits friend:request:declined to the requester", async () => {
+      const emitFriendRequestDeclined = vi.fn();
+      friendRepo.deleteIncomingRequest.mockResolvedValue({
+        id: "request-id",
+        requesterId: otherId,
+      });
+      service = new FriendService(
+        friendRepo as never,
+        userRepo as never,
+        { emitFriendRequestReceived: vi.fn(), emitFriendRequestDeclined } as never,
+        cache as never,
+      );
+
+      await service.declineRequest("request-id", userId);
+
+      expect(friendRepo.deleteIncomingRequest).toHaveBeenCalledWith("request-id", userId);
+      expect(emitFriendRequestDeclined).toHaveBeenCalledWith(otherId, {
+        requestId: "request-id",
+        addresseeId: userId,
+      });
+    });
+  });
+
+  describe("cancelRequest", () => {
+    it("throws FRIEND_REQUEST_NOT_FOUND when outgoing request does not exist", async () => {
+      friendRepo.deleteOutgoingRequest.mockResolvedValue(null);
+
+      await expect(service.cancelRequest("missing-request", userId)).rejects.toMatchObject({
+        code: "FRIEND_REQUEST_NOT_FOUND",
+      });
+    });
+
+    it("deletes outgoing request and emits friend:request:cancelled to the recipient", async () => {
+      const emitFriendRequestCancelled = vi.fn();
+      friendRepo.deleteOutgoingRequest.mockResolvedValue({
+        id: "request-id",
+        addresseeId: otherId,
+      });
+      service = new FriendService(
+        friendRepo as never,
+        userRepo as never,
+        { emitFriendRequestReceived: vi.fn(), emitFriendRequestCancelled } as never,
+        cache as never,
+      );
+
+      await service.cancelRequest("request-id", userId);
+
+      expect(friendRepo.deleteOutgoingRequest).toHaveBeenCalledWith("request-id", userId);
+      expect(emitFriendRequestCancelled).toHaveBeenCalledWith(otherId, {
+        requestId: "request-id",
+        requesterId: userId,
+      });
     });
   });
 });

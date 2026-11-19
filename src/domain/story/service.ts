@@ -22,7 +22,12 @@ import {
   toStoryItemResponse,
   toStoryPreview,
 } from "./dto/mapper.js";
-import { STORY_SILENT_LIKE_EMOJI, type StoryEmoji, type StoryReactionKind } from "./constants.js";
+import {
+  STORY_SILENT_LIKE_EMOJI,
+  STORY_STORAGE_LIMIT_BYTES,
+  type StoryEmoji,
+  type StoryReactionKind,
+} from "./constants.js";
 import type {
   CreateStoryDto,
   ReplyStoryDto,
@@ -64,6 +69,22 @@ export class StoryService {
     private readonly realtimeService: RealtimeService,
     private readonly metrics?: RedisMetricsService,
   ) {}
+
+  private async measureLegacyMedia(userId: string): Promise<void> {
+    const rows = await this.storyRepo.findUnmeasuredMedia(userId);
+    for (const row of rows) {
+      const head = await this.storage.headObject(row.objectKey);
+      await this.storyRepo.setMediaSize(row.id, head?.contentLength ?? 0);
+    }
+  }
+
+  async getStorageUsage(userId: string): Promise<{ usedBytes: number; limitBytes: number }> {
+    await this.measureLegacyMedia(userId);
+    return {
+      usedBytes: await this.storyRepo.getStorageUsage(userId),
+      limitBytes: STORY_STORAGE_LIMIT_BYTES,
+    };
+  }
 
   async createStory(userId: string, dto: CreateStoryDto): Promise<StoryItemResponse> {
     const isMedia = dto.kind === "IMAGE" || dto.kind === "VIDEO";
@@ -125,6 +146,7 @@ export class StoryService {
       bucket,
       objectKey: isMedia ? (dto.objectKey ?? null) : null,
       mimeType: isMedia ? (head?.contentType ?? null) : null,
+      mediaSizeBytes: isMedia ? (head?.contentLength ?? null) : null,
       width: dto.width ?? null,
       height: dto.height ?? null,
       durationMs: dto.durationMs ?? null,
@@ -135,6 +157,7 @@ export class StoryService {
       audienceMode,
     };
 
+    await this.measureLegacyMedia(userId);
     const created = await this.storyRepo.create(newStoryData, audienceUserIds);
 
     // Invalidate feed cache for affected viewers only

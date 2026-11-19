@@ -112,5 +112,7 @@
   "STORY_UNMUTED": "Story unmuted",
   "STORY_SETTINGS_UPDATED": "Story settings updated",
   "STORY_LIKED": "Story liked",
-  "STORY_UNLIKED": "Story like removed"
+  "STORY_UNLIKED": "Story like removed",
+  "STORY_STORAGE_FULL": "Story storage is full. Delete stories and try again.",
+  "STORY_STORAGE_UNAVAILABLE": "Cannot check story storage. Please try again."
 }

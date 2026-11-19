@@ -147,6 +147,57 @@ describe("Story flows with PostgreSQL and Redis", () => {
     }
   });
 
+  it("accounts for legacy media, serializes concurrent uploads and releases quota after deletion", async () => {
+    const quota = 512 * 1024 * 1024;
+    const legacyKey = `stories/${stranger}/legacy.jpg`;
+    objects.set(legacyKey, { body: Buffer.alloc(5), contentType: "image/jpeg" });
+    await db.insert(stories).values({
+      userId: stranger,
+      kind: "IMAGE",
+      objectKey: legacyKey,
+      bucket: "test-bucket",
+      mimeType: "image/jpeg",
+      expiresAt: new Date(Date.now() + 3600_000),
+      mediaSizeBytes: null,
+    });
+    const usage = await request(app.getHttpServer())
+      .get("/api/stories/storage")
+      .auth(strangerToken, { type: "bearer" })
+      .expect(200);
+    expect(usage.body.data.usedBytes).toBe(5);
+    await db
+      .update(stories)
+      .set({ mediaSizeBytes: quota - 4 })
+      .where(eq(stories.objectKey, legacyKey));
+    const keys = [0, 1].map((i) => `stories/${stranger}/concurrent-${i}.jpg`);
+    for (const key of keys) objects.set(key, { body: Buffer.alloc(3), contentType: "image/jpeg" });
+    const results = await Promise.all(
+      keys.map((objectKey) =>
+        request(app.getHttpServer())
+          .post("/api/stories")
+          .auth(strangerToken, { type: "bearer" })
+          .send({ kind: "IMAGE", objectKey }),
+      ),
+    );
+    expect(results.map((result) => result.status).sort((a, b) => a - b)).toEqual([201, 409]);
+    const created = results.find((result) => result.status === 201)!;
+    await request(app.getHttpServer())
+      .delete(`/api/stories/${created.body.data.id}`)
+      .auth(strangerToken, { type: "bearer" })
+      .expect(200);
+    const afterDelete = await request(app.getHttpServer())
+      .get("/api/stories/storage")
+      .auth(strangerToken, { type: "bearer" })
+      .expect(200);
+    expect(afterDelete.body.data.usedBytes).toBe(quota - 4);
+    const failedKey = keys[results.findIndex((result) => result.status === 409)];
+    await request(app.getHttpServer())
+      .post("/api/stories")
+      .auth(strangerToken, { type: "bearer" })
+      .send({ kind: "IMAGE", objectKey: failedKey })
+      .expect(201);
+  });
+
   it("creates, views, edits, reacts, replies and deletes a text story", async () => {
     const created = await request(app.getHttpServer())
       .post("/api/stories")

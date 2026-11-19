@@ -35,6 +35,7 @@ export const stories = pgTable(
     bucket: text("bucket"),
     objectKey: text("object_key"),
     mimeType: text("mime_type"),
+    mediaSizeBytes: integer("media_size_bytes"),
     width: integer("width"),
     height: integer("height"),
     durationMs: integer("duration_ms"),

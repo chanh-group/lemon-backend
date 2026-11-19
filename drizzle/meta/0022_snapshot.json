@@ -1,6 +1,6 @@
 {
-  "id": "d5cb3f09-7057-49dd-bc89-01cba4c06357",
-  "prevId": "aef900f8-004d-447a-86b8-7b2a0eed267b",
+  "id": "aef900f8-004d-447a-86b8-7b2a0eed267b",
+  "prevId": "5ddc72a3-3379-47b6-89a8-e0383eb94bf2",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -468,12 +468,6 @@
         "create_request_id": {
           "name": "create_request_id",
           "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "create_request_hash": {
-          "name": "create_request_hash",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },

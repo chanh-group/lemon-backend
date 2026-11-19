@@ -1,6 +1,6 @@
 {
-  "id": "aef900f8-004d-447a-86b8-7b2a0eed267b",
-  "prevId": "5ddc72a3-3379-47b6-89a8-e0383eb94bf2",
+  "id": "5ddc72a3-3379-47b6-89a8-e0383eb94bf2",
+  "prevId": "d8324927-0508-4ee5-96f8-81f0dd82015d",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -342,12 +342,6 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "history_boundary_message_id": {
-          "name": "history_boundary_message_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -393,19 +387,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "conversation_participants_history_boundary_message_id_messages_id_fk": {
-          "name": "conversation_participants_history_boundary_message_id_messages_id_fk",
-          "tableFrom": "conversation_participants",
-          "tableTo": "messages",
-          "columnsFrom": [
-            "history_boundary_message_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -456,18 +437,6 @@
         "avatar_url": {
           "name": "avatar_url",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "creator_id": {
-          "name": "creator_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "create_request_id": {
-          "name": "create_request_id",
-          "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
@@ -534,28 +503,6 @@
           "method": "btree",
           "with": {}
         },
-        "conversations_group_request_uq": {
-          "name": "conversations_group_request_uq",
-          "columns": [
-            {
-              "expression": "creator_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "create_request_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"conversations\".\"kind\" = 'GROUP' AND \"conversations\".\"create_request_id\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "conversations_inbox_order_idx": {
           "name": "conversations_inbox_order_idx",
           "columns": [
@@ -580,19 +527,6 @@
         }
       },
       "foreignKeys": {
-        "conversations_creator_id_users_id_fk": {
-          "name": "conversations_creator_id_users_id_fk",
-          "tableFrom": "conversations",
-          "tableTo": "users",
-          "columnsFrom": [
-            "creator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
         "conversations_last_message_id_messages_id_fk": {
           "name": "conversations_last_message_id_messages_id_fk",
           "tableFrom": "conversations",
