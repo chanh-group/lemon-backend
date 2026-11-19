@@ -27,7 +27,7 @@ export const sendMessageSchema = z
       .optional(),
     kind: z.enum(["TEXT", "IMAGE", "VIDEO", "AUDIO", "FILE"]).default("TEXT"),
     clientMsgId: z.string().uuid(vmsg("VALIDATION_UUID_CLIENT_MSG")),
-    replyToId: z.string().uuid(vmsg("VALIDATION_UUID_REPLY_TO")).optional(),
+    replyToId: z.string().uuid(vmsg("VALIDATION_UUID_REPLY_TO")).nullish(),
     attachments: z.array(messageAttachmentInputSchema).max(10).optional(),
     isForwarded: z.boolean().optional(),
     sourceMessageId: z.string().uuid().optional(),
