@@ -536,11 +536,18 @@ export class ConversationPgRepository implements ConversationRepository {
     role: "ADMIN" | "MEMBER",
   ): Promise<void> {
     await this.db.transaction(async (tx) => {
-      await tx
+      const [locked] = await tx
         .select({ id: conversations.id })
         .from(conversations)
-        .where(eq(conversations.id, conversationId))
+        .where(
+          and(
+            eq(conversations.id, conversationId),
+            eq(conversations.kind, "GROUP"),
+            isNull(conversations.deletedAt),
+          ),
+        )
         .for("update");
+      if (!locked) throw new BusinessError("CONVERSATION_NOT_FOUND");
       const [actor] = await tx
         .select({ role: conversationParticipants.role })
         .from(conversationParticipants)
@@ -613,6 +620,20 @@ export class ConversationPgRepository implements ConversationRepository {
           ),
         );
       const closed = active.length === 1;
+      if (closed && group.avatarUrl) {
+        const oldObjectKey = groupAvatarObjectKeyFromUrl(group.avatarUrl, conversationId);
+        if (oldObjectKey) {
+          await tx
+            .insert(avatarCleanupJobs)
+            .values({
+              id: uuidv7(),
+              conversationId,
+              objectKey: oldObjectKey,
+              status: "PENDING",
+            })
+            .onConflictDoNothing();
+        }
+      }
       await tx
         .update(conversations)
         .set({

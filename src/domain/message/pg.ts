@@ -563,41 +563,6 @@ export class MessagePgRepository implements MessageRepository {
       );
   }
 
-  async canAccessMessage(
-    conversationId: string,
-    userId: string,
-    messageId: string,
-  ): Promise<boolean> {
-    const [row] = await this.db
-      .select({ id: messages.id })
-      .from(messages)
-      .innerJoin(
-        conversationParticipants,
-        and(
-          eq(conversationParticipants.conversationId, messages.conversationId),
-          eq(conversationParticipants.userId, userId),
-          isNull(conversationParticipants.leftAt),
-        ),
-      )
-      .where(
-        and(
-          eq(messages.id, messageId),
-          eq(messages.conversationId, conversationId),
-          sql`(
-            (${conversationParticipants.historyBoundaryMessageId} IS NOT NULL AND ROW(${messages.createdAt}, ${messages.id}) > (
-              SELECT m.created_at, m.id FROM messages m
-              WHERE m.id = ${conversationParticipants.historyBoundaryMessageId}
-                AND m.conversation_id = ${conversationParticipants.conversationId}
-            ))
-            OR (${conversationParticipants.historyBoundaryMessageId} IS NULL AND ${conversationParticipants.historyBoundaryWasEmpty} = true)
-            OR (${conversationParticipants.historyBoundaryMessageId} IS NULL AND ${conversationParticipants.historyBoundaryWasEmpty} = false AND ${messages.createdAt} > ${conversationParticipants.joinedAt})
-          )`,
-        ),
-      )
-      .limit(1);
-    return Boolean(row);
-  }
-
   async findById(messageId: string, includeDetails = true): Promise<MessageWithAttachments | null> {
     const [msg] = await this.db.select().from(messages).where(eq(messages.id, messageId)).limit(1);
     if (!msg) return null;
