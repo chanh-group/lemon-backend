@@ -1240,14 +1240,11 @@ describe("MessageService", () => {
           deletedAt: null,
           storyPreview: {
             id: "story-1",
-            authorId: userB,
-            mediaType: "IMAGE",
-            mediaUrl: "https://r2.test/story.jpg",
-            thumbnailUrl: null,
+            kind: "IMAGE",
+            bucket: "stories",
+            objectKey: "story-1.jpg",
             caption: "At the beach",
-            backgroundColor: null,
-            createdAt: new Date().toISOString(),
-            expiresAt: new Date().toISOString(),
+            background: null,
           },
         },
       ]);
