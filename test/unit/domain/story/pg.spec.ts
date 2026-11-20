@@ -796,6 +796,36 @@ describe("StoryPgRepository.updateActive", () => {
   });
 });
 
+describe("StoryPgRepository.findViewableByIds", () => {
+  it("keeps only stories alive for the viewer: unexpired-unarchived or archived-by-them", async () => {
+    const rows = [
+      { id: "s1", userId: "u1" },
+      { id: "s2", userId: "u2" },
+    ];
+    const { db, whereMock } = makeDb(rows);
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.findViewableByIds(["s1", "s2"], "u1")).resolves.toEqual(rows);
+
+    const whereSql = render(whereMock.mock.calls[0][0]);
+    expect(whereSql).toContain('"stories"."id" in');
+    expect(whereSql).toContain('"stories"."deleted_at" is null');
+    expect(whereSql).toContain('"stories"."archived_at" is null');
+    expect(whereSql).toContain('"stories"."expires_at" > now()');
+    expect(whereSql).toContain('"stories"."archived_at" is not null');
+    expect(dialect.sqlToQuery(whereMock.mock.calls[0][0]).params).toEqual(["s1", "s2", "u1"]);
+  });
+
+  it("queries nothing when the id list or the viewer is empty", async () => {
+    const { db, whereMock } = makeDb();
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.findViewableByIds([], "u1")).resolves.toEqual([]);
+    await expect(repo.findViewableByIds(["s1"], "")).resolves.toEqual([]);
+    expect(whereMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("StoryPgRepository.findActiveById", () => {
   it("returns the story only while it is unexpired, undeleted and unarchived", async () => {
     const storyRow = { id: "s1", userId: "u1" };

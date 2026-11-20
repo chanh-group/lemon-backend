@@ -227,6 +227,7 @@ describe("StoryService", () => {
       getStorageUsage: vi.fn().mockResolvedValue(0),
       updateActive: updateActiveMock,
       findById: findByIdMock,
+      findViewableByIds: vi.fn().mockResolvedValue([]),
       findActiveById: findActiveByIdMock,
       findActiveByUserIds: findActiveByUserIdsMock,
       findUsersByIds: findUsersByIdsMock,

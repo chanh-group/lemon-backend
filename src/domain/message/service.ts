@@ -27,6 +27,9 @@ import { DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE } from "../pagination.
 import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.js";
 import { CHAT_MAX_FILE_BYTES } from "../../utils/cache/constants.js";
 import type { StoryPreview } from "../story/types.js";
+import type { Story } from "../story/schema.js";
+import { toStoryPreview } from "../story/dto/mapper.js";
+import { STORY_REPOSITORY, type StoryRepository } from "../story/repository.js";
 
 function attachmentKindFromMessageKind(
   kind: SendMessageDto["kind"],
@@ -64,8 +67,49 @@ export class MessageService {
     @Inject(CONVERSATION_REPOSITORY) private readonly convRepo: ConversationRepository,
     private readonly friendService: FriendService,
     private readonly realtimeService: RealtimeService,
+    @Inject(STORY_REPOSITORY) private readonly storyRepo: StoryRepository,
     @Optional() @Inject(STORAGE_SERVICE) private readonly storage?: StorageService,
   ) {}
+
+  /** Resolve live story previews (presigned media URL) and redact dead ones to null. */
+  private async resolveStoryPreviews(
+    items: Array<{ storyPreview?: StoryPreview | null }>,
+    viewerId: string,
+  ): Promise<void> {
+    const ids = [
+      ...new Set(
+        items.map((item) => item.storyPreview?.id).filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    if (ids.length === 0) return;
+    const stories = await this.storyRepo.findViewableByIds(ids, viewerId);
+    const byId = new Map(stories.map((story) => [story.id, story]));
+    await Promise.all(
+      items.map(async (item) => {
+        const preview = item.storyPreview;
+        if (!preview) return;
+        const story = byId.get(preview.id);
+        item.storyPreview = story
+          ? { ...toStoryPreview(story), mediaUrl: await this.presignStoryMedia(story) }
+          : null;
+      }),
+    );
+  }
+
+  private async presignStoryMedia(story: Story): Promise<string | null> {
+    if (!this.storage || !story.objectKey) return null;
+    try {
+      const { downloadUrl } = await this.storage.presignGet({
+        objectKey: story.objectKey,
+        disposition: "inline",
+        ...(story.mimeType && { mimeType: story.mimeType }),
+        expiresInSecs: ATTACHMENT_URL_TTL_SECS,
+      });
+      return downloadUrl;
+    } catch {
+      return null;
+    }
+  }
 
   private inferContentCategory(message: ReplyTargetMessage): ReplyContentCategory {
     if (message.kind === "STORY_REPLY" || message.kind === "STORY_REACTION") {
@@ -268,21 +312,26 @@ export class MessageService {
       } else response.replyTarget = null;
     }
 
+    await this.resolveStoryPreviews(
+      [response, ...(response.replyTarget ? [response.replyTarget] : [])],
+      senderId,
+    );
+
     if (isNew) {
       // replyTarget is viewer-dependent: a user can hide a message locally or
       // be below the group's history boundary. Realtime events broadcast
       // without replyTarget content to prevent cross-epoch leaks; clients
       // fetch replyTarget on-demand via the authenticated quote endpoint if not cached.
+      // The event omits replyTarget entirely so clients can tell "gone"
+      // (null in timeline responses) from "not embedded" (fetch on-demand).
+      const eventMessage = { ...response };
+      delete eventMessage.replyTarget;
       const participantIds = await this.convRepo.getParticipantUserIds(conversationId);
       const recipientPayloads = participantIds.map((participantId) => ({
         userId: participantId,
-        payload: { ...response, replyTarget: null },
+        payload: eventMessage,
       }));
-      this.realtimeService.emitNewMessage(
-        conversationId,
-        { ...response, replyTarget: null },
-        recipientPayloads,
-      );
+      this.realtimeService.emitNewMessage(conversationId, eventMessage, recipientPayloads);
     }
 
     return response;
@@ -396,6 +445,13 @@ export class MessageService {
         }
       }
     }
+    await this.resolveStoryPreviews(
+      [
+        ...response.items,
+        ...response.items.flatMap((item) => (item.replyTarget ? [item.replyTarget] : [])),
+      ],
+      userId,
+    );
     return response;
   }
 
@@ -445,6 +501,7 @@ export class MessageService {
       };
     }
 
+    await this.resolveStoryPreviews([replyTarget], userId);
     return replyTarget;
   }
 
