@@ -63,6 +63,9 @@ export const conversations = pgTable(
     index("conversations_inbox_order_idx")
       .on(sql`coalesce(${table.lastMessageAt}, ${table.createdAt}) DESC`, table.id.desc())
       .where(sql`${table.deletedAt} IS NULL`),
+    index("conversations_direct_active_idx")
+      .on(table.directKey)
+      .where(sql`${table.deletedAt} IS NULL`),
   ],
 );
 
@@ -97,6 +100,9 @@ export const conversationParticipants = pgTable(
       .on(table.userId)
       .where(sql`${table.leftAt} IS NULL`),
     index("participants_history_boundary_idx").on(table.historyBoundaryMessageId),
+    index("participants_active_idx")
+      .on(table.conversationId)
+      .where(sql`${table.leftAt} IS NULL`),
   ],
 );
 

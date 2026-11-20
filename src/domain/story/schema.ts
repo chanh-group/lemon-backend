@@ -66,6 +66,9 @@ export const stories = pgTable(
     index("stories_user_idx").on(table.userId, table.createdAt.desc()),
     index("stories_expiry_idx").on(table.expiresAt),
     index("stories_archived_idx").on(table.archivedAt),
+    index("stories_feed_idx")
+      .on(table.userId, table.createdAt.desc())
+      .where(sql`${table.deletedAt} IS NULL AND ${table.archivedAt} IS NULL`),
   ],
 );
 
