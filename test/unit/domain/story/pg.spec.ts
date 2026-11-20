@@ -5,15 +5,19 @@ import type { DrizzleDb } from "../../../../src/configs/database.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
 import { StoryPgRepository } from "../../../../src/domain/story/pg.js";
 import { STORY_FEED_MAX_PER_AUTHOR } from "../../../../src/domain/story/constants.js";
+import { STORY_TTL_MS } from "../../../../src/utils/cache/constants.js";
 import { encodeReactionCursor } from "../../../../src/domain/story/dto/mapper.js";
 import {
   stories,
+  storyAudiences,
   storyMutes,
   storyReactions,
   storyViews,
   userStorySettings,
 } from "../../../../src/domain/story/schema.js";
 import { friendships } from "../../../../src/domain/friend/schema.js";
+import { messages } from "../../../../src/domain/message/schema.js";
+import { users } from "../../../../src/domain/user/schema.js";
 
 function makeDb(rows: unknown[] = []) {
   const limitMock = vi.fn<(limit: number) => Promise<unknown>>();
@@ -45,7 +49,7 @@ function makeDb(rows: unknown[] = []) {
     returning: returningMock,
   }));
   const onConflictDoNothingMock = vi.fn(() => Promise.resolve());
-  const valuesMock = vi.fn(() => ({
+  const valuesMock = vi.fn<(values: unknown) => unknown>(() => ({
     onConflictDoUpdate: onConflictMock,
     onConflictDoNothing: onConflictDoNothingMock,
     returning: returningMock,
@@ -53,7 +57,10 @@ function makeDb(rows: unknown[] = []) {
   const insertMock = vi.fn(() => ({ values: valuesMock }));
   const deleteWhereMock = vi.fn<(condition: SQL) => unknown>(() => ({ returning: returningMock }));
   const deleteMock = vi.fn(() => ({ where: deleteWhereMock }));
-  const updateSetMock = vi.fn(() => ({ where: vi.fn(() => ({ returning: returningMock })) }));
+  const updateWhereMock = vi.fn<(condition: SQL) => unknown>(() => ({ returning: returningMock }));
+  const updateSetMock = vi.fn<(set: Record<string, unknown>) => unknown>(() => ({
+    where: updateWhereMock,
+  }));
   const updateMock = vi.fn(() => ({ set: updateSetMock }));
   const executeMock = vi.fn(() => Promise.resolve());
   const tx = { select: selectMock, insert: insertMock, update: updateMock, execute: executeMock };
@@ -76,9 +83,13 @@ function makeDb(rows: unknown[] = []) {
     limitMock,
     deleteMock,
     deleteWhereMock,
+    updateMock,
+    updateSetMock,
+    updateWhereMock,
     insertMock,
     valuesMock,
     onConflictMock,
+    onConflictDoNothingMock,
     returningMock,
     executeMock,
     transactionMock,
@@ -102,6 +113,15 @@ describe("StoryPgRepository purge queries", () => {
       expect(whereSql).toContain('"friendships"."user_low" = $1');
       expect(whereSql).toContain('"friendships"."user_high" = $2');
       expect(whereSql).toContain('"friendships"."status" = $3');
+    });
+
+    it("isAcceptedFriend returns false when the canonical pair has no accepted row", async () => {
+      const { db, limitMock } = makeDb();
+      limitMock.mockResolvedValue([]);
+      const repo = new StoryPgRepository(db);
+
+      await expect(repo.isAcceptedFriend("a-user", "z-user")).resolves.toBe(false);
+      expect(limitMock).toHaveBeenCalledWith(1);
     });
   });
 
@@ -275,6 +295,23 @@ describe("StoryPgRepository purge queries", () => {
       expect(result).toBe(false);
     });
 
+    it("deleteReaction scopes the delete to one reaction kind when requested", async () => {
+      const { db, deleteWhereMock, returningMock } = makeDb();
+      returningMock.mockResolvedValue([{ storyId: "s1" }]);
+      const repo = new StoryPgRepository(db);
+
+      const result = await repo.deleteReaction("s1", "u1", "LIKE");
+
+      expect(result).toBe(true);
+      const whereSql = render(deleteWhereMock.mock.calls[0][0]);
+      expect(whereSql).toContain('"story_reactions"."kind" = $3');
+      expect(dialect.sqlToQuery(deleteWhereMock.mock.calls[0][0]).params).toEqual([
+        "s1",
+        "u1",
+        "LIKE",
+      ]);
+    });
+
     it("findReactionsByStoryId maps the rows and bounds the query to one page", async () => {
       const { db, selectMock, limitMock } = makeDb();
       const createdAt = new Date("2026-10-14T01:00:00Z");
@@ -337,6 +374,18 @@ describe("StoryPgRepository purge queries", () => {
       expect(whereSql).not.toContain("SELECT sr.created_at FROM story_reactions sr");
       expect(whereSql).toContain('"story_reactions"."created_at" <');
       expect(whereSql).toContain('"users"."id" <');
+    });
+
+    it("findReactionsByStoryId filters by reaction kind when requested", async () => {
+      const { db, whereMock, limitMock } = makeDb();
+      limitMock.mockResolvedValue([]);
+      const repo = new StoryPgRepository(db);
+
+      await repo.findReactionsByStoryId("s1", undefined, 20, "LIKE");
+
+      const whereSql = render(whereMock.mock.calls[0][0]);
+      expect(whereSql).toContain('"story_reactions"."kind" = $2');
+      expect(dialect.sqlToQuery(whereMock.mock.calls[0][0]).params).toEqual(["s1", "LIKE"]);
     });
 
     it("findReactionsByStoryId throws BAD_REQUEST when cursor is neither valid encoded cursor nor legacy UUID", async () => {
@@ -478,6 +527,35 @@ describe("StoryPgRepository.findActiveByUserIds", () => {
       expect(lookup).toContain('"story_audiences"."user_id" = $1');
     }
   });
+
+  it("resolves CUSTOM inclusion and EXCLUDE removal through dedicated audience lookups", async () => {
+      const { db, selectMock, fromMock, whereMock } = makeDb([]);
+      const repo = new StoryPgRepository(db);
+
+      await repo.findActiveByUserIds(["u1"], "viewer-1");
+
+      // Both membership checks project story_id from story_audiences for the viewer
+      expect(selectMock).toHaveBeenCalledWith({ storyId: storyAudiences.storyId });
+      expect(
+        selectMock.mock.calls.filter(
+          (call) => (call[0] as { storyId?: unknown } | undefined)?.storyId !== undefined,
+        ),
+      ).toHaveLength(2);
+      expect(fromMock).toHaveBeenCalledWith(storyAudiences);
+
+      const rendered = whereMock.mock.calls.map(([condition]) => render(condition));
+      const feedWhere = rendered.find((where) => where.includes('"stories"."expires_at" > now()'));
+      // CUSTOM stories are included only via in (...) membership, EXCLUDE ones via not in (...)
+      expect(feedWhere).toContain('"stories"."audience_mode" = $5');
+      expect(feedWhere).toContain('"stories"."id" in');
+      expect(feedWhere).toContain('"stories"."audience_mode" = $7');
+      expect(feedWhere).toContain('"stories"."id" not in');
+
+      const lookupParams = whereMock.mock.calls
+        .map(([condition]) => dialect.sqlToQuery(condition).params)
+        .filter((params) => params.length === 1 && params[0] === "viewer-1");
+      expect(lookupParams).toHaveLength(2);
+  });
 });
 
 describe("StoryPgRepository.findViewersByStoryId", () => {
@@ -519,6 +597,19 @@ describe("StoryPgRepository.findViewersByStoryId", () => {
     expect(countWhere).toContain('"story_views"."anonymous" = $2');
     expect(countWhere).toContain("now() - interval '24 hours'");
   });
+
+  it("reports zero totalViewsCount when nobody has viewed the story yet", async () => {
+    const { db, limitMock } = makeDb([]);
+    limitMock.mockResolvedValue([]);
+    const repo = new StoryPgRepository(db);
+
+    const page = await repo.findViewersByStoryId("s1", undefined, 20);
+
+    expect(page.totalViewsCount).toBe(0);
+    expect(page.items).toEqual([]);
+    expect(page.hasMore).toBe(false);
+    expect(page.nextCursor).toBeNull();
+  });
 });
 
 describe("story storage accounting", () => {
@@ -556,7 +647,7 @@ describe("StoryPgRepository.create", () => {
   };
 
   it("acquires an advisory lock and checks quota for media stories", async () => {
-    const { db, executeMock, selectMock, whereMock, returningMock } = makeDb([
+    const { db, executeMock, selectMock, returningMock } = makeDb([
       { bytes: 0, unknown: 0 },
     ]);
     returningMock.mockResolvedValue([{ id: "s1" }]);
@@ -571,7 +662,7 @@ describe("StoryPgRepository.create", () => {
   });
 
   it("skips quota check and advisory lock for text stories", async () => {
-    const { db, executeMock, selectMock, returningMock } = makeDb([{ bytes: 0, unknown: 0 }]);
+    const { db, executeMock, returningMock } = makeDb([{ bytes: 0, unknown: 0 }]);
     returningMock.mockResolvedValue([{ id: "s1" }]);
     const repo = new StoryPgRepository(db);
 
@@ -603,5 +694,651 @@ describe("StoryPgRepository.create", () => {
     await expect(repo.create(baseMediaStory)).rejects.toMatchObject({
       code: "STORY_STORAGE_UNAVAILABLE",
     });
+  });
+
+  it("sets expires_at from the story TTL constant", async () => {
+    const { db, valuesMock, returningMock } = makeDb([{ bytes: 0, unknown: 0 }]);
+    returningMock.mockResolvedValue([{ id: "s1" }]);
+    const repo = new StoryPgRepository(db);
+
+    await repo.create(baseMediaStory);
+
+    const storyValues = valuesMock.mock.calls[0][0] as { expiresAt: SQL };
+    const query = dialect.sqlToQuery(storyValues.expiresAt);
+    expect(query.sql).toBe("now() + $1 * interval '1 millisecond'");
+    expect(query.params).toEqual([STORY_TTL_MS]);
+  });
+
+  it("inserts CUSTOM audience rows in the same transaction as the story", async () => {
+    const { db, insertMock, valuesMock, returningMock, transactionMock } = makeDb([
+      { bytes: 0, unknown: 0 },
+    ]);
+    returningMock.mockResolvedValue([{ id: "s1" }]);
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.create({ ...baseMediaStory, audienceMode: "CUSTOM" }, [
+      "friend-a",
+      "friend-b",
+    ]);
+
+    expect(transactionMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ id: "s1" });
+    expect(insertMock).toHaveBeenNthCalledWith(1, stories);
+    expect(insertMock).toHaveBeenNthCalledWith(2, storyAudiences);
+    expect(valuesMock).toHaveBeenNthCalledWith(2, [
+      { storyId: "s1", userId: "friend-a" },
+      { storyId: "s1", userId: "friend-b" },
+    ]);
+  });
+
+  it("writes no audience rows for ALL_FRIENDS stories even when audience ids are passed", async () => {
+    const { db, insertMock, returningMock } = makeDb([{ bytes: 0, unknown: 0 }]);
+    returningMock.mockResolvedValue([{ id: "s1" }]);
+    const repo = new StoryPgRepository(db);
+
+    await repo.create(baseMediaStory, ["friend-a"]);
+
+    expect(insertMock).toHaveBeenCalledTimes(1);
+    expect(insertMock).not.toHaveBeenCalledWith(storyAudiences);
+  });
+});
+
+describe("StoryPgRepository.findById", () => {
+  it("returns the story when it is not deleted", async () => {
+    const storyRow = { id: "s1", userId: "u1", deletedAt: null };
+    const { db, whereMock } = makeDb([storyRow]);
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.findById("s1");
+
+    expect(result).toEqual(storyRow);
+    const whereSql = render(whereMock.mock.calls[0][0]);
+    expect(whereSql).toContain('"stories"."id" = $1');
+    expect(whereSql).toContain('"stories"."deleted_at" is null');
+    expect(dialect.sqlToQuery(whereMock.mock.calls[0][0]).params).toEqual(["s1"]);
+  });
+
+  it("returns null when the story is missing or deleted", async () => {
+    const { db } = makeDb([]);
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.findById("gone")).resolves.toBeNull();
+  });
+});
+
+describe("StoryPgRepository.updateActive", () => {
+  const updateData = { caption: "updated", allowReplies: false };
+
+  it("only updates an owned, unexpired, undeleted, unarchived story", async () => {
+    const storyRow = { id: "s1", userId: "u1", caption: "updated" };
+    const { db, updateMock, updateSetMock, updateWhereMock, returningMock } = makeDb();
+    returningMock.mockResolvedValue([storyRow]);
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.updateActive("s1", "u1", updateData);
+
+    expect(result).toEqual(storyRow);
+    expect(updateMock).toHaveBeenCalledWith(stories);
+    expect(updateSetMock).toHaveBeenCalledWith(updateData);
+    const whereSql = render(updateWhereMock.mock.calls[0][0]);
+    expect(whereSql).toContain('"stories"."id" = $1');
+    expect(whereSql).toContain('"stories"."user_id" = $2');
+    expect(whereSql).toContain('"stories"."expires_at" > now()');
+    expect(whereSql).toContain('"stories"."deleted_at" is null');
+    expect(whereSql).toContain('"stories"."archived_at" is null');
+    expect(dialect.sqlToQuery(updateWhereMock.mock.calls[0][0]).params).toEqual(["s1", "u1"]);
+  });
+
+  it("returns null when no active story matches", async () => {
+    const { db, returningMock } = makeDb();
+    returningMock.mockResolvedValue([]);
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.updateActive("s1", "u2", updateData)).resolves.toBeNull();
+  });
+});
+
+describe("StoryPgRepository.findActiveById", () => {
+  it("returns the story only while it is unexpired, undeleted and unarchived", async () => {
+    const storyRow = { id: "s1", userId: "u1" };
+    const { db, whereMock } = makeDb([storyRow]);
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.findActiveById("s1");
+
+    expect(result).toEqual(storyRow);
+    const whereSql = render(whereMock.mock.calls[0][0]);
+    expect(whereSql).toContain('"stories"."id" = $1');
+    expect(whereSql).toContain('"stories"."expires_at" > now()');
+    expect(whereSql).toContain('"stories"."deleted_at" is null');
+    expect(whereSql).toContain('"stories"."archived_at" is null');
+    expect(dialect.sqlToQuery(whereMock.mock.calls[0][0]).params).toEqual(["s1"]);
+  });
+
+  it("returns null when the story is gone", async () => {
+    const { db } = makeDb([]);
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.findActiveById("gone")).resolves.toBeNull();
+  });
+});
+
+describe("StoryPgRepository.setMediaSize", () => {
+  it("backfills media_size_bytes only while it is still unknown", async () => {
+    const { db, updateMock, updateSetMock, updateWhereMock } = makeDb();
+    const repo = new StoryPgRepository(db);
+
+    await repo.setMediaSize("s1", 2048);
+
+    expect(updateMock).toHaveBeenCalledWith(stories);
+    expect(updateSetMock).toHaveBeenCalledWith({ mediaSizeBytes: 2048 });
+    const whereSql = render(updateWhereMock.mock.calls[0][0]);
+    expect(whereSql).toContain('"stories"."id" = $1');
+    expect(whereSql).toContain('"stories"."media_size_bytes" is null');
+    expect(dialect.sqlToQuery(updateWhereMock.mock.calls[0][0]).params).toEqual(["s1"]);
+  });
+});
+
+describe("StoryPgRepository.findUsersByIds", () => {
+  it("returns an empty map when no ids are requested", async () => {
+    const { db, selectMock } = makeDb();
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.findUsersByIds([]);
+    expect(result.size).toBe(0);
+    expect(selectMock).not.toHaveBeenCalled();
+  });
+
+  it("maps user summaries by id", async () => {
+    const { db, selectMock, whereMock } = makeDb([
+      { id: "u1", username: "f1", fullName: "F1", avatarUrl: null },
+      { id: "u2", username: "f2", fullName: "F2", avatarUrl: "a.png" },
+    ]);
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.findUsersByIds(["u1", "u2"]);
+
+    expect(selectMock).toHaveBeenCalledWith({
+      id: users.id,
+      username: users.username,
+      fullName: users.fullName,
+      avatarUrl: users.avatarUrl,
+    });
+    expect(result.get("u1")).toEqual({ id: "u1", username: "f1", fullName: "F1", avatarUrl: null });
+    expect(result.get("u2")?.avatarUrl).toBe("a.png");
+    expect(result.size).toBe(2);
+    const query = dialect.sqlToQuery(whereMock.mock.calls[0][0]);
+    expect(query.sql).toContain('"users"."id" in (');
+    expect(query.params).toEqual(["u1", "u2"]);
+  });
+});
+
+describe("StoryPgRepository.findViewedStoryIds", () => {
+  it("returns an empty set for an empty story list", async () => {
+    const { db, selectMock } = makeDb();
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.findViewedStoryIds("u1", []);
+    expect(result.size).toBe(0);
+    expect(selectMock).not.toHaveBeenCalled();
+  });
+
+  it("returns only the story ids the user has viewed", async () => {
+    const { db, whereMock } = makeDb([{ storyId: "s1" }, { storyId: "s3" }]);
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.findViewedStoryIds("u1", ["s1", "s2", "s3"]);
+
+    expect(result).toEqual(new Set(["s1", "s3"]));
+    const query = dialect.sqlToQuery(whereMock.mock.calls[0][0]);
+    expect(query.sql).toContain('"story_views"."user_id" = $1');
+    expect(query.sql).toContain('"story_views"."story_id" in (');
+    expect(query.params).toEqual(["u1", "s1", "s2", "s3"]);
+  });
+});
+
+describe("StoryPgRepository.markAsViewed", () => {
+  it("records a non-anonymous view with an upsert keyed on story and user", async () => {
+    const { db, insertMock, valuesMock, onConflictMock } = makeDb();
+    const repo = new StoryPgRepository(db);
+
+    await repo.markAsViewed("s1", "u1");
+
+    expect(insertMock).toHaveBeenCalledWith(storyViews);
+    expect(valuesMock).toHaveBeenCalledWith({ storyId: "s1", userId: "u1", anonymous: false });
+    const conflict = onConflictMock.mock.calls[0][0] as {
+      target: unknown[];
+      set: Record<string, unknown>;
+    };
+    expect(conflict.target).toEqual([storyViews.storyId, storyViews.userId]);
+    expect(conflict.set.anonymous).toBe(false);
+    expect(render(conflict.set.viewedAt as SQL)).toBe("now()");
+  });
+
+  it("keeps the anonymous flag on the recorded view", async () => {
+    const { db, valuesMock, onConflictMock } = makeDb();
+    const repo = new StoryPgRepository(db);
+
+    await repo.markAsViewed("s1", "u1", true);
+
+    expect(valuesMock).toHaveBeenCalledWith({ storyId: "s1", userId: "u1", anonymous: true });
+    const conflict = onConflictMock.mock.calls[0][0] as { set: Record<string, unknown> };
+    expect(conflict.set.anonymous).toBe(true);
+  });
+});
+
+describe("StoryPgRepository.markDeleted", () => {
+  it("soft deletes a live story and reports success", async () => {
+    const { db, updateMock, updateSetMock, updateWhereMock, returningMock } = makeDb();
+    returningMock.mockResolvedValue([{ id: "s1" }]);
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.markDeleted("s1");
+
+    expect(result).toBe(true);
+    expect(updateMock).toHaveBeenCalledWith(stories);
+    const set = updateSetMock.mock.calls[0][0] as { deletedAt: SQL };
+    expect(render(set.deletedAt)).toBe("now()");
+    const whereSql = render(updateWhereMock.mock.calls[0][0]);
+    expect(whereSql).toContain('"stories"."id" = $1');
+    expect(whereSql).toContain('"stories"."deleted_at" is null');
+    expect(dialect.sqlToQuery(updateWhereMock.mock.calls[0][0]).params).toEqual(["s1"]);
+  });
+
+  it("returns false when the story was already deleted", async () => {
+    const { db, returningMock } = makeDb();
+    returningMock.mockResolvedValue([]);
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.markDeleted("s1")).resolves.toBe(false);
+  });
+});
+
+describe("StoryPgRepository.getFriendUserIds", () => {
+  it("returns the counterpart of the pair for either column ordering", async () => {
+    const { db, whereMock } = makeDb([
+      { userLow: "u1", userHigh: "u2" },
+      { userLow: "u3", userHigh: "u1" },
+    ]);
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.getFriendUserIds("u1");
+
+    expect(result).toEqual(["u2", "u3"]);
+    const query = dialect.sqlToQuery(whereMock.mock.calls[0][0]);
+    expect(query.sql).toContain('"friendships"."status" = $1');
+    expect(query.sql).toContain('"friendships"."user_low" = $2');
+    expect(query.sql).toContain('"friendships"."user_high" = $3');
+    expect(query.params).toEqual(["ACCEPTED", "u1", "u1"]);
+  });
+
+  it("returns an empty list when the user has no friendships", async () => {
+    const { db } = makeDb([]);
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.getFriendUserIds("u1")).resolves.toEqual([]);
+  });
+});
+
+describe("StoryPgRepository.archiveStories", () => {
+  it("performs no transaction for an empty id list", async () => {
+    const { db, transactionMock, updateMock } = makeDb();
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.archiveStories([]);
+
+    expect(result).toBe(0);
+    expect(transactionMock).not.toHaveBeenCalled();
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it("detaches message snapshots and stamps archived_at in one transaction", async () => {
+    const { db, updateMock, updateSetMock, updateWhereMock, returningMock, transactionMock } =
+      makeDb();
+    returningMock.mockResolvedValue([{ id: "s1" }, { id: "s2" }]);
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.archiveStories(["s1", "s2"]);
+
+    expect(result).toBe(2);
+    expect(transactionMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenNthCalledWith(1, messages);
+    expect(updateMock).toHaveBeenNthCalledWith(2, stories);
+    expect(updateSetMock).toHaveBeenNthCalledWith(1, { storyId: null });
+    const storySet = updateSetMock.mock.calls[1][0] as { archivedAt: SQL };
+    expect(render(storySet.archivedAt)).toBe("now()");
+
+    const messageWhere = render(updateWhereMock.mock.calls[0][0]);
+    expect(messageWhere).toContain('"messages"."story_id" in (');
+    const storyWhere = render(updateWhereMock.mock.calls[1][0]);
+    expect(storyWhere).toContain('"stories"."id" in (');
+    expect(dialect.sqlToQuery(updateWhereMock.mock.calls[1][0]).params).toEqual(["s1", "s2"]);
+  });
+});
+
+describe("StoryPgRepository.summarizeReactions", () => {
+  it("groups reactions by emoji without a kind filter", async () => {
+    const { db, whereMock, groupByMock } = makeDb();
+    groupByMock.mockResolvedValue([
+      { emoji: "🔥", count: 2 },
+      { emoji: "❤️", count: 1 },
+    ]);
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.summarizeReactions("s1");
+
+    expect(groupByMock).toHaveBeenCalledWith(storyReactions.emoji);
+    expect(result).toEqual([
+      { emoji: "🔥", count: 2 },
+      { emoji: "❤️", count: 1 },
+    ]);
+    const query = dialect.sqlToQuery(whereMock.mock.calls[0][0]);
+    expect(query.sql).toContain('"story_reactions"."story_id" = $1');
+    expect(query.params).toEqual(["s1"]);
+  });
+
+  it("narrows the summary to one reaction kind when requested", async () => {
+    const { db, whereMock, groupByMock } = makeDb();
+    groupByMock.mockResolvedValue([]);
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.summarizeReactions("s1", "LIKE");
+
+    expect(result).toEqual([]);
+    const query = dialect.sqlToQuery(whereMock.mock.calls[0][0]);
+    expect(query.sql).toContain('"story_reactions"."kind" = $2');
+    expect(query.params).toEqual(["s1", "LIKE"]);
+  });
+});
+
+describe("StoryPgRepository settings", () => {
+  it("getUserStorySettings returns the stored row when it exists", async () => {
+    const settingsRow = {
+      userId: "u1",
+      viewedReceiptsEnabled: false,
+      archiveEnabled: false,
+      archiveDurationSecs: 604800,
+    };
+    const { db, whereMock } = makeDb([settingsRow]);
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.getUserStorySettings("u1");
+
+    expect(result).toEqual(settingsRow);
+    const query = dialect.sqlToQuery(whereMock.mock.calls[0][0]);
+    expect(query.sql).toContain('"user_story_settings"."user_id" = $1');
+    expect(query.params).toEqual(["u1"]);
+  });
+
+  it("getUserStorySettings falls back to defaults when nothing is stored", async () => {
+    const { db } = makeDb([]);
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.getUserStorySettings("u1")).resolves.toEqual({
+      userId: "u1",
+      viewedReceiptsEnabled: true,
+      archiveEnabled: true,
+      archiveDurationSecs: null,
+    });
+  });
+
+  it("upsertUserStorySettings writes only the provided fields on conflict", async () => {
+    const settingsRow = {
+      userId: "u1",
+      viewedReceiptsEnabled: false,
+      archiveEnabled: false,
+      archiveDurationSecs: 604800,
+    };
+    const { db, valuesMock, onConflictMock, returningMock } = makeDb();
+    returningMock.mockResolvedValue([settingsRow]);
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.upsertUserStorySettings("u1", {
+      viewedReceiptsEnabled: false,
+      archiveEnabled: false,
+      archiveDurationSecs: 604800,
+    });
+
+    expect(result).toEqual(settingsRow);
+    expect(valuesMock).toHaveBeenCalledWith(settingsRow);
+    const conflict = onConflictMock.mock.calls[0][0] as {
+      target: unknown[];
+      set: Record<string, unknown>;
+    };
+    expect(conflict.target).toEqual([userStorySettings.userId]);
+    expect(conflict.set).toMatchObject({
+      viewedReceiptsEnabled: false,
+      archiveEnabled: false,
+      archiveDurationSecs: 604800,
+    });
+    expect(render(conflict.set.updatedAt as SQL)).toBe("now()");
+  });
+
+  it("upsertUserStorySettings touches only updatedAt when no field is provided", async () => {
+    const { db, valuesMock, onConflictMock, returningMock } = makeDb();
+    returningMock.mockResolvedValue([
+      {
+        userId: "u1",
+        viewedReceiptsEnabled: true,
+        archiveEnabled: true,
+        archiveDurationSecs: null,
+      },
+    ]);
+    const repo = new StoryPgRepository(db);
+
+    await repo.upsertUserStorySettings("u1", {});
+
+    expect(valuesMock).toHaveBeenCalledWith({
+      userId: "u1",
+      viewedReceiptsEnabled: true,
+      archiveEnabled: true,
+      archiveDurationSecs: null,
+    });
+    const conflict = onConflictMock.mock.calls[0][0] as { set: Record<string, unknown> };
+    expect(Object.keys(conflict.set)).toEqual(["updatedAt"]);
+  });
+});
+
+describe("StoryPgRepository audience lookups", () => {
+  it("findStoryAudienceUserIds returns the allowed user ids", async () => {
+    const { db, whereMock } = makeDb([{ userId: "a1" }, { userId: "a2" }]);
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.findStoryAudienceUserIds("s1");
+
+    expect(result).toEqual(["a1", "a2"]);
+    const query = dialect.sqlToQuery(whereMock.mock.calls[0][0]);
+    expect(query.sql).toContain('"story_audiences"."story_id" = $1');
+    expect(query.params).toEqual(["s1"]);
+  });
+
+  it("findStoryAudienceUserIds returns an empty list for a story without audience rows", async () => {
+    const { db } = makeDb([]);
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.findStoryAudienceUserIds("s1")).resolves.toEqual([]);
+  });
+
+  it("isStoryAudience confirms membership with a bounded lookup", async () => {
+    const { db, selectMock, whereMock, limitMock } = makeDb();
+    limitMock.mockResolvedValue([{ userId: "u1" }]);
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.isStoryAudience("s1", "u1")).resolves.toBe(true);
+    expect(selectMock).toHaveBeenCalledWith({ userId: storyAudiences.userId });
+    expect(limitMock).toHaveBeenCalledWith(1);
+    const query = dialect.sqlToQuery(whereMock.mock.calls[0][0]);
+    expect(query.sql).toContain('"story_audiences"."story_id" = $1');
+    expect(query.sql).toContain('"story_audiences"."user_id" = $2');
+    expect(query.params).toEqual(["s1", "u1"]);
+  });
+
+  it("isStoryAudience returns false when the user is not on the audience list", async () => {
+    const { db, limitMock } = makeDb();
+    limitMock.mockResolvedValue([]);
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.isStoryAudience("s1", "u2")).resolves.toBe(false);
+  });
+});
+
+describe("StoryPgRepository mute queries", () => {
+  it("muteAuthor upserts the mute with conflict ignored", async () => {
+    const { db, insertMock, valuesMock, onConflictDoNothingMock } = makeDb();
+    const repo = new StoryPgRepository(db);
+
+    await repo.muteAuthor("u1", "author-1");
+
+    expect(insertMock).toHaveBeenCalledWith(storyMutes);
+    expect(valuesMock).toHaveBeenCalledWith({ userId: "u1", authorId: "author-1" });
+    expect(onConflictDoNothingMock).toHaveBeenCalledOnce();
+  });
+
+  it("unmuteAuthor returns true when a mute row is removed", async () => {
+    const { db, deleteMock, deleteWhereMock, returningMock } = makeDb();
+    returningMock.mockResolvedValue([{ userId: "u1" }]);
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.unmuteAuthor("u1", "author-1");
+
+    expect(result).toBe(true);
+    expect(deleteMock).toHaveBeenCalledWith(storyMutes);
+    const query = dialect.sqlToQuery(deleteWhereMock.mock.calls[0][0]);
+    expect(query.sql).toContain('"story_mutes"."user_id" = $1');
+    expect(query.sql).toContain('"story_mutes"."author_id" = $2');
+    expect(query.params).toEqual(["u1", "author-1"]);
+  });
+
+  it("unmuteAuthor returns false when nothing was muted", async () => {
+    const { db, returningMock } = makeDb();
+    returningMock.mockResolvedValue([]);
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.unmuteAuthor("u1", "author-1")).resolves.toBe(false);
+  });
+
+  it("getMutedAuthorIds lists the muted authors for the user", async () => {
+    const { db, whereMock } = makeDb([{ authorId: "a1" }, { authorId: "a2" }]);
+    const repo = new StoryPgRepository(db);
+
+    const result = await repo.getMutedAuthorIds("u1");
+
+    expect(result).toEqual(["a1", "a2"]);
+    const query = dialect.sqlToQuery(whereMock.mock.calls[0][0]);
+    expect(query.sql).toContain('"story_mutes"."user_id" = $1');
+    expect(query.params).toEqual(["u1"]);
+  });
+
+  it("getMutedAuthorIds returns an empty list when nothing is muted", async () => {
+    const { db } = makeDb([]);
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.getMutedAuthorIds("u1")).resolves.toEqual([]);
+  });
+
+  it("isAuthorMuted returns true for a muted author", async () => {
+    const { db, selectMock, whereMock, limitMock } = makeDb();
+    limitMock.mockResolvedValue([{ authorId: "a1" }]);
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.isAuthorMuted("u1", "a1")).resolves.toBe(true);
+    expect(selectMock).toHaveBeenCalledWith({ authorId: storyMutes.authorId });
+    expect(limitMock).toHaveBeenCalledWith(1);
+    const query = dialect.sqlToQuery(whereMock.mock.calls[0][0]);
+    expect(query.sql).toContain('"story_mutes"."user_id" = $1');
+    expect(query.sql).toContain('"story_mutes"."author_id" = $2');
+    expect(query.params).toEqual(["u1", "a1"]);
+  });
+
+  it("isAuthorMuted returns false for an unmuted author", async () => {
+    const { db, limitMock } = makeDb();
+    limitMock.mockResolvedValue([]);
+    const repo = new StoryPgRepository(db);
+
+    await expect(repo.isAuthorMuted("u1", "a2")).resolves.toBe(false);
+  });
+});
+
+describe("StoryPgRepository.findArchivedStoriesByUserId", () => {
+  const archivedRow = (id: string, createdAt: string) => ({
+    id,
+    userId: "u1",
+    kind: "TEXT",
+    bucket: null,
+    objectKey: null,
+    mimeType: null,
+    width: null,
+    height: null,
+    durationMs: null,
+    caption: "memory",
+    background: null,
+    allowReplies: true,
+    allowReactions: true,
+    audienceMode: "ALL_FRIENDS",
+    archivedAt: new Date("2026-11-05T00:00:00Z"),
+    createdAt: new Date(createdAt),
+    expiresAt: new Date("2026-11-02T00:00:00Z"),
+    deletedAt: null,
+  });
+  const toItem = (row: ReturnType<typeof archivedRow>) => {
+    const { deletedAt: _deletedAt, ...item } = row;
+    return item;
+  };
+
+  it("lists archived stories mapped to story items on the first page", async () => {
+    const { db, whereMock, orderByMock, limitMock } = makeDb();
+    limitMock.mockResolvedValue([archivedRow("s1", "2026-11-01T00:00:00Z")]);
+    const repo = new StoryPgRepository(db);
+
+    const page = await repo.findArchivedStoriesByUserId("u1", undefined, 20);
+
+    expect(limitMock).toHaveBeenCalledWith(21);
+    expect(page.items).toEqual([toItem(archivedRow("s1", "2026-11-01T00:00:00Z"))]);
+    expect(page.hasMore).toBe(false);
+    expect(page.nextCursor).toBeUndefined();
+
+    const query = dialect.sqlToQuery(whereMock.mock.calls[0][0]);
+    expect(query.sql).toContain('"stories"."user_id" = $1');
+    expect(query.sql).toContain('"stories"."archived_at" is not null');
+    expect(query.sql).toContain('"stories"."deleted_at" is null');
+    expect(query.params).toEqual(["u1"]);
+    const orderByCalls = orderByMock.mock.calls[0] as unknown as [SQL, SQL];
+    expect(render(orderByCalls[0])).toContain('"stories"."created_at" desc');
+    expect(render(orderByCalls[1])).toContain('"stories"."id" desc');
+  });
+
+  it("pages past the limit with a story id cursor", async () => {
+    const { db, whereMock, limitMock } = makeDb();
+    limitMock.mockResolvedValue([
+      archivedRow("s2", "2026-11-03T00:00:00Z"),
+      archivedRow("s1", "2026-11-01T00:00:00Z"),
+    ]);
+    const repo = new StoryPgRepository(db);
+
+    const page = await repo.findArchivedStoriesByUserId("u1", "s9", 1);
+
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toEqual(toItem(archivedRow("s2", "2026-11-03T00:00:00Z")));
+    expect(page.hasMore).toBe(true);
+    expect(page.nextCursor).toBe("s2");
+
+    const query = dialect.sqlToQuery(whereMock.mock.calls[0][0]);
+    expect(query.sql).toContain('"stories"."created_at" <');
+    expect(query.sql).toContain('"stories"."created_at" =');
+    expect(query.sql).toContain('"stories"."id" <');
+    expect(query.sql).toContain("SELECT s.created_at FROM stories s WHERE s.id =");
+    expect(query.params).toEqual(["u1", "s9", "u1", "s9", "u1", "s9"]);
+  });
+
+  it("returns an empty page when the user has no archived stories", async () => {
+    const { db, limitMock } = makeDb();
+    limitMock.mockResolvedValue([]);
+    const repo = new StoryPgRepository(db);
+
+    const page = await repo.findArchivedStoriesByUserId("u1", undefined, 20);
+
+    expect(page.items).toEqual([]);
+    expect(page.hasMore).toBe(false);
+    expect(page.nextCursor).toBeUndefined();
   });
 });
