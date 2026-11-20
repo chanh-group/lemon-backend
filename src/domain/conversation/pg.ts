@@ -1232,12 +1232,6 @@ export class ConversationPgRepository implements ConversationRepository {
 
   async updateLastRead(conversationId: string, userId: string, messageId: string): Promise<void> {
     await this.db.transaction(async (tx) => {
-      await tx
-        .select({ id: conversations.id })
-        .from(conversations)
-        .where(eq(conversations.id, conversationId))
-        .for("update")
-        .limit(1);
       const [participant] = await tx
         .select({
           lastReadMessageId: conversationParticipants.lastReadMessageId,
