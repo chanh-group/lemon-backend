@@ -8,6 +8,7 @@ import { RealtimeService } from "../realtime/realtime.service.js";
 import {
   MESSAGE_REPOSITORY,
   type MessageRepository,
+  type MessageTimelineResult,
   type ReplyTargetMessage,
 } from "./repository.js";
 import type { SendMessageDto } from "./dto/request.js";
@@ -15,11 +16,13 @@ import type {
   MessageReactionSummary,
   MessageResponse,
   MessageTimelineResponse,
+  MessageWindowResponse,
   ReplyTargetResponse,
 } from "./dto/response.js";
 import { toMessageResponseAsync, toMessageTimelineAsync } from "./dto/mapper.js";
 import { FriendService } from "../friend/service.js";
 import { MESSAGE_MAX_BODY_LENGTH } from "./constants.js";
+import { DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE } from "../pagination.constants.js";
 import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.js";
 import { CHAT_MAX_FILE_BYTES } from "../../utils/cache/constants.js";
 import type { StoryPreview } from "../story/types.js";
@@ -294,6 +297,58 @@ export class MessageService {
       after,
     );
     if (timeline.authorized === false) throw new BusinessError("NOT_PARTICIPANT");
+    return this.decorateTimeline(conversationId, userId, timeline);
+  }
+
+  /** Cửa sổ tin nhắn quanh một tin: nửa mới hơn + anchor + nửa cũ hơn, thứ tự mới nhất trước. */
+  async getMessageWindow(
+    userId: string,
+    conversationId: string,
+    messageId: string,
+    limit?: number,
+  ): Promise<MessageWindowResponse> {
+    const [, anchorAccessible] = await Promise.all([
+      this.assertDirectConversationAllowed(conversationId, userId),
+      this.convRepo.canAccessMessage(conversationId, userId, messageId),
+    ]);
+    if (!anchorAccessible) throw new BusinessError("MESSAGE_NOT_FOUND");
+
+    const size = Math.min(Math.max(limit ?? DEFAULT_MESSAGE_PAGE_SIZE, 1), MAX_MESSAGE_PAGE_SIZE);
+    const [anchor] = await this.messageRepo.findReplyTargets(conversationId, [messageId], userId);
+    if (!anchor) throw new BusinessError("MESSAGE_NOT_FOUND");
+
+    const newerCount = Math.floor((size - 1) / 2);
+    const olderCount = size - 1 - newerCount;
+    const emptySide: MessageTimelineResult = { items: [], hasMore: false, authorized: true };
+    const [anchorRow, older, newer] = await Promise.all([
+      this.messageRepo.findById(messageId, true),
+      olderCount > 0
+        ? this.messageRepo.findTimeline(conversationId, userId, messageId, olderCount)
+        : Promise.resolve(emptySide),
+      newerCount > 0
+        ? this.messageRepo.findTimeline(conversationId, userId, undefined, newerCount, messageId)
+        : Promise.resolve(emptySide),
+    ]);
+    if (!anchorRow) throw new BusinessError("MESSAGE_NOT_FOUND");
+    if (older.authorized === false || newer.authorized === false) {
+      throw new BusinessError("NOT_PARTICIPANT");
+    }
+
+    const timeline: MessageTimelineResult = {
+      items: [...newer.items.slice().reverse(), anchorRow, ...older.items],
+      hasMore: older.hasMore,
+      ...(older.nextCursor !== undefined && { nextCursor: older.nextCursor }),
+      authorized: true,
+    };
+    const response = await this.decorateTimeline(conversationId, userId, timeline);
+    return { ...response, hasMoreNewer: newer.hasMore };
+  }
+
+  private async decorateTimeline(
+    conversationId: string,
+    userId: string,
+    timeline: MessageTimelineResult,
+  ): Promise<MessageTimelineResponse> {
     const ids = [
       ...new Set(timeline.items.flatMap((item) => (item.replyToId ? [item.replyToId] : []))),
     ];
