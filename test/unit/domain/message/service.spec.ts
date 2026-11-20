@@ -7,6 +7,7 @@ import type { Message } from "../../../../src/domain/message/schema.js";
 import type { FriendService } from "../../../../src/domain/friend/service.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
 import type { StorageService } from "../../../../src/utils/storage/store.js";
+import type { StoryRepository } from "../../../../src/domain/story/repository.js";
 
 describe("MessageService", () => {
   let service: MessageService;
@@ -35,6 +36,8 @@ describe("MessageService", () => {
   let emitMessageUpdatedMock: Mock;
   let emitMessageRevokedMock: Mock;
   let emitMessageHiddenMock: Mock;
+  let findViewableByIdsMock: Mock;
+  let mockStoryRepo: StoryRepository;
 
   const userA = "0193a2b1-0000-7000-8000-000000000001";
   const userB = "0193a2b1-0000-7000-8000-000000000002";
@@ -63,13 +66,14 @@ describe("MessageService", () => {
     createMessageMock = vi.fn();
     findByIdMock = vi.fn();
     findTimelineMock = vi.fn();
-    findReplyTargetsMock = vi.fn();
+    findReplyTargetsMock = vi.fn().mockResolvedValue([]);
     updateBodyMock = vi.fn();
     softDeleteMock = vi.fn();
     hideForUserMock = vi.fn().mockResolvedValue({ conversationId: convId, inserted: true });
     resolveWriteMissMock = vi.fn();
     reactMessageMock = vi.fn();
     findSenderProfilesMock = vi.fn().mockResolvedValue([]);
+    findViewableByIdsMock = vi.fn().mockResolvedValue([]);
     canAccessMessageMock = vi.fn().mockResolvedValue(true);
     getGroupMembershipMock = vi.fn().mockResolvedValue(null);
 
@@ -122,8 +126,17 @@ describe("MessageService", () => {
       emitMessageHidden: emitMessageHiddenMock,
       emitMessageReaction: emitMessageReactionMock,
     } as unknown as RealtimeService;
+    mockStoryRepo = {
+      findViewableByIds: findViewableByIdsMock,
+    } as unknown as StoryRepository;
 
-    service = new MessageService(mockMessageRepo, mockConvRepo, mockFriendService, mockRealtime);
+    service = new MessageService(
+      mockMessageRepo,
+      mockConvRepo,
+      mockFriendService,
+      mockRealtime,
+      mockStoryRepo,
+    );
   });
 
   describe("sendMessage", () => {
@@ -204,11 +217,9 @@ describe("MessageService", () => {
       expect(res.id).toBe(msgId);
       expect(res.body).toBe("Hello");
       expect(res).not.toHaveProperty("clientMsgId");
-      expect(emitNewMessageMock).toHaveBeenCalledWith(
-        convId,
-        { ...res, replyTarget: null },
-        expect.any(Array),
-      );
+      const [, emittedPayload] = emitNewMessageMock.mock.calls[0];
+      expect(emittedPayload).toEqual(res);
+      expect(emittedPayload).not.toHaveProperty("replyTarget");
     });
 
     it("redacts a reply target per recipient instead of broadcasting the sender view", async () => {
@@ -218,6 +229,9 @@ describe("MessageService", () => {
       canAccessMessageMock.mockResolvedValue(true);
       getMessageRecipientUserIdsMock.mockResolvedValue([userA]);
       findByIdMock.mockResolvedValue({ ...mockMessage, id: replyTargetId });
+      findReplyTargetsMock.mockResolvedValue([
+        { ...mockMessage, id: replyTargetId, attachments: [] },
+      ]);
 
       await service.sendMessage(userA, convId, {
         body: "Reply",
@@ -227,16 +241,10 @@ describe("MessageService", () => {
       });
 
       const [, broadcastPayload, payloads] = emitNewMessageMock.mock.calls[0];
-      expect(broadcastPayload).toEqual(expect.objectContaining({ replyTarget: null }));
+      expect(broadcastPayload).not.toHaveProperty("replyTarget");
       expect(payloads).toEqual([
-        expect.objectContaining({
-          userId: userA,
-          payload: expect.objectContaining({ replyTarget: null }),
-        }),
-        expect.objectContaining({
-          userId: userB,
-          payload: expect.objectContaining({ replyTarget: null }),
-        }),
+        expect.objectContaining({ userId: userA, payload: broadcastPayload }),
+        expect.objectContaining({ userId: userB, payload: broadcastPayload }),
       ]);
     });
 
@@ -357,6 +365,7 @@ describe("MessageService", () => {
 
     it("refreshes the reply target after persistence", async () => {
       findByIdMock.mockResolvedValue(mockMessage);
+      findReplyTargetsMock.mockResolvedValue([{ ...mockMessage, attachments: [] }]);
       createMessageMock.mockResolvedValue({
         message: { ...mockMessage, replyToId: msgId },
         isNew: true,
@@ -369,16 +378,18 @@ describe("MessageService", () => {
         replyToId: msgId,
       });
 
-      expect(findByIdMock).toHaveBeenCalledTimes(2);
+      expect(findByIdMock).toHaveBeenCalledTimes(1);
       expect(findByIdMock).toHaveBeenCalledWith(msgId, false);
+      expect(findReplyTargetsMock).toHaveBeenCalledWith(convId, [msgId], userA);
       expect(res.replyTarget).toMatchObject({ id: msgId, body: "Hello", deletedAt: null });
     });
 
     it("redacts a reply target revoked after validation from the response and event", async () => {
       const deletedAt = new Date();
-      findByIdMock
-        .mockResolvedValueOnce(mockMessage)
-        .mockResolvedValueOnce({ ...mockMessage, deletedAt, body: "private old text" });
+      findByIdMock.mockResolvedValueOnce(mockMessage);
+      findReplyTargetsMock.mockResolvedValueOnce([
+        { ...mockMessage, deletedAt, body: "private old text", attachments: [] },
+      ]);
       createMessageMock.mockResolvedValue({
         message: { ...mockMessage, id: "reply", replyToId: msgId },
         isNew: true,
@@ -397,15 +408,11 @@ describe("MessageService", () => {
         storyPreview: null,
         deletedAt,
       });
-      expect(emitNewMessageMock).toHaveBeenCalledWith(
-        convId,
-        expect.objectContaining({ replyTarget: null }),
-        expect.arrayContaining([
-          expect.objectContaining({
-            payload: expect.objectContaining({ replyTarget: null }),
-          }),
-        ]),
-      );
+      const [, emittedPayload, payloads] = emitNewMessageMock.mock.calls[0];
+      expect(emittedPayload).not.toHaveProperty("replyTarget");
+      for (const entry of payloads as Array<{ payload: unknown }>) {
+        expect(entry.payload).toEqual(emittedPayload);
+      }
     });
 
     it("does not look up a reply message when replyToId is absent", async () => {
@@ -779,6 +786,7 @@ describe("MessageService", () => {
         } as any,
         { assertCanChat: assertCanChatMock } as any,
         { emitNewMessage: emitNewMessageMock } as any,
+        mockStoryRepo,
         storageMock as any,
       );
 
@@ -858,6 +866,7 @@ describe("MessageService", () => {
         } as any,
         { assertCanChat: assertCanChatMock } as any,
         { emitNewMessage: emitNewMessageMock } as any,
+        mockStoryRepo,
         storage as any,
       );
       let resolveReply!: (message: Message) => void;
@@ -919,6 +928,7 @@ describe("MessageService", () => {
         } as any,
         { assertCanChat: assertCanChatMock } as any,
         { emitNewMessage: emitNewMessageMock } as any,
+        mockStoryRepo,
         mockStorage as any,
       );
       findByIdMock.mockResolvedValue({
@@ -1089,7 +1099,257 @@ describe("MessageService", () => {
       expect(res).toMatchObject({
         id: msgId,
         body: "Hello",
+        contentCategory: "MESSAGE",
         sender: { id: userB, username: "bob" },
+      });
+    });
+
+    it("infers category ATTACHMENT and attaches presigned previewAttachment for active image target", async () => {
+      const storageMock = {
+        presignGet: vi.fn().mockResolvedValue({ downloadUrl: "https://r2.test/inline.jpg" }),
+      };
+      const serviceWithStorage = new MessageService(
+        {
+          findReplyTargets: findReplyTargetsMock,
+          findSenderProfiles: findSenderProfilesMock,
+        } as any,
+        { isParticipant: isParticipantMock } as any,
+        {} as any,
+        {} as any,
+        mockStoryRepo,
+        storageMock as any,
+      );
+
+      isParticipantMock.mockResolvedValueOnce(true);
+      findReplyTargetsMock.mockResolvedValueOnce([
+        {
+          id: msgId,
+          senderId: userB,
+          kind: "TEXT",
+          body: "Image caption",
+          deletedAt: null,
+          storyPreview: null,
+          attachments: [
+            {
+              id: "att-1",
+              messageId: msgId,
+              kind: "IMAGE",
+              objectKey: "key-1",
+              fileName: "pic.jpg",
+              mimeType: "image/jpeg",
+              width: 800,
+              height: 600,
+              durationMs: null,
+            },
+          ],
+        },
+      ]);
+      findSenderProfilesMock.mockResolvedValueOnce([
+        { id: userB, username: "bob", fullName: "Bob", avatarUrl: null },
+      ]);
+
+      const res = await serviceWithStorage.getReplyTarget(userA, convId, msgId);
+      expect(res.contentCategory).toBe("ATTACHMENT");
+      expect(res.previewAttachment).toEqual({
+        id: "att-1",
+        kind: "IMAGE",
+        fileName: "pic.jpg",
+        mimeType: "image/jpeg",
+        width: 800,
+        height: 600,
+        durationMs: null,
+        previewUrl: "https://r2.test/inline.jpg",
+      });
+      expect(storageMock.presignGet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          objectKey: "key-1",
+          disposition: "inline",
+        }),
+      );
+    });
+
+    it("preserves contentCategory and strips previewAttachment when target is revoked", async () => {
+      isParticipantMock.mockResolvedValueOnce(true);
+      findReplyTargetsMock.mockResolvedValueOnce([
+        {
+          id: msgId,
+          senderId: userB,
+          kind: "TEXT",
+          body: "Revoked caption",
+          deletedAt: new Date(),
+          storyPreview: null,
+          attachments: [
+            {
+              id: "att-1",
+              messageId: msgId,
+              kind: "IMAGE",
+              objectKey: "key-1",
+              fileName: "pic.jpg",
+              mimeType: "image/jpeg",
+              width: 800,
+              height: 600,
+              durationMs: null,
+            },
+          ],
+        },
+      ]);
+      findSenderProfilesMock.mockResolvedValueOnce([
+        { id: userB, username: "bob", fullName: "Bob", avatarUrl: null },
+      ]);
+
+      const res = await service.getReplyTarget(userA, convId, msgId);
+      expect(res.contentCategory).toBe("ATTACHMENT");
+      expect(res.body).toBeNull();
+      expect(res.previewAttachment).toBeUndefined();
+    });
+
+    it("infers VOICE category for messages with only AUDIO attachments", async () => {
+      isParticipantMock.mockResolvedValueOnce(true);
+      findReplyTargetsMock.mockResolvedValueOnce([
+        {
+          id: msgId,
+          senderId: userB,
+          kind: "TEXT",
+          body: null,
+          deletedAt: null,
+          storyPreview: null,
+          attachments: [
+            {
+              id: "att-voice",
+              messageId: msgId,
+              kind: "AUDIO",
+              objectKey: "key-voice",
+              fileName: "voice.webm",
+              mimeType: "audio/webm",
+              width: null,
+              height: null,
+              durationMs: 4500,
+            },
+          ],
+        },
+      ]);
+      findSenderProfilesMock.mockResolvedValueOnce([]);
+
+      const res = await service.getReplyTarget(userA, convId, msgId);
+      expect(res.contentCategory).toBe("VOICE");
+    });
+
+    it("infers STORY category for STORY_REPLY and STORY_REACTION kinds", async () => {
+      isParticipantMock.mockResolvedValueOnce(true);
+      findReplyTargetsMock.mockResolvedValueOnce([
+        {
+          id: msgId,
+          senderId: userB,
+          kind: "STORY_REPLY",
+          body: "Nice story!",
+          deletedAt: null,
+          storyPreview: {
+            id: "story-1",
+            kind: "IMAGE",
+            bucket: "stories",
+            objectKey: "story-1.jpg",
+            caption: "At the beach",
+            background: null,
+          },
+        },
+      ]);
+      findSenderProfilesMock.mockResolvedValueOnce([]);
+
+      const res = await service.getReplyTarget(userA, convId, msgId);
+      expect(res.contentCategory).toBe("STORY");
+    });
+
+    it("resolves a presigned media URL for alive stories and redacts dead ones", async () => {
+      const storyPreview = {
+        id: "0193a2b1-0000-7000-8000-000000000050",
+        kind: "IMAGE" as const,
+        bucket: "lemon-stories",
+        objectKey: "stories/u/a.jpg",
+        caption: "At the beach",
+        background: null,
+      };
+      const storyRow = {
+        ...storyPreview,
+        userId: userB,
+        mimeType: "image/jpeg",
+      };
+      const storageMock = {
+        presignGet: vi.fn().mockResolvedValue({ downloadUrl: "https://r2.test/inline.jpg" }),
+      };
+      const serviceWithStorage = new MessageService(
+        {
+          findReplyTargets: findReplyTargetsMock,
+          findSenderProfiles: findSenderProfilesMock,
+        } as any,
+        { isParticipant: isParticipantMock } as any,
+        {} as any,
+        {} as any,
+        mockStoryRepo,
+        storageMock as any,
+      );
+      const target = {
+        id: msgId,
+        senderId: userB,
+        kind: "STORY_REPLY",
+        body: "Nice!",
+        deletedAt: null,
+        storyPreview,
+        attachments: [],
+      };
+
+      isParticipantMock.mockResolvedValueOnce(true);
+      findReplyTargetsMock.mockResolvedValueOnce([target]);
+      findSenderProfilesMock.mockResolvedValueOnce([]);
+      findViewableByIdsMock.mockResolvedValueOnce([storyRow]);
+
+      const res = await serviceWithStorage.getReplyTarget(userA, convId, msgId);
+      expect(res.storyPreview).toMatchObject({
+        id: storyPreview.id,
+        caption: "At the beach",
+        mediaUrl: "https://r2.test/inline.jpg",
+      });
+      expect(storageMock.presignGet).toHaveBeenCalledWith(
+        expect.objectContaining({ objectKey: "stories/u/a.jpg", disposition: "inline" }),
+      );
+
+      isParticipantMock.mockResolvedValueOnce(true);
+      findReplyTargetsMock.mockResolvedValueOnce([target]);
+      findSenderProfilesMock.mockResolvedValueOnce([]);
+      findViewableByIdsMock.mockResolvedValueOnce([]);
+
+      const dead = await serviceWithStorage.getReplyTarget(userA, convId, msgId);
+      expect(dead.storyPreview).toBeNull();
+    });
+
+    it("keeps text story previews without a media URL", async () => {
+      const storyPreview = {
+        id: "0193a2b1-0000-7000-8000-000000000051",
+        kind: "TEXT" as const,
+        bucket: null,
+        objectKey: null,
+        caption: "Hello world",
+        background: "#123456",
+      };
+      isParticipantMock.mockResolvedValueOnce(true);
+      findReplyTargetsMock.mockResolvedValueOnce([
+        {
+          id: msgId,
+          senderId: userB,
+          kind: "STORY_REPLY",
+          body: "Nice!",
+          deletedAt: null,
+          storyPreview,
+          attachments: [],
+        },
+      ]);
+      findSenderProfilesMock.mockResolvedValueOnce([]);
+      findViewableByIdsMock.mockResolvedValueOnce([{ ...storyPreview, userId: userB }]);
+
+      const res = await service.getReplyTarget(userA, convId, msgId);
+      expect(res.storyPreview).toMatchObject({
+        kind: "TEXT",
+        caption: "Hello world",
+        mediaUrl: null,
       });
     });
   });

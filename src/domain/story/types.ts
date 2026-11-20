@@ -8,4 +8,6 @@ export interface StoryPreview {
   objectKey: string | null;
   caption: string | null;
   background: string | null;
+  /** Presigned inline media URL; null for text stories or when media cannot be served. */
+  mediaUrl?: string | null;
 }

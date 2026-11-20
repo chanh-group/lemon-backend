@@ -135,6 +135,21 @@ export class StoryPgRepository implements StoryRepository {
     return story ?? null;
   }
 
+  async findViewableByIds(ids: string[], viewerId: string): Promise<Story[]> {
+    if (ids.length === 0 || !viewerId) return [];
+    return this.db
+      .select()
+      .from(stories)
+      .where(
+        and(
+          inArray(stories.id, ids),
+          gt(stories.expiresAt, sql`now()`),
+          isNull(stories.deletedAt),
+          isNull(stories.archivedAt),
+        ),
+      );
+  }
+
   async updateActive(
     id: string,
     userId: string,

@@ -25,11 +25,27 @@ export type AttachmentResponseSource = Pick<
 /** Reaction columns consumed by the response mapper (no createdAt). */
 export type ReactionResponseSource = Pick<MessageReaction, "messageId" | "userId" | "emoji">;
 
+/** Attachment columns consumed when resolving reply target previews. */
+export type ReplyAttachmentSource = Pick<
+  MessageAttachment,
+  | "id"
+  | "messageId"
+  | "kind"
+  | "objectKey"
+  | "fileName"
+  | "mimeType"
+  | "width"
+  | "height"
+  | "durationMs"
+>;
+
 /** Message columns consumed when rendering a reply target. */
 export type ReplyTargetMessage = Pick<
   Message,
   "id" | "senderId" | "kind" | "body" | "deletedAt" | "storyPreview"
->;
+> & {
+  attachments?: ReplyAttachmentSource[];
+};
 
 /** Message row plus the projected extras consumed by the response mapper. */
 export type MessageResponseSource = Message & {

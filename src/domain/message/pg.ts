@@ -21,6 +21,7 @@ import type {
   MessageTimelineResult,
   MessageWithAttachments,
   ReactionResponseSource,
+  ReplyAttachmentSource,
   ReplyTargetMessage,
 } from "./repository.js";
 import type { StoryPreview } from "../story/types.js";
@@ -509,7 +510,7 @@ export class MessagePgRepository implements MessageRepository {
   ): Promise<ReplyTargetMessage[]> {
     if (messageIds.length === 0 || !viewerId) return [];
 
-    return this.db
+    const targetRows = await this.db
       .select({
         id: messages.id,
         senderId: messages.senderId,
@@ -561,6 +562,37 @@ export class MessagePgRepository implements MessageRepository {
           )`,
         ),
       );
+
+    if (targetRows.length === 0) return [];
+
+    const targetIds = targetRows.map((r) => r.id);
+    const attachmentRows = await this.db
+      .select({
+        id: messageAttachments.id,
+        messageId: messageAttachments.messageId,
+        kind: messageAttachments.kind,
+        objectKey: messageAttachments.objectKey,
+        fileName: messageAttachments.fileName,
+        mimeType: messageAttachments.mimeType,
+        width: messageAttachments.width,
+        height: messageAttachments.height,
+        durationMs: messageAttachments.durationMs,
+      })
+      .from(messageAttachments)
+      .where(inArray(messageAttachments.messageId, targetIds))
+      .orderBy(asc(messageAttachments.createdAt), asc(messageAttachments.id));
+
+    const attachmentsByMessageId = new Map<string, ReplyAttachmentSource[]>();
+    for (const att of attachmentRows) {
+      const list = attachmentsByMessageId.get(att.messageId) ?? [];
+      list.push(att);
+      attachmentsByMessageId.set(att.messageId, list);
+    }
+
+    return targetRows.map((row) => ({
+      ...row,
+      attachments: attachmentsByMessageId.get(row.id) ?? [],
+    }));
   }
 
   async findById(messageId: string, includeDetails = true): Promise<MessageWithAttachments | null> {

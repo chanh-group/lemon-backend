@@ -5,6 +5,8 @@ import { RateLimitModule } from "../../middleware/ratelimit.module.js";
 import { RealtimeModule } from "../realtime/realtime.module.js";
 import { MessageController } from "./controller.js";
 import { MessagePgRepository } from "./pg.js";
+import { STORY_REPOSITORY } from "../story/repository.js";
+import { StoryPgRepository } from "../story/pg.js";
 import { MESSAGE_REPOSITORY } from "./repository.js";
 import { MessageService } from "./service.js";
 
@@ -15,6 +17,12 @@ import { MessageService } from "./service.js";
     {
       provide: MESSAGE_REPOSITORY,
       useClass: MessagePgRepository,
+    },
+    {
+      // Registered here instead of importing StoryModule (which imports this
+      // module) to avoid a circular module dependency.
+      provide: STORY_REPOSITORY,
+      useClass: StoryPgRepository,
     },
     MessageService,
   ],

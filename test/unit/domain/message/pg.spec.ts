@@ -30,7 +30,13 @@ import { BusinessError } from "../../../../src/utils/errors/business.js";
 function makeSelectChain() {
   const limitMock = vi.fn<(limit: number) => Promise<unknown[]>>().mockResolvedValue([]);
   const forMock = vi.fn(() => ({ limit: limitMock }));
-  const orderByMock = vi.fn(() => ({ limit: limitMock }));
+  const makeOrderByResult = () => ({
+    limit: limitMock,
+    // oxlint-disable-next-line unicorn/no-thenable
+    then: (resolve: (val: unknown) => unknown, reject?: (err: unknown) => unknown) =>
+      limitMock(0).then(resolve, reject),
+  });
+  const orderByMock = vi.fn(makeOrderByResult);
   const makeWhereResult = (condition: SQL) => ({
     limit: limitMock,
     for: forMock,
@@ -948,9 +954,9 @@ describe("MessagePgRepository.reactMessage", () => {
 describe("MessagePgRepository.findReplyTargets", () => {
   it("projects only the reply target fields consumed by responses", async () => {
     const { db, dbSelect } = makeDb();
-    dbSelect.limitMock.mockResolvedValueOnce([
-      { historyBoundaryMessageId: null, joinedAt: new Date(0) },
-    ]);
+    dbSelect.limitMock
+      .mockResolvedValueOnce([{ historyBoundaryMessageId: null, joinedAt: new Date(0) }])
+      .mockResolvedValueOnce([]);
     const repo = new MessagePgRepository(db);
 
     await repo.findReplyTargets(conversationId, [messageId], senderId);
@@ -991,11 +997,11 @@ describe("MessagePgRepository.findReplyTargets", () => {
       deletedAt: null,
       storyPreview: null,
     };
-    dbSelect.limitMock.mockResolvedValueOnce([target]);
+    dbSelect.limitMock.mockResolvedValueOnce([target]).mockResolvedValueOnce([]);
     const repo = new MessagePgRepository(db);
 
     await expect(repo.findReplyTargets(conversationId, [messageId], senderId)).resolves.toEqual([
-      target,
+      { ...target, attachments: [] },
     ]);
 
     const where = render(dbSelect.whereMock.mock.calls[1][0]);
@@ -1011,6 +1017,78 @@ describe("MessagePgRepository.findReplyTargets", () => {
       conversationId,
       conversationId,
     ]);
+  });
+
+  it("groups attachment rows per target in createdAt order", async () => {
+    const { db, dbSelect } = makeDb();
+    const targetA: ReplyTargetMessage = {
+      id: "target-a",
+      senderId,
+      kind: "TEXT",
+      body: "First",
+      deletedAt: null,
+      storyPreview: null,
+    };
+    const targetB: ReplyTargetMessage = {
+      id: "target-b",
+      senderId,
+      kind: "TEXT",
+      body: "Second",
+      deletedAt: null,
+      storyPreview: null,
+    };
+    const attachmentB = {
+      id: "att-b",
+      messageId: "target-b",
+      kind: "IMAGE",
+      objectKey: "key-b",
+      fileName: "b.jpg",
+      mimeType: "image/jpeg",
+      width: 800,
+      height: 600,
+      durationMs: null,
+    };
+    const attachmentA = {
+      id: "att-a",
+      messageId: "target-a",
+      kind: "AUDIO",
+      objectKey: "key-a",
+      fileName: "a.webm",
+      mimeType: "audio/webm",
+      width: null,
+      height: null,
+      durationMs: 4500,
+    };
+    dbSelect.limitMock
+      .mockResolvedValueOnce([targetA, targetB])
+      .mockResolvedValueOnce([attachmentB, attachmentA]);
+    const repo = new MessagePgRepository(db);
+
+    await expect(
+      repo.findReplyTargets(conversationId, ["target-a", "target-b"], senderId),
+    ).resolves.toEqual([
+      { ...targetA, attachments: [attachmentA] },
+      { ...targetB, attachments: [attachmentB] },
+    ]);
+
+    expect(dbSelect.selectMock).toHaveBeenCalledWith({
+      id: messageAttachments.id,
+      messageId: messageAttachments.messageId,
+      kind: messageAttachments.kind,
+      objectKey: messageAttachments.objectKey,
+      fileName: messageAttachments.fileName,
+      mimeType: messageAttachments.mimeType,
+      width: messageAttachments.width,
+      height: messageAttachments.height,
+      durationMs: messageAttachments.durationMs,
+    });
+    const where = render(dbSelect.whereMock.mock.calls[2][0]);
+    expect(where.sql).toContain('"message_attachments"."message_id" in');
+    expect(where.params).toEqual(["target-a", "target-b"]);
+    expect(dbSelect.orderByMock).toHaveBeenCalledWith(
+      asc(messageAttachments.createdAt),
+      asc(messageAttachments.id),
+    );
   });
 });
 
