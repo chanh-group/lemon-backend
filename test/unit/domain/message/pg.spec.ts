@@ -3,7 +3,10 @@ import { asc, desc, sql } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
 import type { DrizzleDb } from "../../../../src/configs/database.js";
-import { conversations, conversationParticipants } from "../../../../src/domain/conversation/schema.js";
+import {
+  conversations,
+  conversationParticipants,
+} from "../../../../src/domain/conversation/schema.js";
 import { MessagePgRepository } from "../../../../src/domain/message/pg.js";
 import {
   ATTACHMENT_PREVIEW_TOKEN,
@@ -61,9 +64,7 @@ function makeDb() {
   }));
   const insertMock = vi.fn<(table: unknown) => unknown>(() => ({ values: valuesMock }));
 
-  const updateReturningMock = vi
-    .fn<(cols?: unknown) => Promise<unknown[]>>()
-    .mockResolvedValue([]);
+  const updateReturningMock = vi.fn<(cols?: unknown) => Promise<unknown[]>>().mockResolvedValue([]);
   const updateWhereResult = {
     returning: updateReturningMock,
     // oxlint-disable-next-line unicorn/no-thenable
@@ -1058,9 +1059,7 @@ describe("MessagePgRepository.hideForUser", () => {
 
   it("throws MESSAGE_NOT_FOUND when the conversation has been deleted", async () => {
     const { db, txSelect } = makeDb();
-    txSelect.limitMock
-      .mockResolvedValueOnce([{ conversationId }])
-      .mockResolvedValueOnce([]); // soft-deleted conversation
+    txSelect.limitMock.mockResolvedValueOnce([{ conversationId }]).mockResolvedValueOnce([]); // soft-deleted conversation
     const repo = new MessagePgRepository(db);
 
     await expect(repo.hideForUser(messageId, senderId)).rejects.toMatchObject({
@@ -1095,7 +1094,9 @@ describe("MessagePgRepository.hideForUser", () => {
     });
     const eligible = render(txSelect.whereMock.mock.calls[3][0]);
     expect(eligible.sql).toContain("ROW(");
-    expect(eligible.sql).toContain("SELECT boundary.created_at, boundary.id FROM messages boundary");
+    expect(eligible.sql).toContain(
+      "SELECT boundary.created_at, boundary.id FROM messages boundary",
+    );
     expect(eligible.params).toEqual([messageId, conversationId, boundaryId, conversationId]);
   });
 

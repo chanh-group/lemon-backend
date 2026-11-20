@@ -390,7 +390,7 @@ describe("FriendPgRepository.listFriendsPage", () => {
     expect(page).toEqual({ items: [], hasMore: false });
     expect(where).toHaveBeenCalledTimes(2);
     for (const [condition] of where.mock.calls) {
-      expect((render(condition as SQL)).params).toEqual([userId, "ACCEPTED"]);
+      expect(render(condition as SQL).params).toEqual([userId, "ACCEPTED"]);
     }
   });
 });
@@ -600,9 +600,7 @@ describe("FriendPgRepository.acceptRequest", () => {
       lastMessageAt,
       createdAt: convCreatedAt,
     };
-    limit
-      .mockResolvedValueOnce([conversationRow])
-      .mockResolvedValueOnce([partnerRow]);
+    limit.mockResolvedValueOnce([conversationRow]).mockResolvedValueOnce([partnerRow]);
     const repo = new FriendPgRepository(db);
 
     const result = await repo.acceptRequest(requestId, userId);
@@ -694,17 +692,15 @@ describe("FriendPgRepository.acceptRequest", () => {
   it("restores a soft-deleted conversation before re-joining participants", async () => {
     const { db, set, updateWhere, updateReturning, limit, values } = makeAcceptDb();
     const restoredAt = new Date("2026-03-05T00:00:00.000Z");
-    updateReturning
-      .mockResolvedValueOnce([acceptedRow])
-      .mockResolvedValueOnce([
-        {
-          id: convId,
-          deletedAt: null,
-          lastMessagePreview: null,
-          lastMessageAt: null,
-          createdAt: day1,
-        },
-      ]);
+    updateReturning.mockResolvedValueOnce([acceptedRow]).mockResolvedValueOnce([
+      {
+        id: convId,
+        deletedAt: null,
+        lastMessagePreview: null,
+        lastMessageAt: null,
+        createdAt: day1,
+      },
+    ]);
     limit
       .mockResolvedValueOnce([
         {
@@ -815,7 +811,13 @@ describe("FriendPgRepository.blockPair", () => {
     expect(render(inserted.respondedAt).sql).toBe("now()");
     const config = onConflictDoUpdate.mock.calls[0][0] as {
       target: unknown[];
-      set: { requesterId: string; addresseeId: string; status: string; respondedAt: SQL; updatedAt: SQL };
+      set: {
+        requesterId: string;
+        addresseeId: string;
+        status: string;
+        respondedAt: SQL;
+        updatedAt: SQL;
+      };
     };
     expect(config.target).toEqual([friendships.userLow, friendships.userHigh]);
     expect(config.set).toMatchObject({

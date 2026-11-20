@@ -529,32 +529,32 @@ describe("StoryPgRepository.findActiveByUserIds", () => {
   });
 
   it("resolves CUSTOM inclusion and EXCLUDE removal through dedicated audience lookups", async () => {
-      const { db, selectMock, fromMock, whereMock } = makeDb([]);
-      const repo = new StoryPgRepository(db);
+    const { db, selectMock, fromMock, whereMock } = makeDb([]);
+    const repo = new StoryPgRepository(db);
 
-      await repo.findActiveByUserIds(["u1"], "viewer-1");
+    await repo.findActiveByUserIds(["u1"], "viewer-1");
 
-      // Both membership checks project story_id from story_audiences for the viewer
-      expect(selectMock).toHaveBeenCalledWith({ storyId: storyAudiences.storyId });
-      expect(
-        selectMock.mock.calls.filter(
-          (call) => (call[0] as { storyId?: unknown } | undefined)?.storyId !== undefined,
-        ),
-      ).toHaveLength(2);
-      expect(fromMock).toHaveBeenCalledWith(storyAudiences);
+    // Both membership checks project story_id from story_audiences for the viewer
+    expect(selectMock).toHaveBeenCalledWith({ storyId: storyAudiences.storyId });
+    expect(
+      selectMock.mock.calls.filter(
+        (call) => (call[0] as { storyId?: unknown } | undefined)?.storyId !== undefined,
+      ),
+    ).toHaveLength(2);
+    expect(fromMock).toHaveBeenCalledWith(storyAudiences);
 
-      const rendered = whereMock.mock.calls.map(([condition]) => render(condition));
-      const feedWhere = rendered.find((where) => where.includes('"stories"."expires_at" > now()'));
-      // CUSTOM stories are included only via in (...) membership, EXCLUDE ones via not in (...)
-      expect(feedWhere).toContain('"stories"."audience_mode" = $5');
-      expect(feedWhere).toContain('"stories"."id" in');
-      expect(feedWhere).toContain('"stories"."audience_mode" = $7');
-      expect(feedWhere).toContain('"stories"."id" not in');
+    const rendered = whereMock.mock.calls.map(([condition]) => render(condition));
+    const feedWhere = rendered.find((where) => where.includes('"stories"."expires_at" > now()'));
+    // CUSTOM stories are included only via in (...) membership, EXCLUDE ones via not in (...)
+    expect(feedWhere).toContain('"stories"."audience_mode" = $5');
+    expect(feedWhere).toContain('"stories"."id" in');
+    expect(feedWhere).toContain('"stories"."audience_mode" = $7');
+    expect(feedWhere).toContain('"stories"."id" not in');
 
-      const lookupParams = whereMock.mock.calls
-        .map(([condition]) => dialect.sqlToQuery(condition).params)
-        .filter((params) => params.length === 1 && params[0] === "viewer-1");
-      expect(lookupParams).toHaveLength(2);
+    const lookupParams = whereMock.mock.calls
+      .map(([condition]) => dialect.sqlToQuery(condition).params)
+      .filter((params) => params.length === 1 && params[0] === "viewer-1");
+    expect(lookupParams).toHaveLength(2);
   });
 });
 
@@ -647,9 +647,7 @@ describe("StoryPgRepository.create", () => {
   };
 
   it("acquires an advisory lock and checks quota for media stories", async () => {
-    const { db, executeMock, selectMock, returningMock } = makeDb([
-      { bytes: 0, unknown: 0 },
-    ]);
+    const { db, executeMock, selectMock, returningMock } = makeDb([{ bytes: 0, unknown: 0 }]);
     returningMock.mockResolvedValue([{ id: "s1" }]);
     const repo = new StoryPgRepository(db);
 

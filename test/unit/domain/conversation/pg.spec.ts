@@ -441,9 +441,9 @@ describe("ConversationPgRepository.disbandGroup", () => {
 
   it("throws CONVERSATION_NOT_FOUND when the conversation is missing or soft-deleted", async () => {
     const groupLimit = vi.fn().mockResolvedValue([]);
-    const select = vi
-      .fn()
-      .mockReturnValueOnce({ from: () => ({ where: () => ({ for: () => ({ limit: groupLimit }) }) }) });
+    const select = vi.fn().mockReturnValueOnce({
+      from: () => ({ where: () => ({ for: () => ({ limit: groupLimit }) }) }),
+    });
     const updateWhere = vi.fn().mockResolvedValue([]);
     const set = vi.fn().mockReturnValue({ where: updateWhere });
     const update = vi.fn().mockReturnValue({ set });
@@ -1045,15 +1045,13 @@ describe("ConversationPgRepository.createGroup", () => {
 
   it("rejects with CONFLICT when the retry lookup finds a deleted winner", async () => {
     const { db, dbSelect, transactionMock } = makeTxDb();
-    dbSelect.limitMock
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          id: convRow.id,
-          deletedAt: new Date("2026-10-19T04:00:00Z"),
-          createRequestHash: createRequest.createRequestHash,
-        },
-      ]);
+    dbSelect.limitMock.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: convRow.id,
+        deletedAt: new Date("2026-10-19T04:00:00Z"),
+        createRequestHash: createRequest.createRequestHash,
+      },
+    ]);
     transactionMock.mockRejectedValueOnce(groupUniqueViolation);
     const repo = new ConversationPgRepository(db);
 
@@ -1064,7 +1062,9 @@ describe("ConversationPgRepository.createGroup", () => {
     const { db, dbSelect, transactionMock } = makeTxDb();
     dbSelect.limitMock
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ id: convRow.id, deletedAt: null, createRequestHash: "other-hash" }]);
+      .mockResolvedValueOnce([
+        { id: convRow.id, deletedAt: null, createRequestHash: "other-hash" },
+      ]);
     transactionMock.mockRejectedValueOnce(groupUniqueViolation);
     const repo = new ConversationPgRepository(db);
 
@@ -1096,7 +1096,11 @@ describe("ConversationPgRepository.createGroup", () => {
 describe("ConversationPgRepository.findGroupCreateRequest", () => {
   it("returns the recorded create request for the creator", async () => {
     const { db, dbSelect } = makeTxDb();
-    const row = { id: convRow.id, createRequestHash: createRequest.createRequestHash, deletedAt: null };
+    const row = {
+      id: convRow.id,
+      createRequestHash: createRequest.createRequestHash,
+      deletedAt: null,
+    };
     dbSelect.limitMock.mockResolvedValueOnce([row]);
     const repo = new ConversationPgRepository(db);
 
@@ -1148,12 +1152,22 @@ describe("ConversationPgRepository.addGroupMembers", () => {
       .mockResolvedValueOnce([{ role: "ADMIN" }])
       .mockResolvedValueOnce(options.active ?? [{ userId: userAId }, { userId: userBId }])
       .mockResolvedValueOnce([{ id: userCId, isActive: true }])
-      .mockResolvedValueOnce(options.latestMsg === undefined ? [{ id: msgId }] : [options.latestMsg].filter(Boolean));
+      .mockResolvedValueOnce(
+        options.latestMsg === undefined ? [{ id: msgId }] : [options.latestMsg].filter(Boolean),
+      );
   }
 
   it("adds members under the group row lock and reports the updated member count", async () => {
-    const { db, txSelect, insertMock, valuesMock, onConflictDoUpdateMock, updateMock, setMock, updateWhereMock } =
-      makeTxDb();
+    const {
+      db,
+      txSelect,
+      insertMock,
+      valuesMock,
+      onConflictDoUpdateMock,
+      updateMock,
+      setMock,
+      updateWhereMock,
+    } = makeTxDb();
     mockHappyQueries(txSelect);
     const repo = new ConversationPgRepository(db);
 
@@ -1214,13 +1228,13 @@ describe("ConversationPgRepository.addGroupMembers", () => {
     expect(render(conflict.set.joinGeneration as SQL).sql).toContain(
       '"conversation_participants"."join_generation" + 1',
     );
-    expect(render(conflict.where).sql).toContain('"conversation_participants"."left_at" IS NOT NULL');
+    expect(render(conflict.where).sql).toContain(
+      '"conversation_participants"."left_at" IS NOT NULL',
+    );
 
     expect(updateMock).toHaveBeenCalledWith(conversations);
     const revision = setMock.mock.calls[0][0] as { unreadRevision: SQL };
-    expect(render(revision.unreadRevision).sql).toContain(
-      '"conversations"."unread_revision" + 1',
-    );
+    expect(render(revision.unreadRevision).sql).toContain('"conversations"."unread_revision" + 1');
     const bumpWhere = render(updateWhereMock.mock.calls[0][0]);
     expect(bumpWhere.params).toEqual([convRow.id]);
   });
@@ -1327,7 +1341,9 @@ describe("ConversationPgRepository.addGroupMembers", () => {
 });
 
 describe("ConversationPgRepository.removeGroupMember", () => {
-  function makeRemoveDb(options: { group?: unknown[]; actor?: unknown[]; target?: unknown[] } = {}) {
+  function makeRemoveDb(
+    options: { group?: unknown[]; actor?: unknown[]; target?: unknown[] } = {},
+  ) {
     const t = makeTxDb();
     t.txSelect.limitMock
       .mockResolvedValueOnce(options.group ?? [{ kind: "GROUP" }])
@@ -1469,14 +1485,13 @@ describe("ConversationPgRepository.updateGroup", () => {
     });
     const repo = new ConversationPgRepository(db);
 
-    await repo.updateGroupAvatar(
-      convRow.id,
-      userAId,
-      "https://cdn.example.com/legacy-2.png",
-    );
+    await repo.updateGroupAvatar(convRow.id, userAId, "https://cdn.example.com/legacy-2.png");
 
     expect(insertMock).not.toHaveBeenCalled();
-    expect(setMock).toHaveBeenCalledWith({ avatarUrl: "https://cdn.example.com/legacy-2.png", updatedAt: expect.anything() });
+    expect(setMock).toHaveBeenCalledWith({
+      avatarUrl: "https://cdn.example.com/legacy-2.png",
+      updatedAt: expect.anything(),
+    });
   });
 
   it("skips cleanup when the avatar URL is unchanged", async () => {
@@ -1565,9 +1580,9 @@ describe("ConversationPgRepository.updateMemberRole", () => {
     const { db, updateMock } = makeRoleDb({ locked: [] });
     const repo = new ConversationPgRepository(db);
 
-    await expect(repo.updateMemberRole(convRow.id, userAId, userCId, "ADMIN")).rejects.toMatchObject(
-      { code: "CONVERSATION_NOT_FOUND" },
-    );
+    await expect(
+      repo.updateMemberRole(convRow.id, userAId, userCId, "ADMIN"),
+    ).rejects.toMatchObject({ code: "CONVERSATION_NOT_FOUND" });
     expect(updateMock).not.toHaveBeenCalled();
   });
 
@@ -1575,9 +1590,9 @@ describe("ConversationPgRepository.updateMemberRole", () => {
     const { db, updateMock } = makeRoleDb({ actor: [{ role: "MEMBER" }] });
     const repo = new ConversationPgRepository(db);
 
-    await expect(repo.updateMemberRole(convRow.id, userAId, userCId, "ADMIN")).rejects.toMatchObject(
-      { code: "FORBIDDEN" },
-    );
+    await expect(
+      repo.updateMemberRole(convRow.id, userAId, userCId, "ADMIN"),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect(updateMock).not.toHaveBeenCalled();
   });
 
@@ -1585,9 +1600,9 @@ describe("ConversationPgRepository.updateMemberRole", () => {
     const { db, updateMock } = makeRoleDb({ target: [] });
     const repo = new ConversationPgRepository(db);
 
-    await expect(repo.updateMemberRole(convRow.id, userAId, userCId, "ADMIN")).rejects.toMatchObject(
-      { code: "FORBIDDEN" },
-    );
+    await expect(
+      repo.updateMemberRole(convRow.id, userAId, userCId, "ADMIN"),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect(updateMock).not.toHaveBeenCalled();
   });
 
@@ -1598,9 +1613,9 @@ describe("ConversationPgRepository.updateMemberRole", () => {
     });
     const repo = new ConversationPgRepository(db);
 
-    await expect(repo.updateMemberRole(convRow.id, userAId, userAId, "MEMBER")).rejects.toMatchObject(
-      { code: "FORBIDDEN" },
-    );
+    await expect(
+      repo.updateMemberRole(convRow.id, userAId, userAId, "MEMBER"),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect(updateMock).not.toHaveBeenCalled();
   });
 });
@@ -1609,8 +1624,16 @@ describe("ConversationPgRepository.leaveGroup closing", () => {
   it("soft-deletes the group and schedules avatar cleanup when the last member leaves", async () => {
     vi.stubEnv("API_PUBLIC_URL", "https://api.example.com");
     const avatarUrl = `https://api.example.com/api/files/group-avatars/${convRow.id}/0193a2b1-7c4d-7e8f-9a0b-1c2d3e4f5a6b.png`;
-    const { db, txSelect, insertMock, valuesMock, onConflictDoNothingMock, updateMock, setMock, updateWhereMock } =
-      makeTxDb();
+    const {
+      db,
+      txSelect,
+      insertMock,
+      valuesMock,
+      onConflictDoNothingMock,
+      updateMock,
+      setMock,
+      updateWhereMock,
+    } = makeTxDb();
     txSelect.limitMock
       .mockResolvedValueOnce([{ kind: "GROUP", avatarUrl }])
       .mockResolvedValueOnce([{ userId: userAId, role: "MEMBER" }]);
@@ -1637,7 +1660,9 @@ describe("ConversationPgRepository.leaveGroup closing", () => {
 
     const closeValues = setMock.mock.calls[1][0] as { unreadRevision: SQL; deletedAt: SQL };
     expect(render(closeValues.deletedAt).sql).toBe("now()");
-    expect(render(closeValues.unreadRevision).sql).toContain('"conversations"."unread_revision" + 1');
+    expect(render(closeValues.unreadRevision).sql).toContain(
+      '"conversations"."unread_revision" + 1',
+    );
     const closeWhere = render(updateWhereMock.mock.calls[1][0]);
     expect(closeWhere.params).toEqual([convRow.id]);
   });
@@ -2460,7 +2485,11 @@ describe("ConversationPgRepository.failAvatarCleanupJob", () => {
 
     await repo.failAvatarCleanupJob(jobId, 4, "x".repeat(520));
 
-    const values = setMock.mock.calls[0][0] as { attempts: number; status: string; lastError: string };
+    const values = setMock.mock.calls[0][0] as {
+      attempts: number;
+      status: string;
+      lastError: string;
+    };
     expect(values.attempts).toBe(5);
     expect(values.status).toBe("FAILED");
     expect(values.lastError).toHaveLength(500);

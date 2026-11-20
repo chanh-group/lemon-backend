@@ -503,7 +503,10 @@ describe("AuthRevocationListener", () => {
       const disconnect = vi.fn();
       listener.track(listenerUserId, listenerSessionId, disconnect);
 
-      client().emit("notification", { channel: "other_channel", payload: `s:${listenerSessionId}` });
+      client().emit("notification", {
+        channel: "other_channel",
+        payload: `s:${listenerSessionId}`,
+      });
 
       expect(disconnect).not.toHaveBeenCalled();
     });
