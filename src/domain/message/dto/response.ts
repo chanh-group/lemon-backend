@@ -56,3 +56,8 @@ export interface MessageTimelineResponse {
   nextCursor?: string;
   hasMore: boolean;
 }
+
+export interface MessageWindowResponse extends MessageTimelineResponse {
+  /** True when messages newer than the returned window exist. */
+  hasMoreNewer: boolean;
+}

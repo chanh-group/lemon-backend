@@ -483,6 +483,122 @@ describe("MessageService", () => {
     });
   });
 
+  describe("getMessageWindow", () => {
+    const anchorTarget = { ...mockMessage };
+
+    it("throws MESSAGE_NOT_FOUND when the anchor is outside the conversation", async () => {
+      canAccessMessageMock.mockResolvedValueOnce(false);
+
+      await expect(service.getMessageWindow(userA, convId, msgId)).rejects.toMatchObject({
+        code: "MESSAGE_NOT_FOUND",
+      });
+      expect(findTimelineMock).not.toHaveBeenCalled();
+    });
+
+    it("throws MESSAGE_NOT_FOUND when the anchor is hidden or outside the history boundary", async () => {
+      findReplyTargetsMock.mockResolvedValueOnce([]);
+
+      await expect(service.getMessageWindow(userA, convId, msgId)).rejects.toMatchObject({
+        code: "MESSAGE_NOT_FOUND",
+      });
+      expect(findTimelineMock).not.toHaveBeenCalled();
+    });
+
+    it("returns a centered window with the anchor between newer and older messages", async () => {
+      const olderMsg = { ...mockMessage, id: "older" };
+      const newerMsg = { ...mockMessage, id: "newer1" };
+      const newestMsg = { ...mockMessage, id: "newer2" };
+      findReplyTargetsMock.mockResolvedValueOnce([anchorTarget]);
+      findByIdMock.mockResolvedValueOnce(mockMessage);
+      findTimelineMock
+        .mockResolvedValueOnce({ items: [olderMsg], hasMore: true, nextCursor: "older" })
+        .mockResolvedValueOnce({ items: [newerMsg, newestMsg], hasMore: false });
+
+      const res = await service.getMessageWindow(userA, convId, msgId, 30);
+
+      expect(res.items.map((item) => item.id)).toEqual(["newer2", "newer1", msgId, "older"]);
+      expect(res.hasMore).toBe(true);
+      expect(res.nextCursor).toBe("older");
+      expect(res.hasMoreNewer).toBe(false);
+      expect(findTimelineMock).toHaveBeenNthCalledWith(1, convId, userA, msgId, 15);
+      expect(findTimelineMock).toHaveBeenNthCalledWith(2, convId, userA, undefined, 14, msgId);
+    });
+
+    it("reports hasMoreNewer when messages above the window remain", async () => {
+      findReplyTargetsMock.mockResolvedValueOnce([anchorTarget]);
+      findByIdMock.mockResolvedValueOnce(mockMessage);
+      findTimelineMock
+        .mockResolvedValueOnce({ items: [], hasMore: false })
+        .mockResolvedValueOnce({ items: [{ ...mockMessage, id: "newer1" }], hasMore: true });
+
+      const res = await service.getMessageWindow(userA, convId, msgId, 30);
+
+      expect(res.hasMoreNewer).toBe(true);
+      expect(res.hasMore).toBe(false);
+      expect(res.nextCursor).toBeUndefined();
+    });
+
+    it("clamps the window size to the maximum page size", async () => {
+      findReplyTargetsMock.mockResolvedValueOnce([anchorTarget]);
+      findByIdMock.mockResolvedValueOnce(mockMessage);
+      findTimelineMock.mockResolvedValue({ items: [], hasMore: false });
+
+      await service.getMessageWindow(userA, convId, msgId, 999);
+
+      expect(findTimelineMock).toHaveBeenNthCalledWith(1, convId, userA, msgId, 25);
+      expect(findTimelineMock).toHaveBeenNthCalledWith(2, convId, userA, undefined, 24, msgId);
+    });
+
+    it("returns only the anchor when the window size is one", async () => {
+      findReplyTargetsMock.mockResolvedValueOnce([anchorTarget]);
+      findByIdMock.mockResolvedValueOnce(mockMessage);
+
+      const res = await service.getMessageWindow(userA, convId, msgId, 1);
+
+      expect(res.items.map((item) => item.id)).toEqual([msgId]);
+      expect(res.hasMore).toBe(false);
+      expect(res.hasMoreNewer).toBe(false);
+      expect(findTimelineMock).not.toHaveBeenCalled();
+    });
+
+    it("throws NOT_PARTICIPANT when the side queries deny access", async () => {
+      findReplyTargetsMock.mockResolvedValueOnce([anchorTarget]);
+      findByIdMock.mockResolvedValueOnce(mockMessage);
+      findTimelineMock.mockResolvedValueOnce({ items: [], hasMore: false, authorized: false });
+
+      await expect(service.getMessageWindow(userA, convId, msgId)).rejects.toMatchObject({
+        code: "NOT_PARTICIPANT",
+      });
+    });
+
+    it("throws MESSAGE_NOT_FOUND when the anchor row disappears before the window loads", async () => {
+      findReplyTargetsMock.mockResolvedValueOnce([anchorTarget]);
+      findByIdMock.mockResolvedValueOnce(null);
+
+      await expect(service.getMessageWindow(userA, convId, msgId)).rejects.toMatchObject({
+        code: "MESSAGE_NOT_FOUND",
+      });
+    });
+
+    it("hides revoked reply content on quoted messages inside the window", async () => {
+      const quote = { ...mockMessage, id: "quote", deletedAt: new Date(), body: "secret" };
+      findReplyTargetsMock.mockResolvedValueOnce([anchorTarget]).mockResolvedValueOnce([quote]);
+      findByIdMock.mockResolvedValueOnce(mockMessage);
+      findTimelineMock.mockResolvedValueOnce({ items: [], hasMore: false }).mockResolvedValueOnce({
+        items: [{ ...mockMessage, id: "newer1", replyToId: "quote" }],
+        hasMore: false,
+      });
+
+      const res = await service.getMessageWindow(userA, convId, msgId, 30);
+
+      expect(res.items[0].replyTarget).toMatchObject({
+        id: "quote",
+        body: null,
+        storyPreview: null,
+      });
+    });
+  });
+
   describe("editMessage", () => {
     it("throws MESSAGE_NOT_FOUND if message does not exist", async () => {
       findByIdMock.mockResolvedValue(null);

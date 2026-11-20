@@ -106,6 +106,29 @@ export class MessageController {
     return ok(data);
   }
 
+  @Get("conversations/:id/messages/:messageId/window")
+  async getMessageWindow(
+    @Req() req: { user?: unknown },
+    @Param("id", ParseUUIDPipe) conversationId: string,
+    @Param("messageId", ParseUUIDPipe) messageId: string,
+    @Query("limit") limit?: string,
+  ) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    const page = parseCursorPage(
+      undefined,
+      limit,
+      DEFAULT_MESSAGE_PAGE_SIZE,
+      MAX_MESSAGE_PAGE_SIZE,
+    );
+    const data = await this.messageService.getMessageWindow(
+      userId,
+      conversationId,
+      messageId,
+      page.size,
+    );
+    return ok(data);
+  }
+
   @Patch("messages/:id")
   async editMessage(
     @Req() req: { user?: unknown },
