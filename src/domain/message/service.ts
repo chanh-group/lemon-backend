@@ -17,6 +17,7 @@ import type {
   MessageResponse,
   MessageTimelineResponse,
   MessageWindowResponse,
+  ReplyContentCategory,
   ReplyTargetResponse,
 } from "./dto/response.js";
 import { toMessageResponseAsync, toMessageTimelineAsync } from "./dto/mapper.js";
@@ -66,6 +67,24 @@ export class MessageService {
     @Optional() @Inject(STORAGE_SERVICE) private readonly storage?: StorageService,
   ) {}
 
+  private inferContentCategory(message: ReplyTargetMessage): ReplyContentCategory {
+    if (message.kind === "STORY_REPLY" || message.kind === "STORY_REACTION") {
+      return "STORY";
+    }
+    if (message.attachments && message.attachments.length > 0) {
+      if (message.attachments.every((a) => a.kind === "AUDIO")) {
+        return "VOICE";
+      }
+      return "ATTACHMENT";
+    }
+    if (message.kind === "AUDIO") return "VOICE";
+    if (message.kind === "IMAGE" || message.kind === "VIDEO" || message.kind === "FILE") {
+      return "ATTACHMENT";
+    }
+    if (message.kind === "TEXT") return "MESSAGE";
+    return "UNKNOWN";
+  }
+
   private replyTarget(message: ReplyTargetMessage): ReplyTargetResponse {
     return {
       id: message.id,
@@ -74,6 +93,7 @@ export class MessageService {
       body: message.deletedAt ? null : message.body,
       deletedAt: message.deletedAt,
       storyPreview: message.deletedAt ? null : message.storyPreview,
+      contentCategory: this.inferContentCategory(message),
     };
   }
 
@@ -234,18 +254,15 @@ export class MessageService {
     const [mapped, target] = await Promise.all([
       toMessageResponseAsync(message, this.storage, senderId),
       message.replyToId
-        ? this.messageRepo.findById(message.replyToId, false)
-        : Promise.resolve(null),
+        ? this.messageRepo.findReplyTargets(conversationId, [message.replyToId], senderId)
+        : Promise.resolve([]),
     ]);
     const response = await this.attachSender(mapped);
     if (message.replyToId) {
-      if (
-        target &&
-        target.conversationId === conversationId &&
-        (await this.convRepo.canAccessMessage(conversationId, senderId, target.id))
-      ) {
-        const replyTarget = this.replyTarget(target);
-        const [replySender] = await this.messageRepo.findSenderProfiles([target.senderId]);
+      const [replyTargetMsg] = target;
+      if (replyTargetMsg) {
+        const replyTarget = this.replyTarget(replyTargetMsg);
+        const [replySender] = await this.messageRepo.findSenderProfiles([replyTargetMsg.senderId]);
         if (replySender) replyTarget.sender = replySender;
         response.replyTarget = replyTarget;
       } else response.replyTarget = null;
@@ -398,6 +415,36 @@ export class MessageService {
     const replyTarget = this.replyTarget(target);
     const [replySender] = await this.messageRepo.findSenderProfiles([target.senderId]);
     if (replySender) replyTarget.sender = replySender;
+
+    if (!target.deletedAt && target.attachments && target.attachments.length > 0) {
+      const firstAtt = target.attachments[0];
+      let previewUrl: string | undefined;
+      if (this.storage && (firstAtt.kind === "IMAGE" || firstAtt.kind === "VIDEO")) {
+        try {
+          const res = await this.storage.presignGet({
+            objectKey: firstAtt.objectKey,
+            fileName: firstAtt.fileName,
+            disposition: "inline",
+            mimeType: firstAtt.mimeType,
+            expiresInSecs: 86400,
+          });
+          previewUrl = res.downloadUrl;
+        } catch {
+          previewUrl = undefined;
+        }
+      }
+      replyTarget.previewAttachment = {
+        id: firstAtt.id,
+        kind: firstAtt.kind,
+        fileName: firstAtt.fileName,
+        mimeType: firstAtt.mimeType,
+        width: firstAtt.width,
+        height: firstAtt.height,
+        durationMs: firstAtt.durationMs,
+        ...(previewUrl ? { previewUrl } : {}),
+      };
+    }
+
     return replyTarget;
   }
 

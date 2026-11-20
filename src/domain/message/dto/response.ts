@@ -21,6 +21,19 @@ export interface MessageReactionSummary {
   userIds: string[];
 }
 
+export type ReplyContentCategory = "MESSAGE" | "ATTACHMENT" | "VOICE" | "STORY" | "UNKNOWN";
+
+export interface ReplyAttachmentPreview {
+  id: string;
+  kind: "IMAGE" | "VIDEO" | "AUDIO" | "FILE";
+  fileName: string;
+  mimeType: string;
+  width?: number | null;
+  height?: number | null;
+  durationMs?: number | null;
+  previewUrl?: string;
+}
+
 export interface ReplyTargetResponse {
   id: string;
   senderId: string;
@@ -29,6 +42,8 @@ export interface ReplyTargetResponse {
   body: string | null;
   deletedAt: Date | null;
   storyPreview?: StoryPreview | null;
+  contentCategory: ReplyContentCategory;
+  previewAttachment?: ReplyAttachmentPreview;
 }
 
 export interface MessageResponse {

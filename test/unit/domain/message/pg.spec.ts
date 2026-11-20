@@ -30,7 +30,13 @@ import { BusinessError } from "../../../../src/utils/errors/business.js";
 function makeSelectChain() {
   const limitMock = vi.fn<(limit: number) => Promise<unknown[]>>().mockResolvedValue([]);
   const forMock = vi.fn(() => ({ limit: limitMock }));
-  const orderByMock = vi.fn(() => ({ limit: limitMock }));
+  const makeOrderByResult = () => ({
+    limit: limitMock,
+    // oxlint-disable-next-line unicorn/no-thenable
+    then: (resolve: (val: unknown) => unknown, reject?: (err: unknown) => unknown) =>
+      limitMock(0).then(resolve, reject),
+  });
+  const orderByMock = vi.fn(makeOrderByResult);
   const makeWhereResult = (condition: SQL) => ({
     limit: limitMock,
     for: forMock,
@@ -948,9 +954,9 @@ describe("MessagePgRepository.reactMessage", () => {
 describe("MessagePgRepository.findReplyTargets", () => {
   it("projects only the reply target fields consumed by responses", async () => {
     const { db, dbSelect } = makeDb();
-    dbSelect.limitMock.mockResolvedValueOnce([
-      { historyBoundaryMessageId: null, joinedAt: new Date(0) },
-    ]);
+    dbSelect.limitMock
+      .mockResolvedValueOnce([{ historyBoundaryMessageId: null, joinedAt: new Date(0) }])
+      .mockResolvedValueOnce([]);
     const repo = new MessagePgRepository(db);
 
     await repo.findReplyTargets(conversationId, [messageId], senderId);
@@ -991,11 +997,11 @@ describe("MessagePgRepository.findReplyTargets", () => {
       deletedAt: null,
       storyPreview: null,
     };
-    dbSelect.limitMock.mockResolvedValueOnce([target]);
+    dbSelect.limitMock.mockResolvedValueOnce([target]).mockResolvedValueOnce([]);
     const repo = new MessagePgRepository(db);
 
     await expect(repo.findReplyTargets(conversationId, [messageId], senderId)).resolves.toEqual([
-      target,
+      { ...target, attachments: [] },
     ]);
 
     const where = render(dbSelect.whereMock.mock.calls[1][0]);
