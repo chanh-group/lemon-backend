@@ -22,7 +22,7 @@ import type {
 } from "./dto/response.js";
 import { toMessageResponseAsync, toMessageTimelineAsync } from "./dto/mapper.js";
 import { FriendService } from "../friend/service.js";
-import { MESSAGE_MAX_BODY_LENGTH } from "./constants.js";
+import { ATTACHMENT_URL_TTL_SECS, MESSAGE_MAX_BODY_LENGTH } from "./constants.js";
 import { DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE } from "../pagination.constants.js";
 import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.js";
 import { CHAT_MAX_FILE_BYTES } from "../../utils/cache/constants.js";
@@ -426,7 +426,7 @@ export class MessageService {
             fileName: firstAtt.fileName,
             disposition: "inline",
             mimeType: firstAtt.mimeType,
-            expiresInSecs: 86400,
+            expiresInSecs: ATTACHMENT_URL_TTL_SECS,
           });
           previewUrl = res.downloadUrl;
         } catch {

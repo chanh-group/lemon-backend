@@ -4,6 +4,7 @@ import type {
   MessageTimelineResult,
 } from "../repository.js";
 import type { StorageService } from "../../../utils/storage/store.js";
+import { ATTACHMENT_URL_TTL_SECS } from "../constants.js";
 import type {
   MessageAttachmentResponse,
   MessageReactionSummary,
@@ -41,14 +42,14 @@ export async function mapAttachmentsToResponse(
             fileName: att.fileName,
             disposition: "inline",
             mimeType: att.mimeType,
-            expiresInSecs: 86400,
+            expiresInSecs: ATTACHMENT_URL_TTL_SECS,
           }),
           storage.presignGet({
             objectKey: att.objectKey,
             fileName: att.fileName,
             disposition: "attachment",
             mimeType: att.mimeType,
-            expiresInSecs: 86400,
+            expiresInSecs: ATTACHMENT_URL_TTL_SECS,
           }),
         ]);
         return {
