@@ -16,6 +16,7 @@ import { NoteModule } from "./domain/note/module.js";
 import { RealtimeModule } from "./domain/realtime/realtime.module.js";
 import { StoryModule } from "./domain/story/module.js";
 import { UserModule } from "./domain/user/module.js";
+import { CallModule } from "./domain/call/module.js";
 import { PurgeModule } from "./jobs/purge/module.js";
 import { RequestLoggerMiddleware } from "./middleware/request-logger.js";
 import { RateLimitModule } from "./middleware/ratelimit.module.js";
@@ -40,6 +41,7 @@ import { RedisReadinessGuard } from "./middleware/redis-readiness.guard.js";
     NoteModule,
     FileModule,
     PurgeModule,
+    CallModule,
   ],
   providers: [
     {

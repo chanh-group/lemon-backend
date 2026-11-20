@@ -143,3 +143,9 @@ export const REDIS_RECONNECT_DELAY_BASE_MS = 100;
 export const REDIS_RECONNECT_DELAY_MAX_MS = 3000;
 export const DEFAULT_REDIS_URL = "redis://localhost:6379";
 export const OFFLINE_PRESENCE_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+// Call session & ICE caching
+export const ACTIVE_CALL_KEY_PREFIX = "call:active:user:";
+export const ACTIVE_CALL_LOCK_TTL_SECONDS = 60; // Auto-evicts orphaned locks if process crashes
+export const METERED_ICE_SERVERS_CACHE_KEY = "cache:metered_turn_ice_servers";
+export const METERED_ICE_SERVERS_TTL_SECONDS = 43_200; // 12 hours

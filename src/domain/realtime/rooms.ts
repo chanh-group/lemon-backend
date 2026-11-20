@@ -6,3 +6,7 @@ export function userRoom(userId: string): string {
 export function convRoom(conversationId: string): string {
   return `conv:${conversationId}`;
 }
+
+export function callRoom(callId: string): string {
+  return `call:${callId}`;
+}

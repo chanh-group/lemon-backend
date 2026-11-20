@@ -1,4 +1,4 @@
-import { Inject, Logger, Optional, type OnApplicationShutdown } from "@nestjs/common";
+import { forwardRef, Inject, Logger, Optional, type OnApplicationShutdown } from "@nestjs/common";
 import {
   ConnectedSocket,
   MessageBody,
@@ -20,7 +20,8 @@ import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
 import { ConversationPgRepository } from "../conversation/pg.js";
 import { UserService } from "../user/service.js";
-import { convRoom, userRoom } from "./rooms.js";
+import { CallService } from "../call/service.js";
+import { callRoom, convRoom, userRoom } from "./rooms.js";
 import { REDIS_DISCONNECT_GRACE_MS, TYPING_TTL_SECS } from "./constants.js";
 import { JWT_CONFIG } from "../auth/constants.js";
 import type { JwtConfig } from "../auth/jwt.js";
@@ -85,6 +86,7 @@ export class ChatGateway
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
     @Inject(AUTH_SESSION_REPOSITORY) private readonly sessions: AuthSessionRepository,
     private readonly revocations: AuthRevocationListener,
+    @Optional() @Inject(forwardRef(() => CallService)) private readonly callService?: CallService,
   ) {
     if (this.redis && typeof this.redis.on === "function") {
       // Debounce failure events into a sustained-outage signal: a single
@@ -202,6 +204,7 @@ export class ChatGateway
     this.userConnections.set(userId, currentConns);
 
     await this.setOnlinePresence(userId, currentConns);
+    this.callService?.handleUserReconnect(userId).catch(() => {});
 
     if (!client.disconnected) {
       client.emit("ready", { userId } satisfies SocketReadyEvent);
@@ -223,6 +226,7 @@ export class ChatGateway
     const currentConns = (this.userConnections.get(userId) ?? 1) - 1;
     if (currentConns <= 0) {
       this.userConnections.delete(userId);
+      this.callService?.handleUserDisconnect(userId).catch(() => {});
 
       // Start grace period before marking offline; a reconnect within the window cancels it
       const existingTimer = this.graceTimers.get(userId);
@@ -550,5 +554,62 @@ export class ChatGateway
     } catch (err) {
       logger.warn(`Failed to set offline presence for ${userId}: ${String(err)}`);
     }
+  }
+
+  @SubscribeMessage("call:signal:offer")
+  handleCallSignalOffer(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { callId: string; sdp: unknown },
+  ): void {
+    const userId = client.data?.userId as string | undefined;
+    if (!userId || !data?.callId) return;
+    client.to(callRoom(data.callId)).emit("call:signal:offer", {
+      callId: data.callId,
+      sdp: data.sdp,
+      senderId: userId,
+    });
+  }
+
+  @SubscribeMessage("call:signal:answer")
+  handleCallSignalAnswer(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { callId: string; sdp: unknown },
+  ): void {
+    const userId = client.data?.userId as string | undefined;
+    if (!userId || !data?.callId) return;
+    client.to(callRoom(data.callId)).emit("call:signal:answer", {
+      callId: data.callId,
+      sdp: data.sdp,
+      senderId: userId,
+    });
+  }
+
+  @SubscribeMessage("call:signal:ice-candidate")
+  handleCallSignalIceCandidate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { callId: string; candidate: unknown },
+  ): void {
+    const userId = client.data?.userId as string | undefined;
+    if (!userId || !data?.callId) return;
+    client.to(callRoom(data.callId)).emit("call:signal:ice-candidate", {
+      callId: data.callId,
+      candidate: data.candidate,
+      senderId: userId,
+    });
+  }
+
+  @SubscribeMessage("call:media-state")
+  handleCallMediaState(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { callId: string; isMuted?: boolean; isVideoOff?: boolean },
+  ): void {
+    const userId = client.data?.userId as string | undefined;
+    if (!userId || !data?.callId) return;
+    client.to(callRoom(data.callId)).emit("call:media-state", {
+      callId: data.callId,
+      isMuted: data.isMuted,
+      isVideoOff: data.isVideoOff,
+      senderId: userId,
+    });
   }
 }

@@ -114,5 +114,10 @@
   "STORY_LIKED": "Story liked",
   "STORY_UNLIKED": "Story like removed",
   "STORY_STORAGE_FULL": "Story storage is full. Delete stories and try again.",
-  "STORY_STORAGE_UNAVAILABLE": "Cannot check story storage. Please try again."
+  "STORY_STORAGE_UNAVAILABLE": "Cannot check story storage. Please try again.",
+  "CALL_NOT_FOUND": "Call not found",
+  "CALL_USER_BUSY": "User is currently busy on another call",
+  "CALL_CANNOT_CALL_SELF": "Cannot call yourself",
+  "CALL_INVALID_STATE": "Invalid call state for this action",
+  "CALL_UNAUTHORIZED_PARTICIPANT": "You are not a participant in this call"
 }

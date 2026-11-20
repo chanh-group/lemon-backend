@@ -114,5 +114,10 @@
   "STORY_LIKED": "Đã thích story",
   "STORY_UNLIKED": "Đã bỏ thích story",
   "STORY_STORAGE_FULL": "Kho tin đã đầy. Hãy xóa bớt tin và thử lại.",
-  "STORY_STORAGE_UNAVAILABLE": "Chưa thể kiểm tra dung lượng kho tin. Vui lòng thử lại."
+  "STORY_STORAGE_UNAVAILABLE": "Chưa thể kiểm tra dung lượng kho tin. Vui lòng thử lại.",
+  "CALL_NOT_FOUND": "Không tìm thấy cuộc gọi",
+  "CALL_USER_BUSY": "Người dùng đang bận trong cuộc gọi khác",
+  "CALL_CANNOT_CALL_SELF": "Không thể tự gọi cho chính mình",
+  "CALL_INVALID_STATE": "Trạng thái cuộc gọi không hợp lệ cho hành động này",
+  "CALL_UNAUTHORIZED_PARTICIPANT": "Bạn không phải người tham gia cuộc gọi này"
 }

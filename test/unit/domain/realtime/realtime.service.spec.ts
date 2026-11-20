@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { RealtimeService } from "../../../../src/domain/realtime/realtime.service.js";
-import { convRoom, userRoom } from "../../../../src/domain/realtime/rooms.js";
+import { callRoom, convRoom, userRoom } from "../../../../src/domain/realtime/rooms.js";
 import type { ChatGateway } from "../../../../src/domain/realtime/chat.gateway.js";
 import type { MessageResponse } from "../../../../src/domain/message/dto/response.js";
 
@@ -265,6 +265,97 @@ describe("RealtimeService", () => {
       const service = new RealtimeService({ server: { in: inRoom } } as unknown as ChatGateway);
 
       expect(() => service.joinConversation(["u1"], "c1")).not.toThrow();
+    });
+  });
+
+  describe("joinCall and leaveCall", () => {
+    it("joins participants to call room", () => {
+      const socketsJoin = vi.fn();
+      const inRoom = vi.fn().mockReturnValue({ socketsJoin });
+      const service = new RealtimeService({ server: { in: inRoom } } as unknown as ChatGateway);
+
+      service.joinCall(["u1", "u2"], "call-1");
+
+      expect(inRoom).toHaveBeenCalledWith([userRoom("u1"), userRoom("u2")]);
+      expect(socketsJoin).toHaveBeenCalledWith(callRoom("call-1"));
+    });
+
+    it("leaves participants from call room", () => {
+      const socketsLeave = vi.fn();
+      const inRoom = vi.fn().mockReturnValue({ socketsLeave });
+      const service = new RealtimeService({ server: { in: inRoom } } as unknown as ChatGateway);
+
+      service.leaveCall(["u1", "u2"], "call-1");
+
+      expect(inRoom).toHaveBeenCalledWith([userRoom("u1"), userRoom("u2")]);
+      expect(socketsLeave).toHaveBeenCalledWith(callRoom("call-1"));
+    });
+  });
+
+  describe("Call emission methods", () => {
+    it("emits call events to rooms safely", () => {
+      const emit = vi.fn();
+      const to = vi.fn().mockReturnValue({ emit });
+      const service = createService(to);
+
+      service.emitCallIncoming("u2", {
+        callId: "call-1",
+        conversationId: "conv-1",
+        caller: { id: "u1", username: "u1", fullName: "User 1", avatarUrl: null },
+        media: "VIDEO",
+      });
+      expect(to).toHaveBeenCalledWith(userRoom("u2"));
+      expect(emit).toHaveBeenCalledWith("call:incoming", expect.any(Object));
+
+      service.emitCallAccepted("call-1", {
+        callId: "call-1",
+        acceptedBy: "u2",
+        answeredAt: new Date(),
+      });
+      expect(to).toHaveBeenCalledWith(callRoom("call-1"));
+      expect(emit).toHaveBeenCalledWith("call:accepted", expect.any(Object));
+
+      service.emitCallRejected("u1", {
+        callId: "call-1",
+        rejectedBy: "u2",
+        reason: "BUSY",
+      });
+      expect(to).toHaveBeenCalledWith(userRoom("u1"));
+      expect(emit).toHaveBeenCalledWith("call:rejected", expect.any(Object));
+
+      service.emitCallCancelled("u2", {
+        callId: "call-1",
+        cancelledBy: "u1",
+      });
+      expect(to).toHaveBeenCalledWith(userRoom("u2"));
+      expect(emit).toHaveBeenCalledWith("call:cancelled", expect.any(Object));
+
+      service.emitCallMissed("u2", {
+        callId: "call-1",
+        callerId: "u1",
+        media: "VOICE",
+        reason: "MISSED_TIMEOUT",
+      });
+      expect(to).toHaveBeenCalledWith(userRoom("u2"));
+      expect(emit).toHaveBeenCalledWith("call:missed", expect.any(Object));
+
+      service.emitCallEnded("call-1", "u1", "u2", {
+        callId: "call-1",
+        endedBy: "u1",
+        reason: "NORMAL",
+        durationSecs: 10,
+      });
+      expect(to).toHaveBeenCalledWith(callRoom("call-1"));
+      expect(to).toHaveBeenCalledWith(userRoom("u1"));
+      expect(to).toHaveBeenCalledWith(userRoom("u2"));
+
+      service.emitCallUserDisconnected("call-1", { callId: "call-1", userId: "u1" });
+      expect(to).toHaveBeenCalledWith(callRoom("call-1"));
+      expect(emit).toHaveBeenCalledWith("call:user-disconnected", expect.any(Object));
+
+      service.emitCallUserReconnected("call-1", { callId: "call-1", userId: "u1" });
+      expect(to).toHaveBeenCalledWith(callRoom("call-1"));
+      expect(emit).toHaveBeenCalledWith("call:user-reconnected", expect.any(Object));
     });
   });
 });

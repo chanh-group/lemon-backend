@@ -2,7 +2,9 @@
 // All functions are pure and sync (no I/O): a key is data, not behaviour.
 // Ported from Rust `dsa/src/utils/cache/keys.rs`.
 import {
+  ACTIVE_CALL_KEY_PREFIX,
   FORGOT_OTP_KEY_PREFIX,
+  METERED_ICE_SERVERS_CACHE_KEY,
   NOTE_FEED_KEY_PREFIX,
   OTP_KEY_PREFIX,
   PURGE_LOCK_KEY,
@@ -62,4 +64,12 @@ export function feedFillKey(key: string): string {
 
 export function purgeLockKey(): string {
   return PURGE_LOCK_KEY;
+}
+
+export function activeCallUserKey(userId: string): string {
+  return `${ACTIVE_CALL_KEY_PREFIX}${userId}`;
+}
+
+export function iceServersCacheKey(): string {
+  return METERED_ICE_SERVERS_CACHE_KEY;
 }
