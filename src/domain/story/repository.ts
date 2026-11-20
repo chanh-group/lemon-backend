@@ -38,7 +38,7 @@ export interface StoryRepository {
     audienceUserIds?: string[],
   ): Promise<Story>;
   findById(id: string): Promise<Story | null>;
-  /** Alive for the viewer: not deleted, and either unexpired or archived-by-them. */
+  /** Active only (feed/chat semantics): unexpired, undeleted, unarchived — mirror of findActiveById. */
   findViewableByIds(ids: string[], viewerId: string): Promise<Story[]>;
   findUnmeasuredMedia(userId: string): Promise<Array<{ id: string; objectKey: string }>>;
   setMediaSize(id: string, size: number): Promise<void>;

@@ -143,11 +143,9 @@ export class StoryPgRepository implements StoryRepository {
       .where(
         and(
           inArray(stories.id, ids),
+          gt(stories.expiresAt, sql`now()`),
           isNull(stories.deletedAt),
-          or(
-            and(isNull(stories.archivedAt), gt(stories.expiresAt, sql`now()`)),
-            and(isNotNull(stories.archivedAt), eq(stories.userId, viewerId)),
-          ),
+          isNull(stories.archivedAt),
         ),
       );
   }

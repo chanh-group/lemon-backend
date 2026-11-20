@@ -797,7 +797,7 @@ describe("StoryPgRepository.updateActive", () => {
 });
 
 describe("StoryPgRepository.findViewableByIds", () => {
-  it("keeps only stories alive for the viewer: unexpired-unarchived or archived-by-them", async () => {
+  it("keeps only active stories: unexpired, undeleted and unarchived", async () => {
     const rows = [
       { id: "s1", userId: "u1" },
       { id: "s2", userId: "u2" },
@@ -809,11 +809,11 @@ describe("StoryPgRepository.findViewableByIds", () => {
 
     const whereSql = render(whereMock.mock.calls[0][0]);
     expect(whereSql).toContain('"stories"."id" in');
+    expect(whereSql).toContain('"stories"."expires_at" > now()');
     expect(whereSql).toContain('"stories"."deleted_at" is null');
     expect(whereSql).toContain('"stories"."archived_at" is null');
-    expect(whereSql).toContain('"stories"."expires_at" > now()');
-    expect(whereSql).toContain('"stories"."archived_at" is not null');
-    expect(dialect.sqlToQuery(whereMock.mock.calls[0][0]).params).toEqual(["s1", "s2", "u1"]);
+    expect(whereSql).not.toContain('"stories"."user_id"');
+    expect(dialect.sqlToQuery(whereMock.mock.calls[0][0]).params).toEqual(["s1", "s2"]);
   });
 
   it("queries nothing when the id list or the viewer is empty", async () => {
