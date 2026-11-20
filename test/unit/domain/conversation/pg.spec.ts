@@ -2225,14 +2225,14 @@ describe("ConversationPgRepository.updateLastRead guards", () => {
 
   it("throws NOT_PARTICIPANT when the user has left the conversation", async () => {
     const { db, txSelect, updateMock } = makeTxDb();
-    txSelect.limitMock.mockResolvedValueOnce([{}]).mockResolvedValueOnce([]);
+    txSelect.limitMock.mockResolvedValueOnce([]);
     const repo = new ConversationPgRepository(db);
 
     await expect(repo.updateLastRead(convRow.id, userAId, msgId)).rejects.toMatchObject({
       code: "NOT_PARTICIPANT",
     });
     expect(updateMock).not.toHaveBeenCalled();
-    const participantWhere = render(txSelect.whereMock.mock.calls[1][0]);
+    const participantWhere = render(txSelect.whereMock.mock.calls[0][0]);
     expect(participantWhere.sql).toContain('"conversation_participants"."left_at" is null');
     expect(participantWhere.params).toEqual([convRow.id, userAId]);
   });
@@ -2240,7 +2240,6 @@ describe("ConversationPgRepository.updateLastRead guards", () => {
   it("rejects when the target message is missing or hidden", async () => {
     const { db, txSelect, updateMock } = makeTxDb();
     txSelect.limitMock
-      .mockResolvedValueOnce([{}])
       .mockResolvedValueOnce([
         {
           lastReadMessageId: null,
@@ -2261,7 +2260,6 @@ describe("ConversationPgRepository.updateLastRead guards", () => {
   it("rejects when the history boundary message can no longer be read", async () => {
     const { db, txSelect, updateMock } = makeTxDb();
     txSelect.limitMock
-      .mockResolvedValueOnce([{}])
       .mockResolvedValueOnce([
         {
           lastReadMessageId: null,
@@ -2278,7 +2276,7 @@ describe("ConversationPgRepository.updateLastRead guards", () => {
       code: "BAD_REQUEST",
     });
     expect(updateMock).not.toHaveBeenCalled();
-    const boundaryWhere = render(txSelect.whereMock.mock.calls[4][0]);
+    const boundaryWhere = render(txSelect.whereMock.mock.calls[3][0]);
     expect(boundaryWhere.sql).toContain('"messages"."conversation_id" =');
     expect(boundaryWhere.params).toEqual([boundaryId, convRow.id]);
   });
@@ -2286,7 +2284,6 @@ describe("ConversationPgRepository.updateLastRead guards", () => {
   it("rejects when the message is not newer than the history boundary", async () => {
     const { db, txSelect, updateMock } = makeTxDb();
     txSelect.limitMock
-      .mockResolvedValueOnce([{}])
       .mockResolvedValueOnce([
         {
           lastReadMessageId: null,
@@ -2308,7 +2305,6 @@ describe("ConversationPgRepository.updateLastRead guards", () => {
   it("rejects when the message predates the join of a member without boundary", async () => {
     const { db, txSelect, updateMock } = makeTxDb();
     txSelect.limitMock
-      .mockResolvedValueOnce([{}])
       .mockResolvedValueOnce([
         {
           lastReadMessageId: null,
@@ -2329,7 +2325,6 @@ describe("ConversationPgRepository.updateLastRead guards", () => {
   it("keeps the existing marker when the message is older than the last read", async () => {
     const { db, txSelect, updateMock } = makeTxDb();
     txSelect.limitMock
-      .mockResolvedValueOnce([{}])
       .mockResolvedValueOnce([
         {
           lastReadMessageId: lastReadId,
@@ -2349,7 +2344,6 @@ describe("ConversationPgRepository.updateLastRead guards", () => {
   it("advances the marker past an older last read while respecting the boundary", async () => {
     const { db, txSelect, updateMock, setMock, updateWhereMock } = makeTxDb();
     txSelect.limitMock
-      .mockResolvedValueOnce([{}])
       .mockResolvedValueOnce([
         {
           lastReadMessageId: lastReadId,
@@ -2376,18 +2370,18 @@ describe("ConversationPgRepository.updateLastRead guards", () => {
     expect(where.sql).toContain('"conversation_participants"."left_at" is null');
     expect(where.params).toEqual([convRow.id, userAId]);
 
-    const messageWhere = render(txSelect.whereMock.mock.calls[3][0]);
+    const messageWhere = render(txSelect.whereMock.mock.calls[2][0]);
     expect(messageWhere.sql).toContain('"messages"."id" =');
     expect(messageWhere.sql).toContain('"messages"."conversation_id" =');
     expect(messageWhere.sql).toContain("not exists");
     expect(messageWhere.params.slice(0, 2)).toEqual([msgId, convRow.id]);
 
-    const hiddenSubquery = render(txSelect.whereMock.mock.calls[2][0]);
+    const hiddenSubquery = render(txSelect.whereMock.mock.calls[1][0]);
     expect(hiddenSubquery.sql).toContain('"message_hidden_for_users"."message_id" =');
     expect(hiddenSubquery.sql).toContain('"message_hidden_for_users"."user_id" =');
     expect(hiddenSubquery.params).toEqual([userAId]);
 
-    const lastReadWhere = render(txSelect.whereMock.mock.calls[5][0]);
+    const lastReadWhere = render(txSelect.whereMock.mock.calls[4][0]);
     expect(lastReadWhere.params).toEqual([lastReadId, convRow.id]);
   });
 });
