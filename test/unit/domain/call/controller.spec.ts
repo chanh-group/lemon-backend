@@ -19,7 +19,7 @@ describe("CallController", () => {
   let server: App;
 
   let initiateCallMock: Mock;
-  let getIceServersMock: Mock;
+  let getCallTokenMock: Mock;
   let getActiveCallMock: Mock;
   let getCallByIdMock: Mock;
   let acceptCallMock: Mock;
@@ -32,6 +32,12 @@ describe("CallController", () => {
   const mockPartnerId = "0193a2b1-0000-7000-8000-000000000002";
   const mockCallId = "0193a2b1-0000-7000-8000-000000000020";
   const mockConvId = "0193a2b1-0000-7000-8000-000000000010";
+
+  const mockLivekit = {
+    serverUrl: "ws://localhost:7880",
+    room: mockCallId,
+    token: "mock-jwt-token",
+  };
 
   const mockCallResponse: CallResponse = {
     id: mockCallId,
@@ -50,10 +56,10 @@ describe("CallController", () => {
   beforeAll(async () => {
     initiateCallMock = vi.fn<() => Promise<InitiateCallResponse>>().mockResolvedValue({
       ...mockCallResponse,
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      livekit: mockLivekit,
     });
 
-    getIceServersMock = vi.fn().mockResolvedValue([{ urls: "stun:stun.l.google.com:19302" }]);
+    getCallTokenMock = vi.fn().mockResolvedValue(mockLivekit);
     getActiveCallMock = vi
       .fn<() => Promise<CallResponse | null>>()
       .mockResolvedValue(mockCallResponse);
@@ -62,7 +68,7 @@ describe("CallController", () => {
       ...mockCallResponse,
       status: "ACCEPTED",
       answeredAt: new Date(),
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      livekit: mockLivekit,
     });
     rejectCallMock = vi.fn<() => Promise<CallResponse>>().mockResolvedValue({
       ...mockCallResponse,
@@ -91,7 +97,7 @@ describe("CallController", () => {
           provide: CallService,
           useValue: {
             initiateCall: initiateCallMock,
-            getIceServers: getIceServersMock,
+            getCallToken: getCallTokenMock,
             getActiveCall: getActiveCallMock,
             getCallById: getCallByIdMock,
             acceptCall: acceptCallMock,
@@ -136,11 +142,12 @@ describe("CallController", () => {
     });
   });
 
-  it("GET /calls/ice-servers returns STUN/TURN servers", async () => {
-    const res = await request(server).get("/calls/ice-servers").expect(200);
+  it("GET /calls/:id/token returns LiveKit access token", async () => {
+    const res = await request(server).get(`/calls/${mockCallId}/token`).expect(200);
 
     expect(res.body.success).toBe(true);
-    expect(res.body.data.iceServers).toBeDefined();
+    expect(res.body.data.token).toBeDefined();
+    expect(res.body.data.serverUrl).toBe("ws://localhost:7880");
   });
 
   it("GET /calls/active returns currently active call", async () => {

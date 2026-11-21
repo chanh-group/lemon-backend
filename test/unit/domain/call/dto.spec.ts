@@ -2,11 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   endCallSchema,
   initiateCallSchema,
-  mediaStateSchema,
   rejectCallSchema,
-  signalAnswerSchema,
-  signalIceCandidateSchema,
-  signalOfferSchema,
 } from "../../../../src/domain/call/dto/request.js";
 
 describe("Call DTOs", () => {
@@ -48,39 +44,6 @@ describe("Call DTOs", () => {
       expect(rejectCallSchema.safeParse({ reason: "Busy right now" }).success).toBe(true);
       expect(endCallSchema.safeParse({}).success).toBe(true);
       expect(endCallSchema.safeParse({ reason: "Call finished" }).success).toBe(true);
-    });
-  });
-
-  describe("signalling schemas", () => {
-    it("validates offer, answer, ice-candidate, and media-state", () => {
-      expect(
-        signalOfferSchema.safeParse({
-          callId: validUuid,
-          sdp: { type: "offer", sdp: "v=0..." },
-        }).success,
-      ).toBe(true);
-
-      expect(
-        signalAnswerSchema.safeParse({
-          callId: validUuid,
-          sdp: { type: "answer", sdp: "v=0..." },
-        }).success,
-      ).toBe(true);
-
-      expect(
-        signalIceCandidateSchema.safeParse({
-          callId: validUuid,
-          candidate: { candidate: "candidate:...", sdpMid: "0" },
-        }).success,
-      ).toBe(true);
-
-      expect(
-        mediaStateSchema.safeParse({
-          callId: validUuid,
-          isMuted: true,
-          isVideoOff: false,
-        }).success,
-      ).toBe(true);
     });
   });
 });

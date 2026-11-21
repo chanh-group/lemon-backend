@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, Optional, type OnApplicationShutdown } from "@nestjs/common";
+import { AccessToken, RoomServiceClient } from "livekit-server-sdk";
 import { get_env } from "../../helpers/index.js";
-import { activeCallUserKey, iceServersCacheKey } from "../../utils/cache/keys.js";
+import { activeCallUserKey } from "../../utils/cache/keys.js";
 import { CACHE_STORE, type CacheStore } from "../../utils/cache/store.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import {
@@ -15,14 +16,13 @@ import {
   CALL_DISCONNECT_GRACE_MS,
   CALL_RING_TIMEOUT_MS,
   DEFAULT_CALL_PAGE_SIZE,
-  DEFAULT_STUN_SERVERS,
-  METERED_ICE_CACHE_TTL_SECONDS,
+  LIVEKIT_TOKEN_TTL_SECONDS,
 } from "./constants.js";
 import type { InitiateCallDto } from "./dto/request.js";
 import type { AcceptCallResponse, CallResponse, InitiateCallResponse } from "./dto/response.js";
 import { toCallResponse } from "./dto/mapper.js";
 import { CALL_REPOSITORY, type CallRepository } from "./repository.js";
-import type { RTCIceServer } from "./types.js";
+import type { LiveKitConnectionDetails } from "./types.js";
 
 @Injectable()
 export class CallService implements OnApplicationShutdown {
@@ -54,41 +54,84 @@ export class CallService implements OnApplicationShutdown {
     this.disconnectTimers.clear();
   }
 
-  async getIceServers(): Promise<RTCIceServer[]> {
+  private get livekitUrl(): string {
+    return get_env("LIVEKIT_URL", "ws://localhost:7880");
+  }
+
+  private get livekitApiKey(): string {
+    return get_env("LIVEKIT_API_KEY", "devkey");
+  }
+
+  private get livekitApiSecret(): string {
+    return get_env("LIVEKIT_API_SECRET", "secret");
+  }
+
+  async createLiveKitToken(
+    userId: string,
+    callId: string,
+    userName?: string,
+  ): Promise<LiveKitConnectionDetails> {
+    const at = new AccessToken(this.livekitApiKey, this.livekitApiSecret, {
+      identity: userId,
+      name: userName || userId,
+      ttl: LIVEKIT_TOKEN_TTL_SECONDS,
+    });
+
+    at.addGrant({
+      roomJoin: true,
+      room: callId,
+      canPublish: true,
+      canSubscribe: true,
+      canPublishData: true,
+    });
+
+    const token = await at.toJwt();
+    return {
+      serverUrl: this.livekitUrl,
+      room: callId,
+      token,
+    };
+  }
+
+  async getCallToken(userId: string, callId: string): Promise<LiveKitConnectionDetails> {
+    const call = await this.callRepo.findById(callId);
+    if (!call) {
+      throw new BusinessError("CALL_NOT_FOUND");
+    }
+    if (call.callerId !== userId && call.calleeId !== userId) {
+      throw new BusinessError("CALL_UNAUTHORIZED_PARTICIPANT");
+    }
+    if (
+      call.status === "COMPLETED" ||
+      call.status === "REJECTED" ||
+      call.status === "CANCELLED" ||
+      call.status === "MISSED" ||
+      call.status === "FAILED"
+    ) {
+      throw new BusinessError("CALL_INVALID_STATE");
+    }
+
+    let userName = userId;
+    if (this.userService) {
+      const user = await this.userService.findById(userId);
+      if (user?.fullName) userName = user.fullName;
+      else if (user?.username) userName = user.username;
+    }
+
+    return this.createLiveKitToken(userId, callId, userName);
+  }
+
+  async deleteLiveKitRoom(callId: string): Promise<void> {
     try {
-      const cached = await this.cache.getRaw(iceServersCacheKey());
-      if (cached) {
-        const parsed = JSON.parse(cached) as RTCIceServer[];
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-    } catch {
-      // Non-critical cache read: fail-open
+      const roomService = new RoomServiceClient(
+        this.livekitUrl,
+        this.livekitApiKey,
+        this.livekitApiSecret,
+      );
+      await roomService.deleteRoom(callId);
+    } catch (err) {
+      this.logger.warn(`Failed to delete LiveKit room ${callId}: ${String(err)}`);
     }
-
-    const domain = get_env("METERED_DOMAIN", "");
-    const apiKey = get_env("METERED_SECRET_KEY", "");
-    if (domain && apiKey) {
-      try {
-        const response = await fetch(`https://${domain}/api/v1/turn/credentials?apiKey=${apiKey}`, {
-          signal: AbortSignal.timeout(3000),
-        });
-        if (response.ok) {
-          const servers = (await response.json()) as RTCIceServer[];
-          if (Array.isArray(servers) && servers.length > 0) {
-            await this.cache
-              .setRaw(iceServersCacheKey(), JSON.stringify(servers), METERED_ICE_CACHE_TTL_SECONDS)
-              .catch(() => {});
-            return servers;
-          }
-        }
-      } catch (err) {
-        this.logger.warn(`Failed to fetch Metered ICE servers: ${String(err)}`);
-      }
-    }
-
-    return DEFAULT_STUN_SERVERS;
   }
 
   async initiateCall(callerId: string, dto: InitiateCallDto): Promise<InitiateCallResponse> {
@@ -183,10 +226,14 @@ export class CallService implements OnApplicationShutdown {
       media: dto.media,
     });
 
-    const iceServers = await this.getIceServers();
+    const livekit = await this.createLiveKitToken(
+      callerId,
+      callId,
+      callerSummary?.fullName ?? callerSummary?.username,
+    );
     return {
       ...toCallResponse(call),
-      iceServers,
+      livekit,
     };
   }
 
@@ -215,17 +262,35 @@ export class CallService implements OnApplicationShutdown {
       throw new BusinessError("CALL_INVALID_STATE");
     }
 
+    let calleeName = calleeId;
+    let callerName = updated.callerId;
+    if (this.userService) {
+      const [calleeUser, callerUser] = await Promise.all([
+        this.userService.findById(calleeId),
+        this.userService.findById(updated.callerId),
+      ]);
+      if (calleeUser?.fullName) calleeName = calleeUser.fullName;
+      else if (calleeUser?.username) calleeName = calleeUser.username;
+      if (callerUser?.fullName) callerName = callerUser.fullName;
+      else if (callerUser?.username) callerName = callerUser.username;
+    }
+
+    const [livekitCallee, livekitCaller] = await Promise.all([
+      this.createLiveKitToken(calleeId, callId, calleeName),
+      this.createLiveKitToken(updated.callerId, callId, callerName),
+    ]);
+
     this.realtimeService.joinCall([updated.callerId, updated.calleeId], callId);
     this.realtimeService.emitCallAccepted(callId, {
       callId,
       acceptedBy: calleeId,
       answeredAt,
+      livekit: livekitCaller,
     });
 
-    const iceServers = await this.getIceServers();
     return {
       ...toCallResponse(updated),
-      iceServers,
+      livekit: livekitCallee,
     };
   }
 
@@ -265,6 +330,7 @@ export class CallService implements OnApplicationShutdown {
       reason,
     });
     this.realtimeService.leaveCall([updated.callerId, updated.calleeId], callId);
+    await this.deleteLiveKitRoom(callId);
 
     return toCallResponse(updated);
   }
@@ -304,6 +370,7 @@ export class CallService implements OnApplicationShutdown {
       cancelledBy: callerId,
     });
     this.realtimeService.leaveCall([updated.callerId, updated.calleeId], callId);
+    await this.deleteLiveKitRoom(callId);
 
     return toCallResponse(updated);
   }
@@ -339,6 +406,7 @@ export class CallService implements OnApplicationShutdown {
       durationSecs: finalCall.durationSecs ?? 0,
     });
     this.realtimeService.leaveCall([finalCall.callerId, finalCall.calleeId], callId);
+    await this.deleteLiveKitRoom(callId);
 
     return toCallResponse(finalCall);
   }
@@ -373,6 +441,7 @@ export class CallService implements OnApplicationShutdown {
     });
 
     this.realtimeService.leaveCall([updated.callerId, updated.calleeId], callId);
+    await this.deleteLiveKitRoom(callId);
   }
 
   async handleUserDisconnect(userId: string): Promise<void> {

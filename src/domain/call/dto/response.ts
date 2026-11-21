@@ -1,4 +1,4 @@
-import type { CallMedia, CallParticipant, CallStatus, RTCIceServer } from "../types.js";
+import type { CallMedia, CallParticipant, CallStatus, LiveKitConnectionDetails } from "../types.js";
 
 export interface CallResponse {
   id: string;
@@ -17,13 +17,15 @@ export interface CallResponse {
 }
 
 export interface InitiateCallResponse extends CallResponse {
-  iceServers: RTCIceServer[];
+  livekit: LiveKitConnectionDetails;
 }
 
 export interface AcceptCallResponse extends CallResponse {
-  iceServers: RTCIceServer[];
+  livekit: LiveKitConnectionDetails;
 }
 
-export interface IceServersResponse {
-  iceServers: RTCIceServer[];
+export interface CallTokenResponse {
+  serverUrl: string;
+  room: string;
+  token: string;
 }

@@ -1,7 +1,7 @@
-export interface RTCIceServer {
-  urls: string | string[];
-  username?: string;
-  credential?: string;
+export interface LiveKitConnectionDetails {
+  serverUrl: string;
+  room: string;
+  token: string;
 }
 
 export type CallMedia = "VOICE" | "VIDEO";
@@ -59,6 +59,7 @@ export interface CallAcceptedPayload {
   callId: string;
   acceptedBy: string;
   answeredAt: Date;
+  livekit?: LiveKitConnectionDetails;
 }
 
 export interface CallRejectedPayload {

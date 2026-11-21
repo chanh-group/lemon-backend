@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   activeCallUserKey,
-  iceServersCacheKey,
   noteFeedKey,
   purgeLockKey,
   refreshTokenKey,
@@ -31,8 +30,7 @@ describe("cache.keys", () => {
     expect(purgeLockKey()).toBe("lock:purge-stories-notes");
   });
 
-  it("builds active call user and ice servers keys", () => {
+  it("builds active call user key", () => {
     expect(activeCallUserKey("user-123")).toBe("call:active:user:user-123");
-    expect(iceServersCacheKey()).toBe("cache:metered_turn_ice_servers");
   });
 });

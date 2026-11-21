@@ -10,7 +10,6 @@ import type { RealtimeService } from "../../../../src/domain/realtime/realtime.s
 import type { UserService } from "../../../../src/domain/user/service.js";
 import type { CallWithUsers } from "../../../../src/domain/call/types.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
-import { DEFAULT_STUN_SERVERS } from "../../../../src/domain/call/constants.js";
 
 describe("CallService", () => {
   let service: CallService;
@@ -178,16 +177,51 @@ describe("CallService", () => {
     vi.useRealTimers();
   });
 
-  describe("getIceServers", () => {
-    it("returns cached servers if present in cache", async () => {
-      const cached = [{ urls: "turn:turn.metered.ca:443" }];
-      cacheGetRawMock.mockResolvedValueOnce(JSON.stringify(cached));
+  describe("LiveKit tokens & room lifecycle", () => {
+    it("creates LiveKit token with serverUrl, room, and jwt token", async () => {
+      const details = await service.createLiveKitToken(callerId, callId, "Caller User");
 
-      await expect(service.getIceServers()).resolves.toEqual(cached);
+      expect(details.serverUrl).toBeDefined();
+      expect(details.room).toBe(callId);
+      expect(details.token).toBeDefined();
+      expect(typeof details.token).toBe("string");
     });
 
-    it("falls back to default stun servers when cache is empty and env not set", async () => {
-      await expect(service.getIceServers()).resolves.toEqual(DEFAULT_STUN_SERVERS);
+    it("throws CALL_NOT_FOUND when getting token for nonexistent call", async () => {
+      findByIdMock.mockResolvedValueOnce(null);
+
+      await expect(service.getCallToken(callerId, callId)).rejects.toThrow(
+        new BusinessError("CALL_NOT_FOUND"),
+      );
+    });
+
+    it("throws CALL_UNAUTHORIZED_PARTICIPANT when non-participant gets token", async () => {
+      await expect(
+        service.getCallToken("0193a2b1-0000-7000-8000-999999999999", callId),
+      ).rejects.toThrow(new BusinessError("CALL_UNAUTHORIZED_PARTICIPANT"));
+    });
+
+    it("throws CALL_INVALID_STATE when call has completed", async () => {
+      findByIdMock.mockResolvedValueOnce({
+        ...mockCall,
+        status: "COMPLETED",
+      });
+
+      await expect(service.getCallToken(callerId, callId)).rejects.toThrow(
+        new BusinessError("CALL_INVALID_STATE"),
+      );
+    });
+
+    it("successfully returns LiveKit token for valid participant", async () => {
+      const details = await service.getCallToken(callerId, callId);
+
+      expect(details.serverUrl).toBeDefined();
+      expect(details.room).toBe(callId);
+      expect(details.token).toBeDefined();
+    });
+
+    it("handles deleteLiveKitRoom gracefully even on error", async () => {
+      await expect(service.deleteLiveKitRoom(callId)).resolves.not.toThrow();
     });
   });
 
@@ -271,7 +305,8 @@ describe("CallService", () => {
         }),
       );
       expect(result.id).toBe(callId);
-      expect(result.iceServers).toBeDefined();
+      expect(result.livekit).toBeDefined();
+      expect(result.livekit.room).toBe(callId);
     });
   });
 
@@ -314,7 +349,8 @@ describe("CallService", () => {
         }),
       );
       expect(result.status).toBe("ACCEPTED");
-      expect(result.iceServers).toBeDefined();
+      expect(result.livekit).toBeDefined();
+      expect(result.livekit.room).toBe(callId);
     });
   });
 

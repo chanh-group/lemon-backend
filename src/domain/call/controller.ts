@@ -38,10 +38,11 @@ export class CallController {
     return created(data, "Call initiated");
   }
 
-  @Get("ice-servers")
-  async getIceServers() {
-    const iceServers = await this.service.getIceServers();
-    return ok({ iceServers });
+  @Get(":id/token")
+  async getCallToken(@Req() req: { user?: unknown }, @Param("id", ParseUUIDPipe) id: string) {
+    const { id: userId }: AuthUser = getAuthUser(req);
+    const data = await this.service.getCallToken(userId, id);
+    return ok(data);
   }
 
   @Get("active")

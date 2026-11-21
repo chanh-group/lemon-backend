@@ -1,5 +1,6 @@
-import { forwardRef, Module } from "@nestjs/common";
+import { Module } from "@nestjs/common";
 import { ConversationModule } from "../conversation/module.js";
+import { CALL_DISCONNECT_HANDLER } from "../realtime/constants.js";
 import { RealtimeModule } from "../realtime/realtime.module.js";
 import { UserModule } from "../user/module.js";
 import { CallController } from "./controller.js";
@@ -8,7 +9,7 @@ import { CALL_REPOSITORY } from "./repository.js";
 import { CallService } from "./service.js";
 
 @Module({
-  imports: [forwardRef(() => RealtimeModule), ConversationModule, UserModule],
+  imports: [RealtimeModule, ConversationModule, UserModule],
   controllers: [CallController],
   providers: [
     {
@@ -16,7 +17,11 @@ import { CallService } from "./service.js";
       useClass: CallPgRepository,
     },
     CallService,
+    {
+      provide: CALL_DISCONNECT_HANDLER,
+      useExisting: CallService,
+    },
   ],
-  exports: [CALL_REPOSITORY, CallService],
+  exports: [CALL_REPOSITORY, CallService, CALL_DISCONNECT_HANDLER],
 })
 export class CallModule {}

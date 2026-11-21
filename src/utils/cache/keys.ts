@@ -4,7 +4,6 @@
 import {
   ACTIVE_CALL_KEY_PREFIX,
   FORGOT_OTP_KEY_PREFIX,
-  METERED_ICE_SERVERS_CACHE_KEY,
   NOTE_FEED_KEY_PREFIX,
   OTP_KEY_PREFIX,
   PURGE_LOCK_KEY,
@@ -68,8 +67,4 @@ export function purgeLockKey(): string {
 
 export function activeCallUserKey(userId: string): string {
   return `${ACTIVE_CALL_KEY_PREFIX}${userId}`;
-}
-
-export function iceServersCacheKey(): string {
-  return METERED_ICE_SERVERS_CACHE_KEY;
 }

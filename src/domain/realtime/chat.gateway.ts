@@ -1,4 +1,4 @@
-import { forwardRef, Inject, Logger, Optional, type OnApplicationShutdown } from "@nestjs/common";
+import { Inject, Logger, Optional, type OnApplicationShutdown } from "@nestjs/common";
 import {
   ConnectedSocket,
   MessageBody,
@@ -20,9 +20,13 @@ import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
 import { ConversationPgRepository } from "../conversation/pg.js";
 import { UserService } from "../user/service.js";
-import { CallService } from "../call/service.js";
-import { callRoom, convRoom, userRoom } from "./rooms.js";
-import { REDIS_DISCONNECT_GRACE_MS, TYPING_TTL_SECS } from "./constants.js";
+import { convRoom, userRoom } from "./rooms.js";
+import {
+  CALL_DISCONNECT_HANDLER,
+  REDIS_DISCONNECT_GRACE_MS,
+  TYPING_TTL_SECS,
+  type CallDisconnectHandler,
+} from "./constants.js";
 import { JWT_CONFIG } from "../auth/constants.js";
 import type { JwtConfig } from "../auth/jwt.js";
 import type { AccessTokenPayload } from "../auth/types.js";
@@ -86,7 +90,9 @@ export class ChatGateway
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
     @Inject(AUTH_SESSION_REPOSITORY) private readonly sessions: AuthSessionRepository,
     private readonly revocations: AuthRevocationListener,
-    @Optional() @Inject(forwardRef(() => CallService)) private readonly callService?: CallService,
+    @Optional()
+    @Inject(CALL_DISCONNECT_HANDLER)
+    private readonly callService?: CallDisconnectHandler,
   ) {
     if (this.redis && typeof this.redis.on === "function") {
       // Debounce failure events into a sustained-outage signal: a single
@@ -554,62 +560,5 @@ export class ChatGateway
     } catch (err) {
       logger.warn(`Failed to set offline presence for ${userId}: ${String(err)}`);
     }
-  }
-
-  @SubscribeMessage("call:signal:offer")
-  handleCallSignalOffer(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { callId: string; sdp: unknown },
-  ): void {
-    const userId = client.data?.userId as string | undefined;
-    if (!userId || !data?.callId) return;
-    client.to(callRoom(data.callId)).emit("call:signal:offer", {
-      callId: data.callId,
-      sdp: data.sdp,
-      senderId: userId,
-    });
-  }
-
-  @SubscribeMessage("call:signal:answer")
-  handleCallSignalAnswer(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { callId: string; sdp: unknown },
-  ): void {
-    const userId = client.data?.userId as string | undefined;
-    if (!userId || !data?.callId) return;
-    client.to(callRoom(data.callId)).emit("call:signal:answer", {
-      callId: data.callId,
-      sdp: data.sdp,
-      senderId: userId,
-    });
-  }
-
-  @SubscribeMessage("call:signal:ice-candidate")
-  handleCallSignalIceCandidate(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { callId: string; candidate: unknown },
-  ): void {
-    const userId = client.data?.userId as string | undefined;
-    if (!userId || !data?.callId) return;
-    client.to(callRoom(data.callId)).emit("call:signal:ice-candidate", {
-      callId: data.callId,
-      candidate: data.candidate,
-      senderId: userId,
-    });
-  }
-
-  @SubscribeMessage("call:media-state")
-  handleCallMediaState(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { callId: string; isMuted?: boolean; isVideoOff?: boolean },
-  ): void {
-    const userId = client.data?.userId as string | undefined;
-    if (!userId || !data?.callId) return;
-    client.to(callRoom(data.callId)).emit("call:media-state", {
-      callId: data.callId,
-      isMuted: data.isMuted,
-      isVideoOff: data.isVideoOff,
-      senderId: userId,
-    });
   }
 }
