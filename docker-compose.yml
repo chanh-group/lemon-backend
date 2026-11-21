@@ -1,0 +1,66 @@
+# Local test stack: Postgres + Redis + backend + one-shot migrations.
+# Usage: docker compose up --build
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: lemon_chat
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d lemon_chat"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Runs drizzle migrations once, then exits; api waits for it.
+  migrate:
+    image: lemon-backend:local
+    build: .
+    command: ["bunx", "drizzle-kit", "migrate"]
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/lemon_chat
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    image: lemon-backend:local
+    build: .
+    ports:
+      - "${API_PORT:-3000}:3000"
+    # S3/R2, SMTP... lấy từ .env thật; biến trong `environment` bên dưới vẫn thắng.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: development
+      NODE_ENV: development
+      DATABASE_URL: postgres://postgres:postgres@db:5432/lemon_chat
+      REDIS_URL: redis://redis:6379
+      FRONTEND_URL: http://localhost:5173
+      JWT_SECRET: local_dev_jwt_secret_at_least_32_bytes_long_123
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
