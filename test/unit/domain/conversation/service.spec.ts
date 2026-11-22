@@ -6,7 +6,7 @@ import type {
   ConversationWithPartner,
 } from "../../../../src/domain/conversation/repository.js";
 import type { UserRepository } from "../../../../src/domain/user/repository.js";
-import type { RealtimeService } from "../../../../src/domain/realtime/realtime.service.js";
+import type { RealtimeService } from "../../../../src/domain/realtime/service.js";
 import { unreadCountKey } from "../../../../src/utils/cache/keys.js";
 import type { Redis } from "ioredis";
 import type { FriendService } from "../../../../src/domain/friend/service.js";

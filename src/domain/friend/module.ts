@@ -1,6 +1,6 @@
 import { Global, Module } from "@nestjs/common";
 import { RateLimitModule } from "../../middleware/ratelimit.module.js";
-import { RealtimeModule } from "../realtime/realtime.module.js";
+import { RealtimeModule } from "../realtime/module.js";
 import { UserModule } from "../user/module.js";
 import { FriendController } from "./controller.js";
 import { USER_PROFILE_CACHE_INVALIDATOR } from "../user/repository.js";

@@ -16,7 +16,7 @@ import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.
 import { ConversationService } from "../conversation/service.js";
 import type { MessageResponse } from "../message/dto/response.js";
 import { MessageService } from "../message/service.js";
-import { RealtimeService } from "../realtime/realtime.service.js";
+import { RealtimeService } from "../realtime/service.js";
 import {
   groupStoriesByUser,
   reviveUserStoryFeed,

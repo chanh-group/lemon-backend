@@ -4,7 +4,7 @@ import {
   CONVERSATION_REPOSITORY,
   type ConversationRepository,
 } from "../conversation/repository.js";
-import { RealtimeService } from "../realtime/realtime.service.js";
+import { RealtimeService } from "../realtime/service.js";
 import {
   MESSAGE_REPOSITORY,
   type MessageRepository,

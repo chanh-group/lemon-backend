@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { RealtimeService } from "../../../../src/domain/realtime/realtime.service.js";
+import { RealtimeService } from "../../../../src/domain/realtime/service.js";
 import { convRoom, userRoom } from "../../../../src/domain/realtime/rooms.js";
-import type { ChatGateway } from "../../../../src/domain/realtime/chat.gateway.js";
+import type { ChatGateway } from "../../../../src/domain/realtime/gateway.js";
 import type { MessageResponse } from "../../../../src/domain/message/dto/response.js";
 
 const message = { id: "m1" } as MessageResponse;

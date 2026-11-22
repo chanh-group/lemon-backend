@@ -1,5 +1,5 @@
 import { Module } from "@nestjs/common";
-import { RealtimeModule } from "../realtime/realtime.module.js";
+import { RealtimeModule } from "../realtime/module.js";
 import { UserModule } from "../user/module.js";
 import { FriendModule } from "../friend/module.js";
 import { ConversationController } from "./controller.js";

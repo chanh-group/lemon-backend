@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { MessageService } from "../../../../src/domain/message/service.js";
 import type { MessageRepository } from "../../../../src/domain/message/repository.js";
 import type { ConversationRepository } from "../../../../src/domain/conversation/repository.js";
-import type { RealtimeService } from "../../../../src/domain/realtime/realtime.service.js";
+import type { RealtimeService } from "../../../../src/domain/realtime/service.js";
 import type { Message } from "../../../../src/domain/message/schema.js";
 import type { FriendService } from "../../../../src/domain/friend/service.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";

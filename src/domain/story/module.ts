@@ -2,7 +2,7 @@ import { Module } from "@nestjs/common";
 import { RateLimitModule } from "../../middleware/ratelimit.module.js";
 import { ConversationModule } from "../conversation/module.js";
 import { MessageModule } from "../message/module.js";
-import { RealtimeModule } from "../realtime/realtime.module.js";
+import { RealtimeModule } from "../realtime/module.js";
 import { StoryController } from "./controller.js";
 import { StoryPgRepository } from "./pg.js";
 import { STORY_REPOSITORY } from "./repository.js";

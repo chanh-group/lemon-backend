@@ -1,3 +1,7 @@
+// Socket.io gateway: decorators, lifecycle hooks and thin dispatchers.
+// Concern logic lives in auth.ts (handshake auth), presence.ts (presence
+// bookkeeping) and typing.ts (typing events); this is the only file that
+// imports socket.io decorators.
 import { Inject, Logger, Optional, type OnApplicationShutdown } from "@nestjs/common";
 import {
   ConnectedSocket,
@@ -9,50 +13,34 @@ import {
   WebSocketServer,
 } from "@nestjs/websockets";
 import type { Server, Socket } from "socket.io";
-import { presenceOnlineKey, presenceUserKey, typingKey } from "../../utils/cache/keys.js";
-import {
-  OFFLINE_PRESENCE_TTL_SECONDS,
-  PRESENCE_GRACE_MS,
-  PRESENCE_OTHER_NODE_TTL_SECONDS,
-  PRESENCE_TTL_SECONDS,
-} from "../../utils/cache/constants.js";
-import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
+import { REDIS_CLIENT } from "../../utils/cache/store.js";
+import { DEFAULT_FRONTEND_URL, DEFAULT_LOCALHOST_ORIGINS } from "../../configs/constants.js";
 import { ConversationPgRepository } from "../conversation/pg.js";
 import { UserService } from "../user/service.js";
 import { convRoom, userRoom } from "./rooms.js";
-import { REDIS_DISCONNECT_GRACE_MS, TYPING_TTL_SECS } from "./constants.js";
+import {
+  REALTIME_EVENTS,
+  REDIS_DISCONNECT_GRACE_MS,
+  REDIS_LIFECYCLE_EVENTS,
+  SOCKET_ERROR_CODES,
+  SUBSCRIBE_EVENTS,
+} from "./constants.js";
+import { SocketAuthenticator } from "./auth.js";
+import { PresenceTracker } from "./presence.js";
+import { handleTypingEvent } from "./typing.js";
+import type { SocketReadyEvent } from "./types.js";
 import { JWT_CONFIG } from "../auth/constants.js";
 import type { JwtConfig } from "../auth/jwt.js";
-import type { AccessTokenPayload } from "../auth/types.js";
 import { AUTH_SESSION_REPOSITORY, type AuthSessionRepository } from "../auth/repository.js";
 import { AuthRevocationListener } from "../auth/pg.js";
 import { get_env } from "../../helpers/index.js";
 
 const logger = new Logger("ChatGateway");
-const frontendUrl = get_env("FRONTEND_URL", "http://localhost:5173");
+const frontendUrl = get_env("FRONTEND_URL", DEFAULT_FRONTEND_URL);
 const allowedOrigins = frontendUrl.includes(",")
   ? frontendUrl.split(",").map((origin) => origin.trim())
-  : [frontendUrl, "http://localhost:5173", "http://localhost:3000"];
-
-export interface SocketUser {
-  userId: string;
-}
-
-export interface SocketReadyEvent {
-  userId: string;
-}
-
-/** What this node last wrote to a user's presence state key. */
-type WrittenPresence = { state: "online"; conns: number } | { state: "offline" };
-
-/** EXPIRE reports 0 when the key is gone — the caller must rebuild the state key. */
-function presenceKeyMissing(results: [Error | null, unknown][] | null): boolean {
-  const first = results?.[0] ?? null;
-  if (first === null) return false;
-  const [err, value] = first;
-  return err === null && value === 0;
-}
+  : [frontendUrl, ...DEFAULT_LOCALHOST_ORIGINS];
 
 @WebSocketGateway({
   cors: {
@@ -66,15 +54,9 @@ export class ChatGateway
   @WebSocketServer()
   server!: Server;
 
-  // Track active connection counts per user: userId -> socket count
-  private readonly userConnections = new Map<string, number>();
-  // Track disconnect/offline recheck timers: userId -> timer
-  private readonly graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly expiryTimers = new Map<Socket, ReturnType<typeof setTimeout>>();
   private readonly pendingConnections = new WeakMap<Socket, Promise<void>>();
-  private readonly trackedSockets = new Map<Socket, () => void>();
-  // Last written presence state per user: pings skip full writes when unchanged
-  private readonly presenceWrites = new Map<string, WrittenPresence>();
+  private readonly auth: SocketAuthenticator;
+  private readonly presence: PresenceTracker;
   // Pending forced disconnect while a sustained Redis outage is being debounced
   private redisDisconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -86,15 +68,17 @@ export class ChatGateway
     @Inject(AUTH_SESSION_REPOSITORY) private readonly sessions: AuthSessionRepository,
     private readonly revocations: AuthRevocationListener,
   ) {
+    this.auth = new SocketAuthenticator(this.jwt, this.revocations);
+    this.presence = new PresenceTracker(this.userService, this.redis);
     if (this.redis && typeof this.redis.on === "function") {
       // Debounce failure events into a sustained-outage signal: a single
       // transient error must never force a reconnect wave across all sockets.
       const onRedisFailure = () => this.scheduleRedisDisconnect();
-      for (const event of ["close", "end", "reconnecting", "error"]) {
+      for (const event of REDIS_LIFECYCLE_EVENTS.FAILURE) {
         this.redis.on(event, onRedisFailure);
       }
       const onRedisRecovery = () => this.cancelRedisDisconnect();
-      for (const event of ["ready", "connect"]) {
+      for (const event of REDIS_LIFECYCLE_EVENTS.RECOVERY) {
         this.redis.on(event, onRedisRecovery);
       }
     }
@@ -112,20 +96,18 @@ export class ChatGateway
       return;
     }
 
-    const payload = await this.extractUserId(client);
+    const payload = await this.auth.extractUserId(client);
     if (!payload || typeof payload.exp !== "number" || payload.exp * 1000 <= Date.now()) {
       logger.warn(`Unauthorized socket connection rejected: ${client.id}`);
-      client.emit("error", { code: "UNAUTHORIZED" });
+      client.emit(REALTIME_EVENTS.ERROR, { code: SOCKET_ERROR_CODES.UNAUTHORIZED });
       client.disconnect(true);
       return;
     }
-    const untrack = this.revocations.track(payload.sub, payload.sid, () => client.disconnect(true));
-    if (!untrack) {
-      client.emit("error", { code: "UNAVAILABLE" });
+    if (!this.auth.trackRevocation(client, payload)) {
+      client.emit(REALTIME_EVENTS.ERROR, { code: SOCKET_ERROR_CODES.UNAVAILABLE });
       client.disconnect(true);
       return;
     }
-    this.trackedSockets.set(client, untrack);
     let user: Awaited<ReturnType<UserService["findById"]>>;
     let active: boolean;
     try {
@@ -134,27 +116,25 @@ export class ChatGateway
         this.sessions.isActive(payload.sub, payload.sid),
       ]);
     } catch (err) {
-      this.untrack(client);
+      this.auth.untrack(client);
       logger.error("Socket authentication state query failed", { err });
-      client.emit("error", { code: "UNAVAILABLE" });
+      client.emit(REALTIME_EVENTS.ERROR, { code: SOCKET_ERROR_CODES.UNAVAILABLE });
       client.disconnect(true);
       return;
     }
     if (!user || !user.isActive || !active || user.authVersion !== payload.authVersion) {
-      this.untrack(client);
-      client.emit("error", { code: "UNAUTHORIZED" });
+      this.auth.untrack(client);
+      client.emit(REALTIME_EVENTS.ERROR, { code: SOCKET_ERROR_CODES.UNAUTHORIZED });
       client.disconnect(true);
       return;
     }
     if (client.disconnected) {
-      this.untrack(client);
+      this.auth.untrack(client);
       return;
     }
 
     const userId = payload.sub;
-    const timer = setTimeout(() => client.disconnect(true), payload.exp * 1000 - Date.now());
-    timer.unref();
-    this.expiryTimers.set(client, timer);
+    this.auth.armTokenExpiry(client, payload.exp * 1000);
     try {
       // The user room join and the conversation lookup are independent — batch them.
       const [, conversationIds] = await Promise.all([
@@ -162,7 +142,7 @@ export class ChatGateway
         this.conversationRepo.getActiveConversationIds(userId),
       ]);
       if (client.disconnected) {
-        this.untrack(client);
+        this.auth.untrack(client);
         return;
       }
       if (conversationIds.length > 0) {
@@ -177,13 +157,11 @@ export class ChatGateway
         );
       }
       if (client.disconnected) {
-        this.untrack(client);
+        this.auth.untrack(client);
         return;
       }
     } catch (err) {
-      this.untrack(client);
-      clearTimeout(timer);
-      this.expiryTimers.delete(client);
+      this.auth.untrack(client);
       client.disconnect(true);
       logger.warn("Socket initialization failed", { err });
       return;
@@ -191,20 +169,10 @@ export class ChatGateway
 
     client.data = { userId };
 
-    // Cancel grace period timer if reconnecting
-    const existingTimer = this.graceTimers.get(userId);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      this.graceTimers.delete(userId);
-    }
-
-    const currentConns = (this.userConnections.get(userId) ?? 0) + 1;
-    this.userConnections.set(userId, currentConns);
-
-    await this.setOnlinePresence(userId, currentConns);
+    const currentConns = await this.presence.registerConnection(userId);
 
     if (!client.disconnected) {
-      client.emit("ready", { userId } satisfies SocketReadyEvent);
+      client.emit(REALTIME_EVENTS.READY, { userId } satisfies SocketReadyEvent);
     }
 
     logger.log(
@@ -213,32 +181,11 @@ export class ChatGateway
   }
 
   async handleDisconnect(client: Socket): Promise<void> {
-    this.untrack(client);
-    const expiryTimer = this.expiryTimers.get(client);
-    if (expiryTimer) clearTimeout(expiryTimer);
-    this.expiryTimers.delete(client);
+    this.auth.untrack(client);
     const userId = client.data?.userId as string | undefined;
     if (!userId) return;
 
-    const currentConns = (this.userConnections.get(userId) ?? 1) - 1;
-    if (currentConns <= 0) {
-      this.userConnections.delete(userId);
-
-      // Start grace period before marking offline; a reconnect within the window cancels it
-      const existingTimer = this.graceTimers.get(userId);
-      if (existingTimer) {
-        clearTimeout(existingTimer);
-      }
-
-      const timer = setTimeout(async () => {
-        await this.finalizeOffline(userId);
-      }, PRESENCE_GRACE_MS);
-      timer.unref();
-
-      this.graceTimers.set(userId, timer);
-    } else {
-      this.userConnections.set(userId, currentConns);
-    }
+    const currentConns = this.presence.registerDisconnection(userId);
 
     logger.log(
       `User disconnected: ${userId} (socket ${client.id}, remaining: ${Math.max(0, currentConns)})`,
@@ -246,28 +193,11 @@ export class ChatGateway
   }
 
   onApplicationShutdown(): void {
-    for (const untrack of this.trackedSockets.values()) untrack();
-    this.trackedSockets.clear();
-    for (const timer of this.expiryTimers.values()) clearTimeout(timer);
-    this.expiryTimers.clear();
-    for (const timer of this.graceTimers.values()) {
-      clearTimeout(timer);
-    }
+    this.auth.shutdown();
+    this.presence.shutdown();
     this.cancelRedisDisconnect();
 
-    this.graceTimers.clear();
-    this.userConnections.clear();
-    this.presenceWrites.clear();
-
     logger.log("ChatGateway shutdown: cleared presence grace timers and connection state");
-  }
-
-  private untrack(client: Socket): void {
-    this.trackedSockets.get(client)?.();
-    this.trackedSockets.delete(client);
-    const timer = this.expiryTimers.get(client);
-    if (timer) clearTimeout(timer);
-    this.expiryTimers.delete(client);
   }
 
   /**
@@ -293,7 +223,7 @@ export class ChatGateway
     this.redisDisconnectTimer = null;
   }
 
-  @SubscribeMessage("conv:join")
+  @SubscribeMessage(SUBSCRIBE_EVENTS.CONV_JOIN)
   async handleJoinConversation(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { conversationId: string },
@@ -308,7 +238,7 @@ export class ChatGateway
       logger.warn(
         `Unauthorized conv:join attempt by user ${userId} for conversation ${data.conversationId}`,
       );
-      client.emit("error", { code: "NOT_PARTICIPANT" });
+      client.emit(REALTIME_EVENTS.ERROR, { code: SOCKET_ERROR_CODES.NOT_PARTICIPANT });
       return { success: false, conversationId: data.conversationId };
     }
 
@@ -316,14 +246,14 @@ export class ChatGateway
     await client.join(room);
     if (!(await this.conversationRepo.isParticipant(data.conversationId, userId))) {
       await client.leave(room);
-      client.emit("error", { code: "NOT_PARTICIPANT" });
+      client.emit(REALTIME_EVENTS.ERROR, { code: SOCKET_ERROR_CODES.NOT_PARTICIPANT });
       return { success: false, conversationId: data.conversationId };
     }
     logger.debug(`Socket ${client.id} (user ${userId}) joined ${room}`);
     return { success: true, conversationId: data.conversationId };
   }
 
-  @SubscribeMessage("conv:leave")
+  @SubscribeMessage(SUBSCRIBE_EVENTS.CONV_LEAVE)
   async handleLeaveConversation(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { conversationId: string },
@@ -336,219 +266,45 @@ export class ChatGateway
     return { success: true, conversationId: data.conversationId };
   }
 
-  @SubscribeMessage("typing:start")
+  @SubscribeMessage(SUBSCRIBE_EVENTS.TYPING_START)
   async handleTypingStart(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { conversationId: string },
   ): Promise<void> {
-    await this.pendingConnections.get(client);
-    const userId = client.data?.userId as string;
-    if (!userId || !data?.conversationId) return;
-
-    const room = convRoom(data.conversationId);
-    const participantIds = await this.conversationRepo.getParticipantUserIds(data.conversationId);
-    if (!participantIds.includes(userId)) {
-      if (client.rooms.has(room)) await client.leave(room);
-      return;
-    }
-
-    // Cache typing indicator in Redis; fire-and-forget so keystroke events
-    // never wait on Redis before the room broadcast.
-    if (this.redis) {
-      this.redis
-        .set(typingKey(data.conversationId, userId), "1", "EX", TYPING_TTL_SECS)
-        .catch((err: unknown) => {
-          logger.warn("Redis typing cache write failed", { err });
-        });
-    }
-
-    const recipientRooms = participantIds.filter((id) => id !== userId).map(userRoom);
-    if (recipientRooms.length === 0) return;
-    client.to(recipientRooms).emit("typing", {
-      conversationId: data.conversationId,
-      userId,
-      isTyping: true,
-    });
+    await handleTypingEvent(
+      client,
+      data,
+      {
+        conversationRepo: this.conversationRepo,
+        redis: this.redis,
+        pending: this.pendingConnections.get(client),
+      },
+      true,
+    );
   }
 
-  @SubscribeMessage("typing:stop")
+  @SubscribeMessage(SUBSCRIBE_EVENTS.TYPING_STOP)
   async handleTypingStop(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { conversationId: string },
   ): Promise<void> {
-    await this.pendingConnections.get(client);
-    const userId = client.data?.userId as string;
-    if (!userId || !data?.conversationId) return;
-
-    const room = convRoom(data.conversationId);
-    const participantIds = await this.conversationRepo.getParticipantUserIds(data.conversationId);
-    if (!participantIds.includes(userId)) {
-      if (client.rooms.has(room)) await client.leave(room);
-      return;
-    }
-
-    if (this.redis) {
-      this.redis.del(typingKey(data.conversationId, userId)).catch((err: unknown) => {
-        logger.warn("Redis typing cache delete failed", { err });
-      });
-    }
-
-    const recipientRooms = participantIds.filter((id) => id !== userId).map(userRoom);
-    if (recipientRooms.length === 0) return;
-    client.to(recipientRooms).emit("typing", {
-      conversationId: data.conversationId,
-      userId,
-      isTyping: false,
-    });
+    await handleTypingEvent(
+      client,
+      data,
+      {
+        conversationRepo: this.conversationRepo,
+        redis: this.redis,
+        pending: this.pendingConnections.get(client),
+      },
+      false,
+    );
   }
 
-  @SubscribeMessage("presence:ping")
+  @SubscribeMessage(SUBSCRIBE_EVENTS.PRESENCE_PING)
   async handlePresencePing(@ConnectedSocket() client: Socket): Promise<void> {
     await this.pendingConnections.get(client);
     const userId = client.data?.userId as string;
     if (!userId) return;
-    await this.touchOnlinePresence(userId, this.userConnections.get(userId) ?? 1);
-  }
-
-  // --- Helper methods ---
-
-  private async extractUserId(client: Socket): Promise<AccessTokenPayload | null> {
-    const rawAuth = client.handshake.auth?.token as string | undefined;
-    const rawHeader = client.handshake.headers?.authorization as string | undefined;
-    const cookieHeader = client.handshake.headers?.cookie as string | undefined;
-
-    let token: string | undefined;
-
-    if (rawAuth && typeof rawAuth === "string") {
-      token = rawAuth.trim();
-    } else if (rawHeader && typeof rawHeader === "string" && rawHeader.startsWith("Bearer ")) {
-      token = rawHeader.substring(7).trim();
-    } else if (cookieHeader) {
-      const match = cookieHeader.match(/(?:^|;\s*)lemon_access_token=([^;]+)/);
-      if (match) {
-        try {
-          token = decodeURIComponent(match[1]);
-        } catch {
-          return null;
-        }
-      }
-    }
-
-    if (!token) {
-      return null;
-    }
-
-    try {
-      return await this.jwt.verifyAccessToken(token);
-    } catch (err) {
-      logger.warn(`Socket JWT verification failed: ${String(err)}`);
-      return null;
-    }
-  }
-
-  private async finalizeOffline(userId: string): Promise<void> {
-    this.graceTimers.delete(userId);
-
-    // Another node still heartbeats when the state key has a healthy remaining TTL —
-    // leave the user online (the reconnect may also have refreshed presence meanwhile).
-    if (this.redis) {
-      try {
-        const ttl = await this.redis.ttl(presenceUserKey(userId));
-        if (ttl > PRESENCE_OTHER_NODE_TTL_SECONDS) {
-          logger.log(
-            `Presence offline deferred for ${userId}: another node may still heartbeat (ttl ${ttl}s)`,
-          );
-          const retryDelayMs = (ttl - PRESENCE_OTHER_NODE_TTL_SECONDS) * 1000 + 1000;
-          const timer = setTimeout(() => {
-            void this.finalizeOffline(userId);
-          }, retryDelayMs);
-          timer.unref();
-          this.graceTimers.set(userId, timer);
-          return;
-        }
-      } catch (err) {
-        logger.warn(`Presence TTL check failed for ${userId}: ${String(err)}`);
-      }
-    }
-
-    await Promise.all([this.setOfflinePresence(userId), this.touchLastSeen(userId)]);
-    logger.log(`User marked offline after ${PRESENCE_GRACE_MS / 1000}s grace: ${userId}`);
-  }
-
-  private async touchLastSeen(userId: string): Promise<void> {
-    try {
-      await this.userService.updateLastSeen(userId);
-    } catch (err) {
-      logger.warn(`Failed to touch lastSeen for ${userId}: ${String(err)}`);
-    }
-  }
-
-  /** Full presence write (SET + ZADD) and record what was written. */
-  private async setOnlinePresence(userId: string, conns: number): Promise<void> {
-    if (!this.redis) return;
-    try {
-      const now = Date.now();
-      await this.redis
-        .pipeline()
-        .set(
-          presenceUserKey(userId),
-          JSON.stringify({ state: "online", lastSeen: now, conns }),
-          "EX",
-          PRESENCE_TTL_SECONDS,
-        )
-        .zadd(presenceOnlineKey(), now, userId)
-        .exec();
-      this.presenceWrites.set(userId, { state: "online", conns });
-    } catch (err) {
-      logger.warn(`Failed to set online presence for ${userId}: ${String(err)}`);
-    }
-  }
-
-  /**
-   * Ping path: when the written state and connection count are unchanged, only
-   * refresh liveness (EXPIRE + ZADD) instead of re-serializing the JSON.
-   */
-  private async touchOnlinePresence(userId: string, conns: number): Promise<void> {
-    const written = this.presenceWrites.get(userId);
-    if (written === undefined || written.state !== "online" || written.conns !== conns) {
-      await this.setOnlinePresence(userId, conns);
-      return;
-    }
-    if (!this.redis) return;
-    try {
-      const now = Date.now();
-      const results = await this.redis
-        .pipeline()
-        .expire(presenceUserKey(userId), PRESENCE_TTL_SECONDS)
-        .zadd(presenceOnlineKey(), now, userId)
-        .exec();
-      if (presenceKeyMissing(results)) {
-        // The state key expired since the last write — rebuild it in full.
-        await this.setOnlinePresence(userId, conns);
-      }
-    } catch (err) {
-      logger.warn(`Failed to refresh presence liveness for ${userId}: ${String(err)}`);
-    }
-  }
-
-  private async setOfflinePresence(userId: string): Promise<void> {
-    if (!this.redis) return;
-    if (this.presenceWrites.get(userId)?.state === "offline") return;
-    try {
-      const now = Date.now();
-      await this.redis
-        .pipeline()
-        .set(
-          presenceUserKey(userId),
-          JSON.stringify({ state: "offline", lastSeen: now }),
-          "EX",
-          OFFLINE_PRESENCE_TTL_SECONDS,
-        )
-        .zrem(presenceOnlineKey(), userId)
-        .exec();
-      this.presenceWrites.set(userId, { state: "offline" });
-    } catch (err) {
-      logger.warn(`Failed to set offline presence for ${userId}: ${String(err)}`);
-    }
+    await this.presence.ping(userId);
   }
 }

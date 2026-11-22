@@ -12,7 +12,7 @@ import { REDIS_CLIENT } from "../../utils/cache/store.js";
 import type { Redis } from "ioredis";
 import { UNREAD_TTL_SECONDS } from "../../utils/cache/constants.js";
 import { presenceUserKey, unreadCountKey } from "../../utils/cache/keys.js";
-import { RealtimeService } from "../realtime/realtime.service.js";
+import { RealtimeService } from "../realtime/service.js";
 import type { ConversationResponse } from "./dto/response.js";
 import type { ConversationMemberResponse } from "./dto/response.js";
 import { toConversationResponse } from "./dto/mapper.js";

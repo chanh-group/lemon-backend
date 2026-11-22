@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import { ChatGateway } from "../../../../src/domain/realtime/chat.gateway.js";
+import { ChatGateway } from "../../../../src/domain/realtime/gateway.js";
 import {
   REDIS_DISCONNECT_GRACE_MS,
   TYPING_TTL_SECS,
@@ -600,9 +600,9 @@ describe("ChatGateway", () => {
       expect(pipelineSetMock).toHaveBeenCalledTimes(2); // online + offline write
 
       const internal = gateway as unknown as {
-        finalizeOffline(userId: string): Promise<void>;
+        presence: { finalizeOffline(userId: string): Promise<void> };
       };
-      await internal.finalizeOffline(mockUserId);
+      await internal.presence.finalizeOffline(mockUserId);
 
       expect(pipelineSetMock).toHaveBeenCalledTimes(2); // offline state unchanged — skipped
     });
@@ -746,13 +746,15 @@ describe("ChatGateway", () => {
 
       expect(vi.getTimerCount()).toBe(0);
       const internal = gateway as unknown as {
-        graceTimers: Map<string, unknown>;
-        userConnections: Map<string, number>;
-        presenceWrites: Map<string, unknown>;
+        presence: {
+          graceTimers: Map<string, unknown>;
+          userConnections: Map<string, number>;
+          presenceWrites: Map<string, unknown>;
+        };
       };
-      expect(internal.graceTimers.size).toBe(0);
-      expect(internal.userConnections.size).toBe(0);
-      expect(internal.presenceWrites.size).toBe(0);
+      expect(internal.presence.graceTimers.size).toBe(0);
+      expect(internal.presence.userConnections.size).toBe(0);
+      expect(internal.presence.presenceWrites.size).toBe(0);
 
       redisTtlMock.mockResolvedValue(-1);
       await vi.advanceTimersByTimeAsync(60_000);
@@ -772,13 +774,13 @@ describe("ChatGateway", () => {
 
       await gateway.handleConnection(client);
       const internal = gateway as unknown as {
-        userConnections: Map<string, number>;
+        presence: { userConnections: Map<string, number> };
       };
-      expect(internal.userConnections.size).toBe(1);
+      expect(internal.presence.userConnections.size).toBe(1);
 
       gateway.onApplicationShutdown();
 
-      expect(internal.userConnections.size).toBe(0);
+      expect(internal.presence.userConnections.size).toBe(0);
     });
   });
 

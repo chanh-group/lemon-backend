@@ -6,7 +6,7 @@ import type { CacheStoreExt } from "../../../../src/utils/cache/store.js";
 import type { StorageService } from "../../../../src/utils/storage/store.js";
 import type { ConversationService } from "../../../../src/domain/conversation/service.js";
 import type { MessageService } from "../../../../src/domain/message/service.js";
-import type { RealtimeService } from "../../../../src/domain/realtime/realtime.service.js";
+import type { RealtimeService } from "../../../../src/domain/realtime/service.js";
 import type { CreateStoryDto } from "../../../../src/domain/story/dto/request.js";
 import type { UserStoryFeedResponse } from "../../../../src/domain/story/dto/response.js";
 

@@ -16,7 +16,7 @@ import { authSessions } from "../../src/domain/auth/schema.js";
 import { conversations } from "../../src/domain/conversation/schema.js";
 import { friendships } from "../../src/domain/friend/schema.js";
 import { users } from "../../src/domain/user/schema.js";
-import { ChatGateway } from "../../src/domain/realtime/chat.gateway.js";
+import { ChatGateway } from "../../src/domain/realtime/gateway.js";
 import { convRoom } from "../../src/domain/realtime/rooms.js";
 import { REFRESH_TOKEN_EXPIRATION } from "../../src/utils/cache/constants.js";
 import { ErrorFilter } from "../../src/middleware/error-filter.js";

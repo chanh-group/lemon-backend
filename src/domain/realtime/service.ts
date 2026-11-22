@@ -1,42 +1,28 @@
 import { Injectable, Logger } from "@nestjs/common";
-import type { UserSummary } from "../user/dto/response.js";
 import type { MessageReactionSummary, MessageResponse } from "../message/dto/response.js";
-import { ChatGateway } from "./chat.gateway.js";
+import { ChatGateway } from "./gateway.js";
+import { REALTIME_EVENTS } from "./constants.js";
 import { convRoom, userRoom } from "./rooms.js";
+import type {
+  FriendRequestAcceptedEvent,
+  FriendRequestCancelledEvent,
+  FriendRequestDeclinedEvent,
+  StoryReactionEvent,
+  StoryReactionRemovedEvent,
+  UserMessagePayload,
+} from "./types.js";
+
+// Re-exported for consumers that import these from the service module.
+export type {
+  FriendRequestAcceptedEvent,
+  FriendRequestCancelledEvent,
+  FriendRequestDeclinedEvent,
+  StoryReactionEvent,
+  StoryReactionRemovedEvent,
+  UserMessagePayload,
+} from "./types.js";
 
 const logger = new Logger("RealtimeService");
-
-export interface UserMessagePayload {
-  userId: string;
-  payload: MessageResponse;
-}
-
-export interface StoryReactionEvent {
-  storyId: string;
-  user: UserSummary;
-  emoji: string;
-  createdAt: Date;
-}
-
-export interface StoryReactionRemovedEvent {
-  storyId: string;
-  user: UserSummary;
-}
-
-export interface FriendRequestCancelledEvent {
-  requestId: string;
-  requesterId: string;
-}
-
-export interface FriendRequestAcceptedEvent {
-  requestId: string;
-  addresseeId: string;
-}
-
-export interface FriendRequestDeclinedEvent {
-  requestId: string;
-  addresseeId: string;
-}
 
 @Injectable()
 export class RealtimeService {
@@ -54,11 +40,13 @@ export class RealtimeService {
     const { clientMsgId, ...publicMessage } = message;
     if (clientMsgId) {
       try {
-        this.gateway.server.to(userRoom(message.senderId)).emit("message:correlated", {
-          conversationId,
-          id: message.id,
-          clientMsgId,
-        });
+        this.gateway.server
+          .to(userRoom(message.senderId))
+          .emit(REALTIME_EVENTS.MESSAGE_CORRELATED, {
+            conversationId,
+            id: message.id,
+            clientMsgId,
+          });
       } catch (err) {
         logger.warn(
           `Failed to emit message correlation for conv ${conversationId}: ${String(err)}`,
@@ -69,7 +57,9 @@ export class RealtimeService {
       for (const { userId, payload } of recipientPayloads) {
         try {
           const { clientMsgId: _recipientClientMsgId, ...recipientMessage } = payload;
-          this.gateway.server.to(userRoom(userId)).emit("message:new", recipientMessage);
+          this.gateway.server
+            .to(userRoom(userId))
+            .emit(REALTIME_EVENTS.MESSAGE_NEW, recipientMessage);
         } catch (err) {
           logger.warn(`Failed to emit message:new for user ${userId}: ${String(err)}`);
         }
@@ -77,7 +67,9 @@ export class RealtimeService {
       return;
     }
     try {
-      this.gateway.server.to(convRoom(conversationId)).emit("message:new", publicMessage);
+      this.gateway.server
+        .to(convRoom(conversationId))
+        .emit(REALTIME_EVENTS.MESSAGE_NEW, publicMessage);
     } catch (err) {
       logger.warn(`Failed to emit message:new for conv ${conversationId}: ${String(err)}`);
     }
@@ -95,8 +87,11 @@ export class RealtimeService {
     try {
       if (recipientUserIds) {
         for (const userId of recipientUserIds)
-          this.gateway.server.to(userRoom(userId)).emit("message:updated", updated);
-      } else this.gateway.server.to(convRoom(conversationId)).emit("message:updated", updated);
+          this.gateway.server.to(userRoom(userId)).emit(REALTIME_EVENTS.MESSAGE_UPDATED, updated);
+      } else
+        this.gateway.server
+          .to(convRoom(conversationId))
+          .emit(REALTIME_EVENTS.MESSAGE_UPDATED, updated);
     } catch (err) {
       logger.warn(`Failed to emit message:updated: ${String(err)}`);
     }
@@ -118,8 +113,11 @@ export class RealtimeService {
       };
       if (recipientUserIds) {
         for (const userId of recipientUserIds)
-          this.gateway.server.to(userRoom(userId)).emit("message:revoked", event);
-      } else this.gateway.server.to(convRoom(conversationId)).emit("message:revoked", event);
+          this.gateway.server.to(userRoom(userId)).emit(REALTIME_EVENTS.MESSAGE_REVOKED, event);
+      } else
+        this.gateway.server
+          .to(convRoom(conversationId))
+          .emit(REALTIME_EVENTS.MESSAGE_REVOKED, event);
     } catch (err) {
       logger.warn(`Failed to emit message:revoked: ${String(err)}`);
     }
@@ -130,7 +128,7 @@ export class RealtimeService {
     try {
       this.gateway.server
         .to(userRoom(userId))
-        .emit("message:hidden", { conversationId, messageId });
+        .emit(REALTIME_EVENTS.MESSAGE_HIDDEN, { conversationId, messageId });
     } catch (err) {
       logger.warn(`Failed to emit message:hidden for conv ${conversationId}: ${String(err)}`);
     }
@@ -171,8 +169,9 @@ export class RealtimeService {
       };
       if (recipientUserIds) {
         for (const userId of recipientUserIds)
-          this.gateway.server.to(userRoom(userId)).emit("read:updated", event);
-      } else this.gateway.server.to(convRoom(conversationId)).emit("read:updated", event);
+          this.gateway.server.to(userRoom(userId)).emit(REALTIME_EVENTS.READ_UPDATED, event);
+      } else
+        this.gateway.server.to(convRoom(conversationId)).emit(REALTIME_EVENTS.READ_UPDATED, event);
     } catch (err) {
       logger.warn(`Failed to emit read:updated: ${String(err)}`);
     }
@@ -199,8 +198,11 @@ export class RealtimeService {
       };
       if (recipientUserIds) {
         for (const userId of recipientUserIds)
-          this.gateway.server.to(userRoom(userId)).emit("message:reaction", event);
-      } else this.gateway.server.to(convRoom(conversationId)).emit("message:reaction", event);
+          this.gateway.server.to(userRoom(userId)).emit(REALTIME_EVENTS.MESSAGE_REACTION, event);
+      } else
+        this.gateway.server
+          .to(convRoom(conversationId))
+          .emit(REALTIME_EVENTS.MESSAGE_REACTION, event);
     } catch (err) {
       logger.warn(`Failed to emit message:reaction for conv ${conversationId}: ${String(err)}`);
     }
@@ -212,7 +214,7 @@ export class RealtimeService {
   ): void {
     if (!this.gateway?.server) return;
     try {
-      this.gateway.server.to(userRoom(userId)).emit("friend:request:new", payload);
+      this.gateway.server.to(userRoom(userId)).emit(REALTIME_EVENTS.FRIEND_REQUEST_NEW, payload);
     } catch (err) {
       logger.warn(`Failed to emit friend:request:new for user ${userId}: ${String(err)}`);
     }
@@ -224,7 +226,9 @@ export class RealtimeService {
   emitFriendRequestCancelled(userId: string, payload: FriendRequestCancelledEvent): void {
     if (!this.gateway?.server) return;
     try {
-      this.gateway.server.to(userRoom(userId)).emit("friend:request:cancelled", payload);
+      this.gateway.server
+        .to(userRoom(userId))
+        .emit(REALTIME_EVENTS.FRIEND_REQUEST_CANCELLED, payload);
     } catch (err) {
       logger.warn(`Failed to emit friend:request:cancelled for user ${userId}: ${String(err)}`);
     }
@@ -236,7 +240,9 @@ export class RealtimeService {
   emitFriendRequestAccepted(userId: string, payload: FriendRequestAcceptedEvent): void {
     if (!this.gateway?.server) return;
     try {
-      this.gateway.server.to(userRoom(userId)).emit("friend:request:accepted", payload);
+      this.gateway.server
+        .to(userRoom(userId))
+        .emit(REALTIME_EVENTS.FRIEND_REQUEST_ACCEPTED, payload);
     } catch (err) {
       logger.warn(`Failed to emit friend:request:accepted for user ${userId}: ${String(err)}`);
     }
@@ -248,7 +254,9 @@ export class RealtimeService {
   emitFriendRequestDeclined(userId: string, payload: FriendRequestDeclinedEvent): void {
     if (!this.gateway?.server) return;
     try {
-      this.gateway.server.to(userRoom(userId)).emit("friend:request:declined", payload);
+      this.gateway.server
+        .to(userRoom(userId))
+        .emit(REALTIME_EVENTS.FRIEND_REQUEST_DECLINED, payload);
     } catch (err) {
       logger.warn(`Failed to emit friend:request:declined for user ${userId}: ${String(err)}`);
     }
@@ -260,8 +268,12 @@ export class RealtimeService {
   emitFriendRemoved(userIdA: string, userIdB: string): void {
     if (!this.gateway?.server) return;
     try {
-      this.gateway.server.to(userRoom(userIdA)).emit("friend:removed", { friendId: userIdB });
-      this.gateway.server.to(userRoom(userIdB)).emit("friend:removed", { friendId: userIdA });
+      this.gateway.server
+        .to(userRoom(userIdA))
+        .emit(REALTIME_EVENTS.FRIEND_REMOVED, { friendId: userIdB });
+      this.gateway.server
+        .to(userRoom(userIdB))
+        .emit(REALTIME_EVENTS.FRIEND_REMOVED, { friendId: userIdA });
     } catch (err) {
       logger.warn(`Failed to emit friend:removed for users ${userIdA}, ${userIdB}: ${String(err)}`);
     }
@@ -290,7 +302,7 @@ export class RealtimeService {
   emitStoryReaction(userId: string, payload: StoryReactionEvent): void {
     if (!this.gateway?.server) return;
     try {
-      this.gateway.server.to(userRoom(userId)).emit("story:reaction", payload);
+      this.gateway.server.to(userRoom(userId)).emit(REALTIME_EVENTS.STORY_REACTION, payload);
     } catch (err) {
       logger.warn(`Failed to emit story:reaction for user ${userId}: ${String(err)}`);
     }
@@ -302,7 +314,9 @@ export class RealtimeService {
   emitStoryReactionRemoved(userId: string, payload: StoryReactionRemovedEvent): void {
     if (!this.gateway?.server) return;
     try {
-      this.gateway.server.to(userRoom(userId)).emit("story:reaction:removed", payload);
+      this.gateway.server
+        .to(userRoom(userId))
+        .emit(REALTIME_EVENTS.STORY_REACTION_REMOVED, payload);
     } catch (err) {
       logger.warn(`Failed to emit story:reaction:removed for user ${userId}: ${String(err)}`);
     }

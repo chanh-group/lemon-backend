@@ -3,7 +3,7 @@ import { CACHE_STORE, type CacheStoreExt } from "../../utils/cache/store.js";
 import { noteFeedKey, storyFeedKey } from "../../utils/cache/keys.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { USER_REPOSITORY, type UserRepository } from "../user/repository.js";
-import { RealtimeService } from "../realtime/realtime.service.js";
+import { RealtimeService } from "../realtime/service.js";
 import { FRIEND_REPOSITORY, type FriendRepository } from "./repository.js";
 import type { ConversationResponse } from "../conversation/dto/response.js";
 
