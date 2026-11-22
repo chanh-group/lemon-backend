@@ -114,5 +114,16 @@
   "STORY_LIKED": "Đã thích story",
   "STORY_UNLIKED": "Đã bỏ thích story",
   "STORY_STORAGE_FULL": "Kho tin đã đầy. Hãy xóa bớt tin và thử lại.",
-  "STORY_STORAGE_UNAVAILABLE": "Chưa thể kiểm tra dung lượng kho tin. Vui lòng thử lại."
+  "STORY_STORAGE_UNAVAILABLE": "Chưa thể kiểm tra dung lượng kho tin. Vui lòng thử lại.",
+  "EMAIL_OTP_SUBJECT": "[LemonChat] {title} - Mã OTP: {code}",
+  "EMAIL_OTP_TITLE_SIGNUP": "Xác thực đăng ký tài khoản",
+  "EMAIL_OTP_TITLE_RESET": "Đặt lại mật khẩu",
+  "EMAIL_OTP_LEAD_SIGNUP": "Cảm ơn bạn đã đăng ký tài khoản tại LemonChat! Vui lòng sử dụng mã OTP dưới đây để hoàn tất quá trình xác thực email:",
+  "EMAIL_OTP_LEAD_RESET": "Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản LemonChat của bạn. Vui lòng sử dụng mã OTP dưới đây:",
+  "EMAIL_OTP_CODE_LINE": "Mã xác thực OTP của bạn là: {code}",
+  "EMAIL_OTP_EXPIRY_TEXT": "Lưu ý: Mã OTP này có hiệu lực trong vòng {minutes} phút. Tuyệt đối không chia sẻ mã này cho bất kỳ ai.",
+  "EMAIL_OTP_IGNORE_TEXT": "Nếu bạn không yêu cầu hành động này, vui lòng bỏ qua email này.",
+  "EMAIL_OTP_SIGN_OFF": "Trân trọng,\nĐội ngũ LemonChat",
+  "EMAIL_OTP_EXPIRY_HTML": "⏳ Mã này sẽ hết hạn sau <strong>{minutes} phút</strong>",
+  "EMAIL_OTP_WARNING_HTML": "<strong>Bảo mật:</strong> Tuyệt đối không chia sẻ mã này cho bất kỳ ai, kể cả nhân viên LemonChat. Nếu bạn không thực hiện yêu cầu này, vui lòng bỏ qua email."
 }

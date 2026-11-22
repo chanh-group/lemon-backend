@@ -115,7 +115,7 @@ export class AuthController {
     ) {
       throw new BusinessError("TOO_MANY_REQUESTS");
     }
-    await this.authService.requestOtp(body);
+    await this.authService.requestOtp(body, lang);
     return messageOnly(t("OTP_SENT", lang));
   }
 
@@ -234,7 +234,7 @@ export class AuthController {
     ) {
       throw new BusinessError("TOO_MANY_REQUESTS");
     }
-    await this.authService.forgotPasswordOtp(body);
+    await this.authService.forgotPasswordOtp(body, lang);
     return messageOnly(t("OTP_SENT", lang));
   }
 

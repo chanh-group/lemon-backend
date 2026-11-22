@@ -71,7 +71,7 @@ export class MailService implements OnModuleDestroy {
       return;
     }
 
-    const { subject, text, html } = renderOtpEmail(options.code, options.purpose);
+    const { subject, text, html } = renderOtpEmail(options.code, options.purpose, options.lang);
 
     const job: MailJob = {
       to: options.to,

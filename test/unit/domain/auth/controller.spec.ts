@@ -93,8 +93,15 @@ describe("AuthController", () => {
       authService.requestOtp.mockResolvedValueOnce(undefined);
       const res = await controller.requestOtp({ email: "lemon@example.com" }, "vi");
 
-      expect(authService.requestOtp).toHaveBeenCalledWith({ email: "lemon@example.com" });
+      expect(authService.requestOtp).toHaveBeenCalledWith({ email: "lemon@example.com" }, "vi");
       expect(res).toEqual({ success: true, message: "Đã gửi mã OTP" });
+    });
+
+    it("forwards the resolved language to the mail layer", async () => {
+      authService.requestOtp.mockResolvedValueOnce(undefined);
+      await controller.requestOtp({ email: "lemon@example.com" }, "en");
+
+      expect(authService.requestOtp).toHaveBeenCalledWith({ email: "lemon@example.com" }, "en");
     });
   });
 
@@ -261,7 +268,10 @@ describe("AuthController", () => {
   describe("forgot-password", () => {
     it("forgotPasswordOtp calls authService and returns the vi message", async () => {
       const res = await controller.forgotPasswordOtp({ email: "lemon@example.com" }, "vi");
-      expect(authService.forgotPasswordOtp).toHaveBeenCalledWith({ email: "lemon@example.com" });
+      expect(authService.forgotPasswordOtp).toHaveBeenCalledWith(
+        { email: "lemon@example.com" },
+        "vi",
+      );
       expect(res).toEqual({
         success: true,
         message: "Đã gửi mã OTP",

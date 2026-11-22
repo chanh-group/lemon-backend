@@ -1,4 +1,5 @@
 import { OTP_EXPIRATION } from "../cache/constants.js";
+import { t } from "../i18n/index.js";
 import type { OtpPurpose } from "./types.js";
 
 // Validity copy renders the minutes from the OTP TTL (120s → "2 phút").
@@ -7,43 +8,44 @@ const OTP_EXPIRATION_MINUTES = OTP_EXPIRATION / 60;
 export function renderOtpEmail(
   code: string,
   purpose: OtpPurpose,
+  lang: string,
 ): { subject: string; text: string; html: string } {
   const isSignup = purpose === "signup";
-  const actionTitle = isSignup ? "Xác thực đăng ký tài khoản" : "Đặt lại mật khẩu";
-  const subject = `[LemonChat] ${actionTitle} - Mã OTP: ${code}`;
+  const title = t(isSignup ? "EMAIL_OTP_TITLE_SIGNUP" : "EMAIL_OTP_TITLE_RESET", lang);
+  const lead = t(isSignup ? "EMAIL_OTP_LEAD_SIGNUP" : "EMAIL_OTP_LEAD_RESET", lang);
+  const minutes = String(OTP_EXPIRATION_MINUTES);
 
-  const messageLead = isSignup
-    ? "Cảm ơn bạn đã đăng ký tài khoản tại LemonChat! Vui lòng sử dụng mã OTP dưới đây để hoàn tất quá trình xác thực email:"
-    : "Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản LemonChat của bạn. Vui lòng sử dụng mã OTP dưới đây:";
+  const subject = t("EMAIL_OTP_SUBJECT", lang, { title, code });
 
-  const text = `
-LemonChat - ${actionTitle}
-
-${messageLead}
-
-Mã xác thực OTP của bạn là: ${code}
-
-Lưu ý: Mã OTP này có hiệu lực trong vòng ${OTP_EXPIRATION_MINUTES} phút. Tuyệt đối không chia sẻ mã này cho bất kỳ ai.
-Nếu bạn không yêu cầu hành động này, vui lòng bỏ qua email này.
-
-Trân trọng,
-Đội ngũ LemonChat
-`.trim();
+  const text = [
+    `LemonChat - ${title}`,
+    "",
+    lead,
+    "",
+    t("EMAIL_OTP_CODE_LINE", lang, { code }),
+    "",
+    t("EMAIL_OTP_EXPIRY_TEXT", lang, { minutes }),
+    t("EMAIL_OTP_IGNORE_TEXT", lang),
+    "",
+    t("EMAIL_OTP_SIGN_OFF", lang),
+  ]
+    .join("\n")
+    .trim();
 
   const html = `
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="${lang}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${actionTitle}</title>
+  <title>${title}</title>
   <style>
     body {
       margin: 0;
       padding: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      background-color: #f4f4f5;
-      color: #18181b;
+      background-color: #f6f8f6;
+      color: #1c1917;
     }
     .container {
       max-width: 520px;
@@ -52,17 +54,17 @@ Trân trọng,
       border-radius: 12px;
       overflow: hidden;
       box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
-      border: 1px solid #e4e4e7;
+      border: 1px solid #d6e8d6;
     }
     .header {
-      background: #fef08a;
+      background: #dcfce7;
       padding: 24px;
       text-align: center;
-      border-bottom: 2px solid #eab308;
+      border-bottom: 2px solid #00c853;
     }
     .header h1 {
       margin: 0;
-      color: #713f12;
+      color: #1b5e20;
       font-size: 24px;
       font-weight: 700;
       letter-spacing: -0.5px;
@@ -75,17 +77,17 @@ Trân trọng,
       font-weight: 600;
       margin-top: 0;
       margin-bottom: 12px;
-      color: #27272a;
+      color: #1c1917;
     }
     .description {
       font-size: 14px;
       line-height: 1.6;
-      color: #52525b;
+      color: #57534e;
       margin-bottom: 24px;
     }
     .otp-box {
-      background: #fefce8;
-      border: 2px dashed #eab308;
+      background: #f0fdf4;
+      border: 2px dashed #00e676;
       border-radius: 8px;
       padding: 16px;
       text-align: center;
@@ -95,13 +97,13 @@ Trân trọng,
       font-size: 32px;
       font-weight: 800;
       letter-spacing: 6px;
-      color: #854d0e;
+      color: #1b5e20;
       font-family: "Courier New", Courier, monospace;
       margin: 0;
     }
     .otp-expiry {
       font-size: 12px;
-      color: #a16207;
+      color: #15803d;
       margin-top: 8px;
       margin-bottom: 0;
     }
@@ -131,14 +133,14 @@ Trân trọng,
       <h1>🍋 LemonChat</h1>
     </div>
     <div class="content">
-      <h2 class="title">${actionTitle}</h2>
-      <p class="description">${messageLead}</p>
+      <h2 class="title">${title}</h2>
+      <p class="description">${lead}</p>
       <div class="otp-box">
         <p class="otp-code">${code}</p>
-        <p class="otp-expiry">⏳ Mã này sẽ hết hạn sau <strong>${OTP_EXPIRATION_MINUTES} phút</strong></p>
+        <p class="otp-expiry">${t("EMAIL_OTP_EXPIRY_HTML", lang, { minutes })}</p>
       </div>
       <div class="warning">
-        <strong>Bảo mật:</strong> Tuyệt đối không chia sẻ mã này cho bất kỳ ai, kể cả nhân viên LemonChat. Nếu bạn không thực hiện yêu cầu này, vui lòng bỏ qua email.
+        ${t("EMAIL_OTP_WARNING_HTML", lang)}
       </div>
     </div>
     <div class="footer">

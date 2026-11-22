@@ -150,14 +150,16 @@ describe("AuthService", () => {
     it("returns success without issuing an OTP when email already exists", async () => {
       mockUserRepo.findByEmail.mockResolvedValueOnce(mockUser);
 
-      await expect(authService.requestOtp({ email: "lemon@example.com" })).resolves.toBeUndefined();
+      await expect(
+        authService.requestOtp({ email: "lemon@example.com" }, "vi"),
+      ).resolves.toBeUndefined();
       expect(mockMailService.sendOtp).not.toHaveBeenCalled();
     });
 
     it("stores OTP in cache and enqueues mail when email does not exist", async () => {
       mockUserRepo.findByEmail.mockResolvedValueOnce(null);
 
-      await authService.requestOtp({ email: "newuser@example.com" });
+      await authService.requestOtp({ email: "newuser@example.com" }, "vi");
 
       const raw = await cacheStore.getRaw(`${OTP_KEY_PREFIX}newuser@example.com`);
       expect(raw).toBeDefined();
@@ -167,6 +169,7 @@ describe("AuthService", () => {
         expect.objectContaining({
           to: "newuser@example.com",
           purpose: "signup",
+          lang: "vi",
         }),
       );
     });
@@ -175,7 +178,7 @@ describe("AuthService", () => {
       mockUserRepo.findByEmail.mockResolvedValueOnce(null);
       vi.spyOn(cacheStore, "setRaw").mockRejectedValueOnce(new CacheError("SET"));
 
-      await expectSystemUnavailable(authService.requestOtp({ email: "newuser@example.com" }));
+      await expectSystemUnavailable(authService.requestOtp({ email: "newuser@example.com" }, "vi"));
     });
   });
 
@@ -520,7 +523,7 @@ describe("AuthService", () => {
       mockUserRepo.findByEmail.mockResolvedValueOnce(null);
 
       await expect(
-        authService.forgotPasswordOtp({ email: "unknown@example.com" }),
+        authService.forgotPasswordOtp({ email: "unknown@example.com" }, "vi"),
       ).resolves.toBeUndefined();
 
       expect(mockMailService.sendOtp).not.toHaveBeenCalled();
@@ -529,12 +532,13 @@ describe("AuthService", () => {
     it("sends OTP when email exists", async () => {
       mockUserRepo.findByEmail.mockResolvedValueOnce(mockUser);
 
-      await authService.forgotPasswordOtp({ email: mockUser.email });
+      await authService.forgotPasswordOtp({ email: mockUser.email }, "vi");
 
       expect(mockMailService.sendOtp).toHaveBeenCalledWith(
         expect.objectContaining({
           to: mockUser.email,
           purpose: "reset",
+          lang: "vi",
         }),
       );
     });

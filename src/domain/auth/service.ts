@@ -50,7 +50,7 @@ export class AuthService {
     private readonly sessions: AuthSessionRepository,
   ) {}
 
-  async requestOtp(input: RequestOtpDto): Promise<void> {
+  async requestOtp(input: RequestOtpDto, lang: string): Promise<void> {
     const existingUser = await this.userRepo.findByEmail(input.email);
     if (existingUser) {
       this.logger.log("Registration OTP skipped for existing account", {
@@ -76,6 +76,7 @@ export class AuthService {
       to: input.email,
       code,
       purpose: "signup",
+      lang,
     });
 
     this.logger.log("Registration OTP requested", {
@@ -363,7 +364,7 @@ export class AuthService {
     }
   }
 
-  async forgotPasswordOtp(input: ForgotPasswordOtpDto): Promise<void> {
+  async forgotPasswordOtp(input: ForgotPasswordOtpDto, lang: string): Promise<void> {
     const user = await this.userRepo.findByEmail(input.email);
     if (!user) {
       this.logger.log("Forgot password OTP requested for non-existent email (anti-enumeration)", {
@@ -389,6 +390,7 @@ export class AuthService {
       to: input.email,
       code,
       purpose: "reset",
+      lang,
     });
 
     this.logger.log("Forgot password OTP sent", {

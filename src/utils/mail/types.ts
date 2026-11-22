@@ -4,6 +4,7 @@ export interface SendOtpMailOptions {
   to: string;
   code: string;
   purpose: OtpPurpose;
+  lang: string;
 }
 
 export interface MailJob {

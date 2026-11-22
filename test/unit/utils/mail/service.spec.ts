@@ -51,6 +51,7 @@ describe("MailService", () => {
       to: "test@example.com",
       code: "123456",
       purpose: "signup",
+      lang: "vi",
     });
 
     await service.onModuleDestroy();
@@ -75,6 +76,7 @@ describe("MailService", () => {
       to: "recipient@example.com",
       code: "999888",
       purpose: "signup",
+      lang: "vi",
     });
 
     await service.onModuleDestroy();
@@ -104,7 +106,12 @@ describe("MailService", () => {
     const warn = vi.spyOn(Logger.prototype, "warn");
 
     const service = new MailService();
-    await service.sendOtp({ to: "retry@example.com", code: "112233", purpose: "reset" });
+    await service.sendOtp({
+      to: "retry@example.com",
+      code: "112233",
+      purpose: "reset",
+      lang: "vi",
+    });
     await vi.advanceTimersByTimeAsync(0);
 
     expect(mockSendMail).toHaveBeenCalledTimes(1);
@@ -177,7 +184,12 @@ describe("MailService", () => {
     const warn = vi.spyOn(Logger.prototype, "warn");
 
     const service = new MailService();
-    await service.sendOtp({ to: "retry@example.com", code: "112233", purpose: "reset" });
+    await service.sendOtp({
+      to: "retry@example.com",
+      code: "112233",
+      purpose: "reset",
+      lang: "vi",
+    });
 
     for (const backoff of MAIL_RETRY_BACKOFFS_MS) {
       await vi.advanceTimersByTimeAsync(0);
@@ -220,16 +232,31 @@ describe("MailService", () => {
 
     const service = new MailService();
     for (let i = 0; i < MAIL_QUEUE_CONCURRENCY; i++) {
-      await service.sendOtp({ to: "first@example.com", code: "111111", purpose: "signup" });
+      await service.sendOtp({
+        to: "first@example.com",
+        code: "111111",
+        purpose: "signup",
+        lang: "vi",
+      });
     }
     await vi.waitFor(() => expect(mockSendMail).toHaveBeenCalledTimes(MAIL_QUEUE_CONCURRENCY));
 
     for (let i = 0; i < MAIL_QUEUE_MAX_SIZE; i++) {
-      await service.sendOtp({ to: "queued@example.com", code: "222222", purpose: "signup" });
+      await service.sendOtp({
+        to: "queued@example.com",
+        code: "222222",
+        purpose: "signup",
+        lang: "vi",
+      });
     }
     expect(service.getQueueSize()).toBe(MAIL_QUEUE_MAX_SIZE);
 
-    await service.sendOtp({ to: "dropped@example.com", code: "333333", purpose: "signup" });
+    await service.sendOtp({
+      to: "dropped@example.com",
+      code: "333333",
+      purpose: "signup",
+      lang: "vi",
+    });
     await service.sendRaw({ to: "dropped@example.com", subject: "raw", text: "raw", html: "raw" });
     expect(warn).toHaveBeenCalledWith("Mail queue is full, dropping email", {
       action: "mail.queue_full",
