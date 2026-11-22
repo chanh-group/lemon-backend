@@ -4,6 +4,7 @@ import { createAdapter } from "@socket.io/redis-adapter";
 import { Redis } from "ioredis";
 import type { Server, ServerOptions } from "socket.io";
 import { get_env } from "../helpers/index.js";
+import { DEFAULT_FRONTEND_URL, DEFAULT_LOCALHOST_ORIGINS } from "./constants.js";
 import {
   DEFAULT_REDIS_URL,
   REDIS_RECONNECT_DELAY_BASE_MS,
@@ -11,6 +12,10 @@ import {
 } from "../utils/cache/constants.js";
 
 const logger = new Logger("RedisIoAdapter");
+
+// Deliberately NOT REDIS_MAX_RETRIES_PER_REQUEST (=2): the pub/sub clients
+// keep retrying a bit longer before a command gives up during failover.
+const SOCKET_ADAPTER_MAX_RETRIES = 3;
 
 export class RedisIoAdapter extends IoAdapter {
   private adapterConstructor: ReturnType<typeof createAdapter> | null = null;
@@ -24,7 +29,7 @@ export class RedisIoAdapter extends IoAdapter {
     let subClient: Redis | null = null;
     try {
       pubClient = new Redis(redisUrl, {
-        maxRetriesPerRequest: 3,
+        maxRetriesPerRequest: SOCKET_ADAPTER_MAX_RETRIES,
         retryStrategy: (times: number) =>
           Math.min(times * REDIS_RECONNECT_DELAY_BASE_MS, REDIS_RECONNECT_DELAY_MAX_MS),
       });
@@ -65,10 +70,10 @@ export class RedisIoAdapter extends IoAdapter {
   }
 
   override createIOServer(port: number, options?: ServerOptions): Server {
-    const frontendUrl = get_env("FRONTEND_URL", "http://localhost:5173");
+    const frontendUrl = get_env("FRONTEND_URL", DEFAULT_FRONTEND_URL);
     const allowedOrigins = frontendUrl.includes(",")
       ? frontendUrl.split(",").map((s) => s.trim())
-      : [frontendUrl, "http://localhost:5173", "http://localhost:3000"];
+      : [frontendUrl, ...DEFAULT_LOCALHOST_ORIGINS];
 
     const server = super.createIOServer(port, {
       ...options,

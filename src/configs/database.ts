@@ -6,6 +6,8 @@ import * as schema from "./schema.js";
 
 export type DrizzleDb = NodePgDatabase<typeof schema>;
 
+export const DEFAULT_DATABASE_URL = "postgres://postgres:postgres@localhost:5432/lemon_chat";
+
 @Global()
 @Module({
   imports: [
@@ -13,10 +15,7 @@ export type DrizzleDb = NodePgDatabase<typeof schema>;
       useFactory: () => ({
         drizzle,
         connection: {
-          connectionString: get_env(
-            "DATABASE_URL",
-            "postgres://postgres:postgres@localhost:5432/lemon_chat",
-          ),
+          connectionString: get_env("DATABASE_URL", DEFAULT_DATABASE_URL),
         },
         schema,
         logger: false,

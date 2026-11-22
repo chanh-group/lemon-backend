@@ -3,6 +3,7 @@ import cookieParser from "cookie-parser";
 import compression from "compression";
 import { AppModule } from "./app.js";
 import { RedisIoAdapter } from "./configs/socket-adapter.js";
+import { DEFAULT_FRONTEND_URL, DEFAULT_LOCALHOST_ORIGINS } from "./configs/constants.js";
 import { get_env } from "./helpers/index.js";
 import { ErrorFilter } from "./middleware/error-filter.js";
 import { createAppLogger } from "./utils/logger.js";
@@ -25,10 +26,10 @@ async function bootstrap() {
   app.useGlobalFilters(new ErrorFilter());
 
   // CORS configuration
-  const frontendUrl = get_env("FRONTEND_URL", "http://localhost:5173");
+  const frontendUrl = get_env("FRONTEND_URL", DEFAULT_FRONTEND_URL);
   const allowedOrigins = frontendUrl.includes(",")
     ? frontendUrl.split(",").map((s) => s.trim())
-    : [frontendUrl, "http://localhost:5173", "http://localhost:3000"];
+    : [frontendUrl, ...DEFAULT_LOCALHOST_ORIGINS];
 
   app.enableCors({
     origin: allowedOrigins,

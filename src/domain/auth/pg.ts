@@ -2,7 +2,7 @@ import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from "@ne
 import { InjectDrizzle } from "@nestjs/drizzle";
 import { and, eq, exists, gt, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { Client } from "pg";
-import type { DrizzleDb } from "../../configs/database.js";
+import { DEFAULT_DATABASE_URL, type DrizzleDb } from "../../configs/database.js";
 import { get_env } from "../../helpers/index.js";
 import {
   AUTH_LISTENER_CONNECT_TIMEOUT_MS,
@@ -153,10 +153,7 @@ export class AuthRevocationListener implements OnModuleInit, OnModuleDestroy {
   private async connect(): Promise<void> {
     if (this.stopped || this.client) return;
     const client = new Client({
-      connectionString: get_env(
-        "DATABASE_URL",
-        "postgres://postgres:postgres@localhost:5432/lemon_chat",
-      ),
+      connectionString: get_env("DATABASE_URL", DEFAULT_DATABASE_URL),
       connectionTimeoutMillis: AUTH_LISTENER_CONNECT_TIMEOUT_MS,
       keepAlive: true,
     });

@@ -4,11 +4,14 @@
 // fail-closed no-op instead.
 import { Global, Logger, Module } from "@nestjs/common";
 import { S3_PRESIGN_TTL_SECS, STORY_DEFAULT_BUCKET } from "../utils/cache/constants.js";
+import { DEFAULT_API_PUBLIC_URL } from "../utils/storage/constants.js";
 import type { S3StorageService } from "../utils/storage/s3.js";
 import { STORAGE_SERVICE } from "../utils/storage/store.js";
 import { UnavailableStorageService } from "../utils/storage/unavailable.js";
 
 const logger = new Logger("Storage");
+
+const DEFAULT_S3_REGION = "us-east-1";
 
 type StorageEnv = Record<string, string | undefined>;
 
@@ -58,7 +61,7 @@ export function resolveStorageConfig(env: StorageEnv): StorageConfig {
 
   const apiPublicUrl = isProduction
     ? required(env, "API_PUBLIC_URL")
-    : (env.API_PUBLIC_URL ?? "http://localhost:3000");
+    : (env.API_PUBLIC_URL ?? DEFAULT_API_PUBLIC_URL);
   const parsedApiPublicUrl = new URL(apiPublicUrl);
   if (
     !/^https?:$/.test(parsedApiPublicUrl.protocol) ||
@@ -73,7 +76,7 @@ export function resolveStorageConfig(env: StorageEnv): StorageConfig {
   return {
     mode: "s3",
     bucket,
-    region: env.S3_REGION ?? "us-east-1",
+    region: env.S3_REGION ?? DEFAULT_S3_REGION,
     endpoint: env.S3_ENDPOINT || undefined,
     forcePathStyle: env.S3_FORCE_PATH_STYLE === "true",
     accessKeyId,

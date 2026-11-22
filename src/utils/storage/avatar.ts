@@ -1,4 +1,5 @@
 import { get_env } from "../../helpers/index.js";
+import { DEFAULT_API_PUBLIC_URL } from "./constants.js";
 import { StorageError } from "./error.js";
 
 const AVATAR_FILE_NAME =
@@ -11,7 +12,7 @@ export function isAvatarFileName(value: string): boolean {
 function publicApiOrigin(): string | null {
   const isProduction =
     get_env("APP_ENV", "") === "production" || get_env("NODE_ENV", "") === "production";
-  const value = get_env("API_PUBLIC_URL", isProduction ? "" : "http://localhost:3000");
+  const value = get_env("API_PUBLIC_URL", isProduction ? "" : DEFAULT_API_PUBLIC_URL);
   if (!value) return null;
   try {
     const url = new URL(value);
