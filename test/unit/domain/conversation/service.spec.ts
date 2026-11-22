@@ -466,7 +466,7 @@ describe("ConversationService", () => {
         unreadCountKey(userA, convId),
         JSON.stringify({ revision: "1", lastRead: null, count: 3 }),
         "EX",
-        604800,
+        86400,
       );
     });
 
@@ -585,7 +585,7 @@ describe("ConversationService", () => {
         unreadCountKey(userA, convId),
         JSON.stringify({ revision: "2", lastRead: null, count: 4 }),
         "EX",
-        604800,
+        86400,
       );
       releaseRebuild(new Map([[convId, 3]]));
       expect((await first).items[0].unreadCount).toBe(3);
@@ -652,7 +652,7 @@ describe("ConversationService", () => {
         unreadCountKey(userA, convId),
         JSON.stringify({ revision: "2", lastRead: null, count: 4 }),
         "EX",
-        604800,
+        86400,
       );
     });
 
@@ -711,7 +711,7 @@ describe("ConversationService", () => {
         unreadCountKey(userA, convId),
         JSON.stringify({ revision: "1", lastRead: null, count: 4 }),
         "EX",
-        604800,
+        86400,
       );
     });
 

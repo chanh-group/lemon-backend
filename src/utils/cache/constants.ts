@@ -121,8 +121,11 @@ export const PURGE_LOCK_TTL_SECS = 300;
 export const PURGE_CRON_EXPRESSION = "*/5 * * * *";
 export const PURGE_BATCH_LIMIT = 500;
 
-// Unread counters: rebuilt from the DB on cache miss, cached for 7 days.
-export const UNREAD_TTL_SECONDS = 604_800;
+// Unread counters: rebuilt from the DB on cache miss. The TTL is pure garbage
+// collection (keys are fanned out per user x conversation pair), not freshness —
+// correctness comes from the unreadRevision/lastRead guard in parseUnreadCount,
+// so a shorter window only costs batched DB rebuilds for dormant conversations.
+export const UNREAD_TTL_SECONDS = 86_400;
 export const FEED_FILL_LEASE_SECS = 30;
 // Feed fill stampede guard: when another node holds the fill lease, poll for
 // its published value (FEED_FILL_POLL_ATTEMPTS reads spaced
