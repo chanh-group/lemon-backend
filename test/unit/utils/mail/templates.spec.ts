@@ -17,6 +17,8 @@ describe("Mail Templates - renderOtpEmail", () => {
     expect(html).toContain("LemonChat");
     expect(html).toContain("2 phút");
     expect(html).toContain('<html lang="vi">');
+    expect(html).toContain('/logo.png" alt="LemonChat"');
+    expect(html).not.toContain("🍋");
   });
 
   it("renders reset password OTP email in Vietnamese", () => {
