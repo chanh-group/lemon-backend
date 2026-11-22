@@ -7,6 +7,7 @@ import type { DrizzleDb } from "../../configs/database.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { isUniqueViolation } from "../../utils/errors/pg.js";
 import { messageHiddenForUsers, messages } from "../message/schema.js";
+import { MESSAGE_PREVIEW_LENGTH } from "../message/constants.js";
 import { users } from "../user/schema.js";
 import type {
   ConversationRepository,
@@ -16,7 +17,11 @@ import type {
 } from "./repository.js";
 import { avatarCleanupJobs, conversationParticipants, conversations } from "./schema.js";
 import { canonicalPair, toCursorPage } from "../shared.js";
-import { GROUP_MAX_MEMBERS } from "./constants.js";
+import {
+  AVATAR_CLEANUP_ERROR_MAX_LENGTH,
+  AVATAR_CLEANUP_MAX_ATTEMPTS,
+  GROUP_MAX_MEMBERS,
+} from "./constants.js";
 import { groupAvatarObjectKeyFromUrl } from "../../utils/storage/avatar.js";
 
 const partnerParticipants = alias(conversationParticipants, "partner_participants");
@@ -42,7 +47,7 @@ function visiblePreview(userId: string) {
     SELECT CASE
       WHEN m.deleted_at IS NOT NULL THEN '[message-revoked]'
       WHEN m.kind = 'STORY_REACTION' THEN '[story-reaction]'
-      WHEN m.body IS NOT NULL AND m.body <> '' THEN left(m.body, 80)
+      WHEN m.body IS NOT NULL AND m.body <> '' THEN left(m.body, ${MESSAGE_PREVIEW_LENGTH})
       ELSE '[attachment]'
     END FROM messages m
     WHERE m.conversation_id = ${conversations.id}
@@ -1448,7 +1453,12 @@ export class ConversationPgRepository implements ConversationRepository {
         attempts: avatarCleanupJobs.attempts,
       })
       .from(avatarCleanupJobs)
-      .where(and(eq(avatarCleanupJobs.status, "PENDING"), lt(avatarCleanupJobs.attempts, 5)))
+      .where(
+        and(
+          eq(avatarCleanupJobs.status, "PENDING"),
+          lt(avatarCleanupJobs.attempts, AVATAR_CLEANUP_MAX_ATTEMPTS),
+        ),
+      )
       .limit(limit);
   }
 
@@ -1464,8 +1474,8 @@ export class ConversationPgRepository implements ConversationRepository {
       .update(avatarCleanupJobs)
       .set({
         attempts: nextAttempts,
-        status: nextAttempts >= 5 ? "FAILED" : "PENDING",
-        lastError: error.slice(0, 500),
+        status: nextAttempts >= AVATAR_CLEANUP_MAX_ATTEMPTS ? "FAILED" : "PENDING",
+        lastError: error.slice(0, AVATAR_CLEANUP_ERROR_MAX_LENGTH),
         updatedAt: sql`now()`,
       })
       .where(eq(avatarCleanupJobs.id, id));
