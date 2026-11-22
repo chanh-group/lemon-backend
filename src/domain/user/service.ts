@@ -14,12 +14,21 @@ import type { User } from "./schema.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import { mapUniqueViolation } from "../../utils/errors/pg.js";
 import { parseSchemaIssues } from "../../utils/validation.js";
-import { USER_AVATAR_ALLOWED_MIME, USER_AVATAR_MAX_BYTES } from "../../utils/cache/constants.js";
+import {
+  USER_AVATAR_ALLOWED_MIME,
+  USER_AVATAR_MAX_BYTES,
+  USER_AVATAR_MAX_MB,
+} from "../../utils/cache/constants.js";
 import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.js";
 import { avatarObjectKeyFromUrl } from "../../utils/storage/avatar.js";
 
+// MIME alternation is built from USER_AVATAR_ALLOWED_MIME — single source of truth.
+const AVATAR_DATA_URL_REGEX = new RegExp(
+  `^data:(${USER_AVATAR_ALLOWED_MIME.map((m) => m.replace(/[^\w/]/g, "\\$&")).join("|")});base64,([A-Za-z0-9+/]+={0,2})$`,
+);
+
 function validateDataAvatar(dataUrl: string): void {
-  const match = /^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/.exec(dataUrl);
+  const match = AVATAR_DATA_URL_REGEX.exec(dataUrl);
   const payload = match?.[2];
   if (!match || !payload || Buffer.from(payload, "base64").toString("base64") !== payload) {
     throw new BusinessError("FILE_TYPE_NOT_ALLOWED");
@@ -27,7 +36,7 @@ function validateDataAvatar(dataUrl: string): void {
   const sizeBytes = Buffer.byteLength(payload, "base64");
   if (sizeBytes === 0) throw new BusinessError("BAD_REQUEST");
   if (sizeBytes > USER_AVATAR_MAX_BYTES) {
-    throw new BusinessError("FILE_TOO_LARGE", { maxMb: "5" });
+    throw new BusinessError("FILE_TOO_LARGE", { maxMb: String(USER_AVATAR_MAX_MB) });
   }
 }
 
@@ -131,7 +140,7 @@ export class UserService {
           const object = await this.storage.headObject(objectKey);
           if (!object) throw new BusinessError("OBJECT_NOT_UPLOADED");
           if (object.contentLength > USER_AVATAR_MAX_BYTES) {
-            throw new BusinessError("FILE_TOO_LARGE", { maxMb: "5" });
+            throw new BusinessError("FILE_TOO_LARGE", { maxMb: String(USER_AVATAR_MAX_MB) });
           }
           if (
             object.contentLength < 1 ||

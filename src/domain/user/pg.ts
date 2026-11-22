@@ -8,6 +8,11 @@ import { users } from "./schema.js";
 import { toCursorPage } from "../shared.js";
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "../pagination.constants.js";
 import { AUTH_REVOCATION_CHANNEL } from "../auth/constants.js";
+import {
+  USER_SEARCH_RANK_FALLBACK,
+  USER_SEARCH_RANK_FULL_NAME_PREFIX,
+  USER_SEARCH_RANK_MAX,
+} from "./constants.js";
 
 function encodeSearchCursor(rank: number, id: string): string {
   return Buffer.from(`${rank}:${id}`).toString("base64url");
@@ -17,7 +22,9 @@ function decodeSearchCursor(cursor: string): { rank: number; id: string } | null
   try {
     const [rank, id] = Buffer.from(cursor, "base64url").toString("utf8").split(":");
     const value = Number(rank);
-    return Number.isInteger(value) && value >= 0 && value <= 3 && id ? { rank: value, id } : null;
+    return Number.isInteger(value) && value >= 0 && value <= USER_SEARCH_RANK_MAX && id
+      ? { rank: value, id }
+      : null;
   } catch {
     return null;
   }
@@ -26,8 +33,8 @@ function decodeSearchCursor(cursor: string): { rank: number; id: string } | null
 function searchRank(user: Pick<User, "username" | "fullName">, query: string): number {
   if (user.username === query) return 0;
   if (user.username.startsWith(query)) return 1;
-  if (user.fullName.toLowerCase().startsWith(query)) return 2;
-  return 3;
+  if (user.fullName.toLowerCase().startsWith(query)) return USER_SEARCH_RANK_FULL_NAME_PREFIX;
+  return USER_SEARCH_RANK_FALLBACK;
 }
 
 @Injectable()
@@ -88,8 +95,8 @@ export class UserPgRepository implements UserRepository {
     const usernameRank = sql<number>`CASE
       WHEN ${users.username} = ${clean} THEN 0
       WHEN ${users.username} ILIKE ${prefix} THEN 1
-      WHEN ${users.fullName} ILIKE ${prefix} THEN 2
-      ELSE 3
+      WHEN ${users.fullName} ILIKE ${prefix} THEN ${USER_SEARCH_RANK_FULL_NAME_PREFIX}
+      ELSE ${USER_SEARCH_RANK_FALLBACK}
     END`;
     const searchFilter =
       field === "email"
