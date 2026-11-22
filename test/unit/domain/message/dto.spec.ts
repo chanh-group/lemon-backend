@@ -114,6 +114,23 @@ describe("Message DTOs", () => {
       ).toEqual(["VALIDATION_BODY_MAX|max=4000"]);
     });
 
+    it("accepts exactly 4000 Unicode code points and rejects 4001", () => {
+      expect(
+        sendMessageSchema.safeParse({
+          body: "😀".repeat(4000),
+          kind: "TEXT",
+          clientMsgId: validClientMsgId,
+        }).success,
+      ).toBe(true);
+      expect(
+        messagesFor(
+          sendMessageSchema,
+          { body: "😀".repeat(4001), kind: "TEXT", clientMsgId: validClientMsgId },
+          "body",
+        ),
+      ).toEqual(["VALIDATION_BODY_MAX|max=4000"]);
+    });
+
     it("requires attachments for media messages and rejects SYSTEM", () => {
       const result = sendMessageSchema.safeParse({
         kind: "IMAGE",
@@ -175,6 +192,13 @@ describe("Message DTOs", () => {
 
     it("rejects body longer than 4000 characters with the encoded VALIDATION_BODY_MAX key", () => {
       expect(messagesFor(editMessageSchema, { body: "x".repeat(4001) }, "body")).toEqual([
+        "VALIDATION_BODY_MAX|max=4000",
+      ]);
+    });
+
+    it("uses the same Unicode code-point limit as send", () => {
+      expect(editMessageSchema.safeParse({ body: "😀".repeat(4000) }).success).toBe(true);
+      expect(messagesFor(editMessageSchema, { body: "😀".repeat(4001) }, "body")).toEqual([
         "VALIDATION_BODY_MAX|max=4000",
       ]);
     });

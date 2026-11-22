@@ -129,4 +129,9 @@ describe("replyStorySchema", () => {
     const result = replyStorySchema.safeParse({ body: "x".repeat(4001) });
     expect(result.success).toBe(false);
   });
+
+  it("uses the message Unicode code-point limit", () => {
+    expect(replyStorySchema.safeParse({ body: "😀".repeat(4000) }).success).toBe(true);
+    expect(replyStorySchema.safeParse({ body: "😀".repeat(4001) }).success).toBe(false);
+  });
 });

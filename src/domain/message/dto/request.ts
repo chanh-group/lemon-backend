@@ -8,6 +8,7 @@ import {
   MESSAGE_MIME_TYPE_MAX_LENGTH,
   MESSAGE_OBJECT_KEY_MAX_LENGTH,
 } from "../constants.js";
+import { isMessageBodyWithinLimit } from "../body-length.js";
 
 export const messageAttachmentInputSchema = z.object({
   objectKey: z.string().min(1).max(MESSAGE_OBJECT_KEY_MAX_LENGTH),
@@ -27,11 +28,10 @@ export const sendMessageSchema = z
   .object({
     body: z
       .string()
-      .max(
-        MESSAGE_MAX_BODY_LENGTH,
-        vmsg("VALIDATION_BODY_MAX", { max: String(MESSAGE_MAX_BODY_LENGTH) }),
-      )
-      .optional(),
+      .optional()
+      .refine((value) => value === undefined || isMessageBodyWithinLimit(value), {
+        message: vmsg("VALIDATION_BODY_MAX", { max: String(MESSAGE_MAX_BODY_LENGTH) }),
+      }),
     kind: z.enum(["TEXT", "IMAGE", "VIDEO", "AUDIO", "FILE"]).default("TEXT"),
     clientMsgId: z.string().uuid(vmsg("VALIDATION_UUID_CLIENT_MSG")),
     replyToId: z.string().uuid(vmsg("VALIDATION_UUID_REPLY_TO")).nullish(),
@@ -63,10 +63,9 @@ export const editMessageSchema = z.object({
   body: z
     .string()
     .min(1, vmsg("VALIDATION_MESSAGE_BODY_REQUIRED"))
-    .max(
-      MESSAGE_MAX_BODY_LENGTH,
-      vmsg("VALIDATION_BODY_MAX", { max: String(MESSAGE_MAX_BODY_LENGTH) }),
-    ),
+    .refine(isMessageBodyWithinLimit, {
+      message: vmsg("VALIDATION_BODY_MAX", { max: String(MESSAGE_MAX_BODY_LENGTH) }),
+    }),
 });
 
 export type EditMessageDto = z.infer<typeof editMessageSchema>;
