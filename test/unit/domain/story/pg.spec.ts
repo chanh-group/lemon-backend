@@ -4,7 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { DrizzleDb } from "../../../../src/configs/database.js";
 import { BusinessError } from "../../../../src/utils/errors/business.js";
 import { StoryPgRepository } from "../../../../src/domain/story/pg.js";
-import { STORY_FEED_MAX_PER_AUTHOR } from "../../../../src/domain/story/constants.js";
+import {
+  STORY_FEED_MAX_PER_AUTHOR,
+  STORY_VIEWER_WINDOW_HOURS,
+} from "../../../../src/domain/story/constants.js";
 import { STORY_TTL_MS } from "../../../../src/utils/cache/constants.js";
 import { encodeReactionCursor } from "../../../../src/domain/story/dto/mapper.js";
 import {
@@ -595,7 +598,10 @@ describe("StoryPgRepository.findViewersByStoryId", () => {
     expect(countWhere).not.toContain("SELECT sv.viewed_at FROM story_views sv");
     expect(countWhere).toContain('"story_views"."story_id" = $1');
     expect(countWhere).toContain('"story_views"."anonymous" = $2');
-    expect(countWhere).toContain("now() - interval '24 hours'");
+    expect(countWhere).toContain("now() - $3 * interval '1 hour'");
+    expect(dialect.sqlToQuery(whereMock.mock.calls[1][0]).params).toContain(
+      STORY_VIEWER_WINDOW_HOURS,
+    );
   });
 
   it("reports zero totalViewsCount when nobody has viewed the story yet", async () => {

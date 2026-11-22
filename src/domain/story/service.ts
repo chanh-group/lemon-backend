@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { v7 as uuidv7 } from "uuid";
 import {
+  BYTES_PER_MB,
   STORY_ALLOWED_IMAGE_MIME,
   STORY_ALLOWED_VIDEO_MIME,
   STORY_FEED_TTL_SECS,
@@ -45,8 +46,6 @@ import type {
 import { STORY_REPOSITORY, type StoryRepository } from "./repository.js";
 import type { NewStory, Story } from "./schema.js";
 import type { CursorPage } from "../shared.js";
-
-const BYTES_PER_MB = 1024 * 1024;
 
 const STORY_MEDIA_RULES: Record<
   "IMAGE" | "VIDEO",

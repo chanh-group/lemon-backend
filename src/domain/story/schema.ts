@@ -13,7 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { created, updated, uuidV7 } from "../../utils/database.js";
 import { users } from "../user/schema.js";
-import { STORY_MAX_CAPTION_LENGTH } from "./constants.js";
+import { STORY_EXPIRY_CHECK_HOURS, STORY_MAX_CAPTION_LENGTH } from "./constants.js";
 
 export const storyKindEnum = pgEnum("story_kind", ["IMAGE", "VIDEO", "TEXT"]);
 export type StoryKind = (typeof storyKindEnum.enumValues)[number];
@@ -61,7 +61,7 @@ export const stories = pgTable(
     ),
     check(
       "stories_expiry_chk",
-      sql`${table.expiresAt} > ${table.createdAt} AND ${table.expiresAt} <= ${table.createdAt} + INTERVAL '25 hours'`,
+      sql`${table.expiresAt} > ${table.createdAt} AND ${table.expiresAt} <= ${table.createdAt} + ${sql.raw(`INTERVAL '${STORY_EXPIRY_CHECK_HOURS} hours'`)}`,
     ),
     index("stories_user_idx").on(table.userId, table.createdAt.desc()),
     index("stories_expiry_idx").on(table.expiresAt),

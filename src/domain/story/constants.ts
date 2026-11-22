@@ -31,6 +31,13 @@ export type StoryReactionKind = (typeof STORY_REACTION_KINDS)[number];
 
 /** Viewer names disappear after 24h (Instagram model), aggregate view count remains (WhatsApp model). */
 export const STORY_VIEWER_NAMES_EXPIRY_MS = 24 * 60 * 60 * 1000;
+/** SQL window for viewer identities; derived from STORY_VIEWER_NAMES_EXPIRY_MS. */
+export const STORY_VIEWER_WINDOW_HOURS = STORY_VIEWER_NAMES_EXPIRY_MS / (60 * 60 * 1000);
+/**
+ * `stories_expiry_chk` DDL bound: STORY_VIEWER_WINDOW_HOURS TTL + 1h slack.
+ * DDL check constraints cannot take bind params, hence the raw literal in schema.ts.
+ */
+export const STORY_EXPIRY_CHECK_HOURS = STORY_VIEWER_WINDOW_HOURS + 1;
 
 /**
  * Upper bound of stories kept per author in the feed payload — bounds both the

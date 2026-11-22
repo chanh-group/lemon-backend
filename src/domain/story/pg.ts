@@ -24,6 +24,7 @@ import { users } from "../user/schema.js";
 import {
   STORY_FEED_MAX_PER_AUTHOR,
   STORY_STORAGE_LIMIT_BYTES,
+  STORY_VIEWER_WINDOW_HOURS,
   type StoryReactionKind,
 } from "./constants.js";
 import type {
@@ -292,7 +293,7 @@ export class StoryPgRepository implements StoryRepository {
     const baseConditions = [
       eq(storyViews.storyId, storyId),
       eq(storyViews.anonymous, false),
-      gte(storyViews.viewedAt, sql`now() - interval '24 hours'`),
+      gte(storyViews.viewedAt, sql`now() - ${STORY_VIEWER_WINDOW_HOURS} * interval '1 hour'`),
     ];
 
     const rowConditions = [...baseConditions];
