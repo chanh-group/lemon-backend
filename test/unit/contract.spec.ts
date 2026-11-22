@@ -10,6 +10,7 @@ import {
   USER_SEARCH_MIN_LENGTH,
 } from "../../src/domain/user/constants.js";
 import { STORY_MAX_CAPTION_LENGTH } from "../../src/domain/story/constants.js";
+import { MESSAGE_MAX_BODY_LENGTH } from "../../src/domain/message/constants.js";
 import { USER_AVATAR_MAX_BYTES } from "../../src/utils/cache/constants.js";
 
 describe("Core↔UI contract (issue #59)", () => {
@@ -52,5 +53,9 @@ describe("Core↔UI contract (issue #59)", () => {
 
   it("story captions are capped at 500 characters", () => {
     expect(STORY_MAX_CAPTION_LENGTH).toBe(500);
+  });
+
+  it("message bodies are capped at 4000 code points", () => {
+    expect(MESSAGE_MAX_BODY_LENGTH).toBe(4000);
   });
 });
