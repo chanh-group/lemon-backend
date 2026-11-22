@@ -5,6 +5,12 @@ import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "./pagination.constants.js";
 
 const uuidSchema = z.string().uuid();
 
+export const CURSOR_MIN_LENGTH = 10;
+export const CURSOR_MAX_LENGTH = 128;
+const OPAQUE_CURSOR_REGEX = new RegExp(
+  `^[A-Za-z0-9_-]{${CURSOR_MIN_LENGTH},${CURSOR_MAX_LENGTH}}$`,
+);
+
 export function isUuid(value: string): boolean {
   return uuidSchema.safeParse(value).success;
 }
@@ -48,7 +54,7 @@ export function parseCursorPage(
 ): CursorPageInput {
   if (cursor !== undefined) {
     const validUuid = isUuid(cursor);
-    const isOpaque = options?.allowOpaque && /^[A-Za-z0-9_-]{10,128}$/.test(cursor);
+    const isOpaque = options?.allowOpaque && OPAQUE_CURSOR_REGEX.test(cursor);
     if (!validUuid && !isOpaque) {
       throw new BusinessError("BAD_REQUEST");
     }
