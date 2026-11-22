@@ -503,6 +503,44 @@ describe("Direct Chat 1-1 with Real JWT Auth (E2E)", () => {
     expect(res.body.message).toBe("body: Nội dung tin nhắn tối đa 4000 ký tự");
   });
 
+  it("POST /api/conversations/:id/messages - should use Unicode code points for the body limit", async () => {
+    const accepted = await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/messages`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ body: "😀".repeat(4000), clientMsgId: uuidv7() })
+      .expect(201);
+
+    expect(accepted.body.success).toBe(true);
+    expect(accepted.body.data.body).toBe("😀".repeat(4000));
+
+    const rejected = await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/messages`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .set("Accept-Language", "en")
+      .send({ body: "😀".repeat(4001), clientMsgId: uuidv7() })
+      .expect(422);
+
+    expect(rejected.body.code).toBe("VALIDATION_ERROR");
+    expect(rejected.body.message).toBe("body: Message body must be at most 4000 characters");
+  });
+
+  it("PATCH /api/messages/:id - should reject an edit beyond the Unicode body limit", async () => {
+    const sent = await request(app.getHttpServer())
+      .post(`/api/conversations/${conversationId}/messages`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ body: "Editable message", clientMsgId: uuidv7() })
+      .expect(201);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/messages/${sent.body.data.id}`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({ body: "😀".repeat(4001) })
+      .expect(422);
+
+    expect(res.body.code).toBe("VALIDATION_ERROR");
+    expect(res.body.message).toBe("body: Nội dung tin nhắn tối đa 4000 ký tự");
+  });
+
   it("PATCH /api/messages/:id - should return 400 MESSAGE_REVOKED if message was already revoked", async () => {
     const res = await request(app.getHttpServer())
       .patch(`/api/messages/${messageId}`)

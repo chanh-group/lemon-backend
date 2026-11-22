@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { vmsg } from "../../../utils/validation.js";
 import { MESSAGE_MAX_BODY_LENGTH } from "../../message/constants.js";
+import { isMessageBodyWithinLimit } from "../../message/body-length.js";
 import {
   ALLOWED_STORY_EMOJIS,
   STORY_AUDIENCE_MODES,
@@ -47,10 +48,9 @@ export const replyStorySchema = z.object({
     .string()
     .trim()
     .min(1, vmsg("VALIDATION_MESSAGE_BODY_REQUIRED"))
-    .max(
-      MESSAGE_MAX_BODY_LENGTH,
-      vmsg("VALIDATION_BODY_MAX", { max: String(MESSAGE_MAX_BODY_LENGTH) }),
-    ),
+    .refine(isMessageBodyWithinLimit, {
+      message: vmsg("VALIDATION_BODY_MAX", { max: String(MESSAGE_MAX_BODY_LENGTH) }),
+    }),
 });
 
 export type ReplyStoryDto = z.infer<typeof replyStorySchema>;
