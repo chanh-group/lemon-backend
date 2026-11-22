@@ -1,12 +1,10 @@
 import { OTP_EXPIRATION } from "../cache/constants.js";
-import { get_env } from "../../helpers/index.js";
 import { t } from "../i18n/index.js";
+import { LOGO_SVG } from "./logo.js";
 import type { OtpPurpose } from "./types.js";
 
 // Validity copy renders the minutes from the OTP TTL (120s → "2 phút").
 const OTP_EXPIRATION_MINUTES = OTP_EXPIRATION / 60;
-// Mirrors configs/constants DEFAULT_FRONTEND_URL; utils must not import configs.
-const DEFAULT_FRONTEND_URL = "http://localhost:5173";
 
 export function renderOtpEmail(
   code: string,
@@ -17,7 +15,6 @@ export function renderOtpEmail(
   const title = t(isSignup ? "EMAIL_OTP_TITLE_SIGNUP" : "EMAIL_OTP_TITLE_RESET", lang);
   const lead = t(isSignup ? "EMAIL_OTP_LEAD_SIGNUP" : "EMAIL_OTP_LEAD_RESET", lang);
   const minutes = String(OTP_EXPIRATION_MINUTES);
-  const logoUrl = `${get_env("FRONTEND_URL", DEFAULT_FRONTEND_URL).replace(/\/+$/, "")}/logo.png`;
 
   const subject = t("EMAIL_OTP_SUBJECT", lang, { title, code });
 
@@ -134,7 +131,7 @@ export function renderOtpEmail(
 <body>
   <div class="container">
     <div class="header">
-      <img src="${logoUrl}" alt="LemonChat" width="56" height="56" style="display: block; margin: 0 auto 8px; border: 0;">
+      ${LOGO_SVG}
       <h1>LemonChat</h1>
     </div>
     <div class="content">
