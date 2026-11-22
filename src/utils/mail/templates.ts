@@ -1,4 +1,8 @@
+import { OTP_EXPIRATION } from "../cache/constants.js";
 import type { OtpPurpose } from "./types.js";
+
+// Validity copy renders the minutes from the OTP TTL (120s → "2 phút").
+const OTP_EXPIRATION_MINUTES = OTP_EXPIRATION / 60;
 
 export function renderOtpEmail(
   code: string,
@@ -19,7 +23,7 @@ ${messageLead}
 
 Mã xác thực OTP của bạn là: ${code}
 
-Lưu ý: Mã OTP này có hiệu lực trong vòng 2 phút. Tuyệt đối không chia sẻ mã này cho bất kỳ ai.
+Lưu ý: Mã OTP này có hiệu lực trong vòng ${OTP_EXPIRATION_MINUTES} phút. Tuyệt đối không chia sẻ mã này cho bất kỳ ai.
 Nếu bạn không yêu cầu hành động này, vui lòng bỏ qua email này.
 
 Trân trọng,
@@ -131,7 +135,7 @@ Trân trọng,
       <p class="description">${messageLead}</p>
       <div class="otp-box">
         <p class="otp-code">${code}</p>
-        <p class="otp-expiry">⏳ Mã này sẽ hết hạn sau <strong>2 phút</strong></p>
+        <p class="otp-expiry">⏳ Mã này sẽ hết hạn sau <strong>${OTP_EXPIRATION_MINUTES} phút</strong></p>
       </div>
       <div class="warning">
         <strong>Bảo mật:</strong> Tuyệt đối không chia sẻ mã này cho bất kỳ ai, kể cả nhân viên LemonChat. Nếu bạn không thực hiện yêu cầu này, vui lòng bỏ qua email.
