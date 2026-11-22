@@ -198,20 +198,28 @@ describe("User DTOs & Validation Schemas", () => {
       expect(
         messagesFor(
           changePasswordSchema,
-          { oldPassword: "", newPassword: "123456" },
+          { oldPassword: "", newPassword: "12345678" },
           "oldPassword",
         ),
       ).toEqual(["VALIDATION_OLD_PASSWORD_REQUIRED"]);
     });
 
-    it("rejects short new passwords (< 6 chars) with VALIDATION_NEW_PASSWORD_MIN", () => {
+    it("rejects short new passwords (< 8 chars) with VALIDATION_NEW_PASSWORD_MIN", () => {
       expect(
         messagesFor(
           changePasswordSchema,
-          { oldPassword: "old_password_123", newPassword: "12345" },
+          { oldPassword: "old_password_123", newPassword: "1234567" },
           "newPassword",
         ),
-      ).toEqual(["VALIDATION_NEW_PASSWORD_MIN|min=6"]);
+      ).toEqual(["VALIDATION_NEW_PASSWORD_MIN|min=8"]);
+    });
+
+    it("accepts an 8-character new password at the minimum length", () => {
+      const parsed = changePasswordSchema.parse({
+        oldPassword: "old_password_123",
+        newPassword: "12345678",
+      });
+      expect(parsed.newPassword).toBe("12345678");
     });
   });
 

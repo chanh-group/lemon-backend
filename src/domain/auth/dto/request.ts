@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { vmsg } from "../../../utils/validation.js";
 import { emailSchema, fullNameSchema, usernameSchema } from "../../user/dto/fields.js";
+import { OTP_REGEX, PASSWORD_MIN_LENGTH } from "../constants.js";
 
 export const requestOtpSchema = z.object({
   email: z.string().trim().toLowerCase().email(vmsg("VALIDATION_EMAIL")),
@@ -10,10 +11,7 @@ export type RequestOtpInput = z.input<typeof requestOtpSchema>;
 
 export const verifyOtpSchema = z.object({
   email: z.string().trim().toLowerCase().email(vmsg("VALIDATION_EMAIL")),
-  otp: z
-    .string()
-    .trim()
-    .regex(/^\d{6}$/, vmsg("VALIDATION_OTP_FORMAT")),
+  otp: z.string().trim().regex(OTP_REGEX, vmsg("VALIDATION_OTP_FORMAT")),
   purpose: z.enum(["signup", "reset"]).default("signup"),
 });
 export type VerifyOtpDto = z.infer<typeof verifyOtpSchema>;
@@ -23,11 +21,13 @@ export const signupSchema = z.object({
   email: emailSchema,
   fullName: fullNameSchema,
   username: usernameSchema,
-  password: z.string().min(6, vmsg("VALIDATION_PASSWORD_MIN", { min: "6" })),
-  otp: z
+  password: z
     .string()
-    .trim()
-    .regex(/^\d{6}$/, vmsg("VALIDATION_OTP_FORMAT")),
+    .min(
+      PASSWORD_MIN_LENGTH,
+      vmsg("VALIDATION_PASSWORD_MIN", { min: String(PASSWORD_MIN_LENGTH) }),
+    ),
+  otp: z.string().trim().regex(OTP_REGEX, vmsg("VALIDATION_OTP_FORMAT")),
 });
 export type SignupDto = z.infer<typeof signupSchema>;
 export type SignupInput = z.input<typeof signupSchema>;
@@ -55,18 +55,25 @@ export type ForgotPasswordOtpInput = z.input<typeof forgotPasswordOtpSchema>;
 
 export const forgotPasswordResetSchema = z.object({
   email: z.string().trim().toLowerCase().email(vmsg("VALIDATION_EMAIL")),
-  otp: z
+  otp: z.string().trim().regex(OTP_REGEX, vmsg("VALIDATION_OTP_FORMAT")),
+  newPassword: z
     .string()
-    .trim()
-    .regex(/^\d{6}$/, vmsg("VALIDATION_OTP_FORMAT")),
-  newPassword: z.string().min(6, vmsg("VALIDATION_NEW_PASSWORD_MIN", { min: "6" })),
+    .min(
+      PASSWORD_MIN_LENGTH,
+      vmsg("VALIDATION_NEW_PASSWORD_MIN", { min: String(PASSWORD_MIN_LENGTH) }),
+    ),
 });
 export type ForgotPasswordResetDto = z.infer<typeof forgotPasswordResetSchema>;
 export type ForgotPasswordResetInput = z.input<typeof forgotPasswordResetSchema>;
 
 export const changePasswordSchema = z.object({
   oldPassword: z.string().min(1, vmsg("VALIDATION_OLD_PASSWORD_REQUIRED")),
-  newPassword: z.string().min(6, vmsg("VALIDATION_NEW_PASSWORD_MIN", { min: "6" })),
+  newPassword: z
+    .string()
+    .min(
+      PASSWORD_MIN_LENGTH,
+      vmsg("VALIDATION_NEW_PASSWORD_MIN", { min: String(PASSWORD_MIN_LENGTH) }),
+    ),
 });
 export type ChangePasswordDto = z.infer<typeof changePasswordSchema>;
 export type ChangePasswordInput = z.input<typeof changePasswordSchema>;

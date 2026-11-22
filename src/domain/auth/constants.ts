@@ -1,3 +1,11 @@
+export const OTP_LENGTH = 6;
+// Digit-only OTP with exactly OTP_LENGTH digits — keep in sync with OTP_LENGTH.
+export const OTP_REGEX = /^\d{6}$/;
+export const OTP_VALUE_MIN = 10 ** (OTP_LENGTH - 1); // smallest OTP_LENGTH-digit number
+export const OTP_VALUE_MAX = 10 ** OTP_LENGTH; // exclusive upper bound for randomInt
+export const PASSWORD_MIN_LENGTH = 8;
+export const ARGON2_HASH_LENGTH = 32;
+
 export const ACCESS_TOKEN_EXPIRATION_SECS = 15 * 60; // 15 minutes
 export const REFRESH_TOKEN_EXPIRATION_SECS = 7 * 24 * 60 * 60; // 7 days
 export const DEFAULT_JWT_ISSUER = "lemon-chat";
@@ -13,6 +21,8 @@ export const JWT_CONFIG: unique symbol = Symbol("JWT_CONFIG");
 
 export const REFRESH_COOKIE_NAME = "refreshCookie";
 export const REFRESH_COOKIE_PATH = "/";
+// Access-token cookie read from the socket handshake (set by the frontend).
+export const ACCESS_TOKEN_COOKIE_NAME = "lemon_access_token";
 
 export {
   RATE_LIMIT_CHANGE_PASSWORD_IP_MAX,

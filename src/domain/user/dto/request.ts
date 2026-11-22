@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { vmsg } from "../../../utils/validation.js";
+import { PASSWORD_MIN_LENGTH } from "../../auth/constants.js";
 import { USER_BIO_MAX_LENGTH } from "../constants.js";
 import { emailSchema, fullNameSchema, usernameSchema } from "./fields.js";
 
@@ -48,7 +49,12 @@ export type UpdateUserInput = z.input<typeof updateUserSchema>;
 
 export const changePasswordSchema = z.object({
   oldPassword: z.string().min(1, vmsg("VALIDATION_OLD_PASSWORD_REQUIRED")),
-  newPassword: z.string().min(6, vmsg("VALIDATION_NEW_PASSWORD_MIN", { min: "6" })),
+  newPassword: z
+    .string()
+    .min(
+      PASSWORD_MIN_LENGTH,
+      vmsg("VALIDATION_NEW_PASSWORD_MIN", { min: String(PASSWORD_MIN_LENGTH) }),
+    ),
 });
 
 export type ChangePasswordDto = z.infer<typeof changePasswordSchema>;

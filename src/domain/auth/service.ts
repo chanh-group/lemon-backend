@@ -29,7 +29,7 @@ import {
   SignupDto,
   VerifyOtpDto,
 } from "./dto/request.js";
-import { JWT_CONFIG } from "./constants.js";
+import { ARGON2_HASH_LENGTH, JWT_CONFIG, OTP_VALUE_MAX, OTP_VALUE_MIN } from "./constants.js";
 import type { JwtConfig } from "./jwt.js";
 import type { TokenPair } from "./types.js";
 import { AUTH_SESSION_REPOSITORY, type AuthSessionRepository } from "./repository.js";
@@ -487,7 +487,7 @@ export class AuthService {
   async hashPassword(password: string): Promise<string> {
     return argon2.hash(password, {
       type: argon2.argon2id,
-      hashLength: 32,
+      hashLength: ARGON2_HASH_LENGTH,
     });
   }
 
@@ -500,6 +500,6 @@ export class AuthService {
   }
 
   private generateOtp(): string {
-    return crypto.randomInt(100000, 1000000).toString();
+    return crypto.randomInt(OTP_VALUE_MIN, OTP_VALUE_MAX).toString();
   }
 }

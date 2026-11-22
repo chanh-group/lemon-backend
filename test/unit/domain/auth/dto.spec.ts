@@ -84,10 +84,15 @@ describe("Auth DTO Validation Schemas", () => {
       expect(parsed.otp).toBe("123456");
     });
 
-    it("rejects passwords shorter than 6 characters with VALIDATION_PASSWORD_MIN", () => {
-      expect(messagesFor(signupSchema, { ...validPayload, password: "12345" }, "password")).toEqual(
-        ["VALIDATION_PASSWORD_MIN|min=6"],
-      );
+    it("rejects passwords shorter than 8 characters with VALIDATION_PASSWORD_MIN", () => {
+      expect(
+        messagesFor(signupSchema, { ...validPayload, password: "1234567" }, "password"),
+      ).toEqual(["VALIDATION_PASSWORD_MIN|min=8"]);
+    });
+
+    it("accepts an 8-character password at the minimum length", () => {
+      const parsed = signupSchema.parse({ ...validPayload, password: "12345678" });
+      expect(parsed.password).toBe("12345678");
     });
 
     it("rejects invalid username characters with VALIDATION_USERNAME_FORMAT", () => {
@@ -166,10 +171,15 @@ describe("Auth DTO Validation Schemas", () => {
       expect(
         messagesFor(
           forgotPasswordResetSchema,
-          { ...validReset, newPassword: "123" },
+          { ...validReset, newPassword: "1234567" },
           "newPassword",
         ),
-      ).toEqual(["VALIDATION_NEW_PASSWORD_MIN|min=6"]);
+      ).toEqual(["VALIDATION_NEW_PASSWORD_MIN|min=8"]);
+    });
+
+    it("accepts an 8-character new password at the minimum length", () => {
+      const parsed = forgotPasswordResetSchema.parse({ ...validReset, newPassword: "12345678" });
+      expect(parsed.newPassword).toBe("12345678");
     });
 
     it("rejects malformed OTP with VALIDATION_OTP_FORMAT", () => {
@@ -200,10 +210,18 @@ describe("Auth DTO Validation Schemas", () => {
       expect(
         messagesFor(
           changePasswordSchema,
-          { oldPassword: "OldPassword", newPassword: "12345" },
+          { oldPassword: "OldPassword", newPassword: "1234567" },
           "newPassword",
         ),
-      ).toEqual(["VALIDATION_NEW_PASSWORD_MIN|min=6"]);
+      ).toEqual(["VALIDATION_NEW_PASSWORD_MIN|min=8"]);
+    });
+
+    it("accepts an 8-character new password at the minimum length", () => {
+      const parsed = changePasswordSchema.parse({
+        oldPassword: "OldPassword",
+        newPassword: "12345678",
+      });
+      expect(parsed.newPassword).toBe("12345678");
     });
   });
 
