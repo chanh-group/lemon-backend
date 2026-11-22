@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { v7 as uuidv7 } from "uuid";
 import {
+  BYTES_PER_MB,
   CHAT_ALLOWED_AUDIO_MIME,
   CHAT_ALLOWED_IMAGE_MIME,
   CHAT_ALLOWED_VIDEO_MIME,
@@ -13,6 +14,7 @@ import {
   STORY_MAX_VIDEO_BYTES,
   USER_AVATAR_ALLOWED_MIME,
   USER_AVATAR_MAX_BYTES,
+  USER_AVATAR_MAX_MB,
 } from "../../utils/cache/constants.js";
 import { BusinessError } from "../../utils/errors/business.js";
 import {
@@ -30,8 +32,7 @@ import {
 } from "../../utils/storage/avatar.js";
 import type { PresignFileDto } from "./dto/request.js";
 import type { PresignFileResponse } from "./dto/response.js";
-
-const BYTES_PER_MB = 1024 * 1024;
+import { FILE_NAME_SANITIZE_MAX_LENGTH } from "./constants.js";
 
 const UPLOAD_RULES: Record<
   PresignFileDto["kind"],
@@ -75,7 +76,7 @@ function createObjectKey(
       throw new BusinessError("FILE_TYPE_NOT_ALLOWED", { mimeType });
     }
     if (!ext && candidateExt) ext = candidateExt;
-    sanitizedFileName = fileName.replace(/[^\w.-]/g, "_").slice(0, 100);
+    sanitizedFileName = fileName.replace(/[^\w.-]/g, "_").slice(0, FILE_NAME_SANITIZE_MAX_LENGTH);
   }
 
   ext ??= "bin";
@@ -154,7 +155,7 @@ export class FileService {
     const object = await this.storage.headObject(objectKey);
     if (!object) throw new BusinessError("USER_NOT_FOUND");
     if (object.contentLength > USER_AVATAR_MAX_BYTES) {
-      throw new BusinessError("FILE_TOO_LARGE", { maxMb: "5" });
+      throw new BusinessError("FILE_TOO_LARGE", { maxMb: String(USER_AVATAR_MAX_MB) });
     }
     if (
       object.contentLength < 1 ||

@@ -36,6 +36,12 @@ import { ok } from "../../utils/response.js";
 import { getAuthUser, type AuthUser } from "../shared.js";
 import { parseSchemaIssues } from "../../utils/validation.js";
 import { fileUploadSchema, presignFileSchema, type PresignFileDto } from "./dto/request.js";
+import {
+  FILE_UPLOAD_FIELD_SIZE_BYTES,
+  FILE_UPLOAD_MAX_FIELDS,
+  FILE_UPLOAD_MAX_FILES,
+  FILE_UPLOAD_MAX_PARTS,
+} from "./constants.js";
 import { UploadRateLimitInterceptor } from "./upload-rate-limit.interceptor.js";
 import { FileService } from "./service.js";
 import { Public } from "../../utils/decorators.js";
@@ -95,7 +101,13 @@ export class FileController {
   @UseInterceptors(
     UploadRateLimitInterceptor,
     FileInterceptor("file", {
-      limits: { fileSize: USER_AVATAR_MAX_BYTES, files: 1, fields: 2, fieldSize: 256, parts: 3 },
+      limits: {
+        fileSize: USER_AVATAR_MAX_BYTES,
+        files: FILE_UPLOAD_MAX_FILES,
+        fields: FILE_UPLOAD_MAX_FIELDS,
+        fieldSize: FILE_UPLOAD_FIELD_SIZE_BYTES,
+        parts: FILE_UPLOAD_MAX_PARTS,
+      },
     }),
   )
   async uploadGroupAvatar(
@@ -162,7 +174,13 @@ export class FileController {
   @UseInterceptors(
     UploadRateLimitInterceptor,
     FileInterceptor("file", {
-      limits: { fileSize: USER_AVATAR_MAX_BYTES, files: 1, fields: 2, fieldSize: 256, parts: 3 },
+      limits: {
+        fileSize: USER_AVATAR_MAX_BYTES,
+        files: FILE_UPLOAD_MAX_FILES,
+        fields: FILE_UPLOAD_MAX_FIELDS,
+        fieldSize: FILE_UPLOAD_FIELD_SIZE_BYTES,
+        parts: FILE_UPLOAD_MAX_PARTS,
+      },
     }),
   )
   async uploadAvatar(
@@ -192,10 +210,10 @@ export class FileController {
     FileInterceptor("file", {
       limits: {
         fileSize: Math.max(CHAT_MAX_FILE_BYTES, STORY_MAX_VIDEO_BYTES),
-        files: 1,
-        fields: 2,
-        fieldSize: 256,
-        parts: 3,
+        files: FILE_UPLOAD_MAX_FILES,
+        fields: FILE_UPLOAD_MAX_FIELDS,
+        fieldSize: FILE_UPLOAD_FIELD_SIZE_BYTES,
+        parts: FILE_UPLOAD_MAX_PARTS,
       },
     }),
   )

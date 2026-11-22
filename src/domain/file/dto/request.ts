@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FILE_MIME_TYPE_MAX_LENGTH, FILE_NAME_MAX_LENGTH } from "../constants.js";
 
 const fileKindSchema = z.enum([
   "STORY_IMAGE",
@@ -25,8 +26,8 @@ export const fileUploadSchema = fileUploadFieldsSchema.refine(
 export const presignFileSchema = fileUploadFieldsSchema
   .extend({
     sizeBytes: z.number().int().min(1),
-    mimeType: z.string().min(1).max(255),
-    fileName: z.string().min(1).max(255).optional(),
+    mimeType: z.string().min(1).max(FILE_MIME_TYPE_MAX_LENGTH),
+    fileName: z.string().min(1).max(FILE_NAME_MAX_LENGTH).optional(),
   })
   .refine(requireChatConversation);
 
