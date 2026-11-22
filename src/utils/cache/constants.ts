@@ -54,8 +54,10 @@ export const S3_PRESIGN_TTL_SECS = 300;
 export const S3_DELETE_BATCH_SIZE = 1000;
 
 // Chat attachment upload limits (< 25MB)
+export const BYTES_PER_MB = 1024 * 1024;
 export const CHAT_MAX_FILE_BYTES = 25 * 1024 * 1024; // 25MB
 export const USER_AVATAR_MAX_BYTES = 5 * 1024 * 1024;
+export const USER_AVATAR_MAX_MB = USER_AVATAR_MAX_BYTES / BYTES_PER_MB;
 export const USER_AVATAR_ALLOWED_MIME = [
   "image/jpeg",
   "image/png",
