@@ -1,11 +1,18 @@
 import { z } from "zod";
 import { vmsg } from "../../../utils/validation.js";
-import { ALLOWED_MESSAGE_REACTIONS, MESSAGE_MAX_BODY_LENGTH } from "../constants.js";
+import {
+  ALLOWED_MESSAGE_REACTIONS,
+  MESSAGE_FILE_NAME_MAX_LENGTH,
+  MESSAGE_MAX_ATTACHMENTS,
+  MESSAGE_MAX_BODY_LENGTH,
+  MESSAGE_MIME_TYPE_MAX_LENGTH,
+  MESSAGE_OBJECT_KEY_MAX_LENGTH,
+} from "../constants.js";
 
 export const messageAttachmentInputSchema = z.object({
-  objectKey: z.string().min(1).max(512),
-  fileName: z.string().min(1).max(255),
-  mimeType: z.string().min(1).max(255),
+  objectKey: z.string().min(1).max(MESSAGE_OBJECT_KEY_MAX_LENGTH),
+  fileName: z.string().min(1).max(MESSAGE_FILE_NAME_MAX_LENGTH),
+  mimeType: z.string().min(1).max(MESSAGE_MIME_TYPE_MAX_LENGTH),
   sizeBytes: z.number().int().min(1),
   kind: z.enum(["IMAGE", "VIDEO", "AUDIO", "FILE"]).optional(),
   width: z.number().int().optional(),
@@ -28,7 +35,7 @@ export const sendMessageSchema = z
     kind: z.enum(["TEXT", "IMAGE", "VIDEO", "AUDIO", "FILE"]).default("TEXT"),
     clientMsgId: z.string().uuid(vmsg("VALIDATION_UUID_CLIENT_MSG")),
     replyToId: z.string().uuid(vmsg("VALIDATION_UUID_REPLY_TO")).nullish(),
-    attachments: z.array(messageAttachmentInputSchema).max(10).optional(),
+    attachments: z.array(messageAttachmentInputSchema).max(MESSAGE_MAX_ATTACHMENTS).optional(),
     isForwarded: z.boolean().optional(),
     sourceMessageId: z.string().uuid().optional(),
   })

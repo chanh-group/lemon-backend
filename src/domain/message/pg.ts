@@ -10,6 +10,7 @@ import { friendships } from "../friend/schema.js";
 import { DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE } from "../pagination.constants.js";
 import {
   ATTACHMENT_PREVIEW_TOKEN,
+  MESSAGE_PREVIEW_LENGTH,
   MESSAGE_REVOKED_PREVIEW_TOKEN,
   STORY_REACTION_PREVIEW_TOKEN,
 } from "./constants.js";
@@ -46,7 +47,7 @@ type DbTx = Parameters<Parameters<DrizzleDb["transaction"]>[0]>[0];
  */
 function toConversationPreview(kind: Message["kind"], body: string | null): string {
   if (kind === "STORY_REACTION") return STORY_REACTION_PREVIEW_TOKEN;
-  return body ? body.slice(0, 80) : ATTACHMENT_PREVIEW_TOKEN;
+  return body ? body.slice(0, MESSAGE_PREVIEW_LENGTH) : ATTACHMENT_PREVIEW_TOKEN;
 }
 
 @Injectable()
@@ -699,7 +700,9 @@ export class MessagePgRepository implements MessageRepository {
       if (!updated) return null;
 
       // Update conversation preview if this is the last message
-      const preview = updated.body ? updated.body.slice(0, 80) : ATTACHMENT_PREVIEW_TOKEN;
+      const preview = updated.body
+        ? updated.body.slice(0, MESSAGE_PREVIEW_LENGTH)
+        : ATTACHMENT_PREVIEW_TOKEN;
       await tx
         .update(conversations)
         .set({

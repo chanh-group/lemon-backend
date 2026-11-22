@@ -25,7 +25,7 @@ import { FriendService } from "../friend/service.js";
 import { ATTACHMENT_URL_TTL_SECS, MESSAGE_MAX_BODY_LENGTH } from "./constants.js";
 import { DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE } from "../pagination.constants.js";
 import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.js";
-import { CHAT_MAX_FILE_BYTES } from "../../utils/cache/constants.js";
+import { BYTES_PER_MB, CHAT_MAX_FILE_BYTES } from "../../utils/cache/constants.js";
 import type { StoryPreview } from "../story/types.js";
 import type { Story } from "../story/schema.js";
 import { toStoryPreview } from "../story/dto/mapper.js";
@@ -219,7 +219,7 @@ export class MessageService {
     for (const attachment of attachments ?? []) {
       if (attachment.sizeBytes > CHAT_MAX_FILE_BYTES) {
         throw new BusinessError("FILE_TOO_LARGE", {
-          maxMb: String(Math.floor(CHAT_MAX_FILE_BYTES / (1024 * 1024))),
+          maxMb: String(Math.floor(CHAT_MAX_FILE_BYTES / BYTES_PER_MB)),
         });
       }
       const isValidKey = sourceMessage
