@@ -204,6 +204,28 @@ describe("MessageService", () => {
       ).rejects.toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
     });
 
+    it("accepts 4000 emoji code points even though they exceed 4000 UTF-16 units", async () => {
+      createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
+
+      await expect(
+        service.sendMessage(userA, convId, {
+          body: "😀".repeat(4000),
+          kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
+        }),
+      ).resolves.toMatchObject({ id: msgId });
+    });
+
+    it("throws BAD_REQUEST if the body exceeds 4000 code points", async () => {
+      await expect(
+        service.sendMessage(userA, convId, {
+          body: "😀".repeat(4001),
+          kind: "TEXT",
+          clientMsgId: defaultClientMsgId,
+        }),
+      ).rejects.toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
+    });
+
     it("successfully creates a message and emits a realtime event", async () => {
       createMessageMock.mockResolvedValue({ message: mockMessage, isNew: true });
 
