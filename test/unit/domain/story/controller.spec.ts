@@ -63,9 +63,6 @@ describe("StoryController", () => {
   let updateStorySettingsMock: Mock<
     (userId: string, dto: UpdateStorySettingsDto) => Promise<UserStorySettingsResponse>
   >;
-  let muteAuthorMock: Mock<(userId: string, authorId: string) => Promise<void>>;
-  let unmuteAuthorMock: Mock<(userId: string, authorId: string) => Promise<void>>;
-  let getMutedAuthorIdsMock: Mock<(userId: string) => Promise<string[]>>;
   let getArchivedStoriesMock: Mock<
     (
       userId: string,
@@ -223,9 +220,6 @@ describe("StoryController", () => {
       archiveEnabled: true,
       archiveDurationSecs: null,
     });
-    muteAuthorMock = vi.fn().mockResolvedValue(undefined);
-    unmuteAuthorMock = vi.fn().mockResolvedValue(undefined);
-    getMutedAuthorIdsMock = vi.fn().mockResolvedValue([]);
     getArchivedStoriesMock = vi.fn().mockResolvedValue({ items: [], hasMore: false });
 
     const mockService = {
@@ -243,9 +237,6 @@ describe("StoryController", () => {
       replyStory: replyStoryMock,
       getStorySettings: getStorySettingsMock,
       updateStorySettings: updateStorySettingsMock,
-      muteAuthor: muteAuthorMock,
-      unmuteAuthor: unmuteAuthorMock,
-      getMutedAuthorIds: getMutedAuthorIdsMock,
       getArchivedStories: getArchivedStoriesMock,
     } as unknown as StoryService;
 
@@ -477,31 +468,6 @@ describe("StoryController", () => {
     });
   });
 
-  describe("mutes endpoints", () => {
-    it("mutes an author", async () => {
-      const result = await controller.muteAuthor(
-        { user: { id: "user-1" } },
-        "0193a2b1-0000-7000-8000-000000000002",
-        "en",
-      );
-      expect(muteAuthorMock).toHaveBeenCalledWith("user-1", "0193a2b1-0000-7000-8000-000000000002");
-      expect(result.message).toBe("Story muted");
-    });
-
-    it("unmutes an author", async () => {
-      const result = await controller.unmuteAuthor(
-        { user: { id: "user-1" } },
-        "0193a2b1-0000-7000-8000-000000000002",
-        "en",
-      );
-      expect(unmuteAuthorMock).toHaveBeenCalledWith(
-        "user-1",
-        "0193a2b1-0000-7000-8000-000000000002",
-      );
-      expect(result.message).toBe("Story unmuted");
-    });
-  });
-
   describe("getReactions", () => {
     it("delegates to storyService.getReactions and wraps in response envelope", async () => {
       const result = await controller.getReactions(
@@ -615,9 +581,6 @@ describe("StoryController", () => {
         replyStory: vi.fn(),
         getStorySettings: vi.fn(),
         updateStorySettings: vi.fn(),
-        muteAuthor: vi.fn(),
-        unmuteAuthor: vi.fn(),
-        getMutedAuthorIds: vi.fn(),
         getArchivedStories: vi.fn(),
       } as unknown as StoryService;
 

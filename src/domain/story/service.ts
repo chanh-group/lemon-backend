@@ -559,24 +559,6 @@ export class StoryService {
     };
   }
 
-  // Mutes
-  async muteAuthor(userId: string, authorId: string): Promise<void> {
-    if (userId === authorId) {
-      throw new BusinessError("CANNOT_MUTE_SELF");
-    }
-    await this.storyRepo.muteAuthor(userId, authorId);
-    await this.cache.invalidateFeedsBestEffort([storyFeedKey(userId)]);
-  }
-
-  async unmuteAuthor(userId: string, authorId: string): Promise<void> {
-    await this.storyRepo.unmuteAuthor(userId, authorId);
-    await this.cache.invalidateFeedsBestEffort([storyFeedKey(userId)]);
-  }
-
-  async getMutedAuthorIds(userId: string): Promise<string[]> {
-    return this.storyRepo.getMutedAuthorIds(userId);
-  }
-
   // Archives
   async getArchivedStories(
     userId: string,

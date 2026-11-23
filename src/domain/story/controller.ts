@@ -91,36 +91,6 @@ export class StoryController {
     return withMessage(data, t("STORY_SETTINGS_UPDATED", lang));
   }
 
-  @Get("mutes")
-  async getMutes(@Req() req: { user?: unknown }) {
-    const { id: userId }: AuthUser = getAuthUser(req);
-    const data = await this.storyService.getMutedAuthorIds(userId);
-    return ok(data);
-  }
-
-  @Post("mutes/:authorId")
-  @HttpCode(HttpStatus.OK)
-  async muteAuthor(
-    @Req() req: { user?: unknown },
-    @Param("authorId", ParseUUIDPipe) authorId: string,
-    @Lang() lang: string,
-  ) {
-    const { id: userId }: AuthUser = getAuthUser(req);
-    await this.storyService.muteAuthor(userId, authorId);
-    return messageOnly(t("STORY_MUTED", lang));
-  }
-
-  @Delete("mutes/:authorId")
-  async unmuteAuthor(
-    @Req() req: { user?: unknown },
-    @Param("authorId", ParseUUIDPipe) authorId: string,
-    @Lang() lang: string,
-  ) {
-    const { id: userId }: AuthUser = getAuthUser(req);
-    await this.storyService.unmuteAuthor(userId, authorId);
-    return messageOnly(t("STORY_UNMUTED", lang));
-  }
-
   @Get("storage")
   async getStorage(@Req() req: { user?: unknown }) {
     const { id: userId }: AuthUser = getAuthUser(req);

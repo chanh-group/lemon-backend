@@ -13,7 +13,6 @@ import { encodeReactionCursor } from "../../../../src/domain/story/dto/mapper.js
 import {
   stories,
   storyAudiences,
-  storyMutes,
   storyReactions,
   storyViews,
   userStorySettings,
@@ -494,18 +493,13 @@ describe("StoryPgRepository.findActiveByUserIds", () => {
     expect(result[0]).not.toHaveProperty("feedRank");
   });
 
-  it("excludes muted authors with a NOT EXISTS in the same query instead of a second round trip", async () => {
-    const { db, fromMock, whereMock } = makeDb([]);
-    const repo = new StoryPgRepository(db);
-
-    await repo.findActiveByUserIds(["u1"], "viewer-1");
-
+  it("does not filter stories based on legacy mutes", async () => {
+    const { db, whereMock } = makeDb([]);
+    await new StoryPgRepository(db).findActiveByUserIds(["u1"], "viewer-1");
     const feedWhere = whereMock.mock.calls
       .map(([condition]) => render(condition))
       .find((where) => where.includes('"stories"."expires_at" > now()'));
-    expect(feedWhere).toContain('not exists (select 1 from "story_mutes"');
-    expect(feedWhere).toContain('"story_mutes"."author_id" = "stories"."user_id"');
-    expect(fromMock).not.toHaveBeenCalledWith(storyMutes);
+    expect(feedWhere).not.toContain("story_mutes");
   });
 
   it("keeps the audience visibility rules for the viewer", async () => {
@@ -549,9 +543,9 @@ describe("StoryPgRepository.findActiveByUserIds", () => {
     const rendered = whereMock.mock.calls.map(([condition]) => render(condition));
     const feedWhere = rendered.find((where) => where.includes('"stories"."expires_at" > now()'));
     // CUSTOM stories are included only via in (...) membership, EXCLUDE ones via not in (...)
-    expect(feedWhere).toContain('"stories"."audience_mode" = $5');
+    expect(feedWhere).toContain('"stories"."audience_mode" = $4');
     expect(feedWhere).toContain('"stories"."id" in');
-    expect(feedWhere).toContain('"stories"."audience_mode" = $7');
+    expect(feedWhere).toContain('"stories"."audience_mode" = $6');
     expect(feedWhere).toContain('"stories"."id" not in');
 
     const lookupParams = whereMock.mock.calls
@@ -1213,83 +1207,6 @@ describe("StoryPgRepository audience lookups", () => {
     const repo = new StoryPgRepository(db);
 
     await expect(repo.isStoryAudience("s1", "u2")).resolves.toBe(false);
-  });
-});
-
-describe("StoryPgRepository mute queries", () => {
-  it("muteAuthor upserts the mute with conflict ignored", async () => {
-    const { db, insertMock, valuesMock, onConflictDoNothingMock } = makeDb();
-    const repo = new StoryPgRepository(db);
-
-    await repo.muteAuthor("u1", "author-1");
-
-    expect(insertMock).toHaveBeenCalledWith(storyMutes);
-    expect(valuesMock).toHaveBeenCalledWith({ userId: "u1", authorId: "author-1" });
-    expect(onConflictDoNothingMock).toHaveBeenCalledOnce();
-  });
-
-  it("unmuteAuthor returns true when a mute row is removed", async () => {
-    const { db, deleteMock, deleteWhereMock, returningMock } = makeDb();
-    returningMock.mockResolvedValue([{ userId: "u1" }]);
-    const repo = new StoryPgRepository(db);
-
-    const result = await repo.unmuteAuthor("u1", "author-1");
-
-    expect(result).toBe(true);
-    expect(deleteMock).toHaveBeenCalledWith(storyMutes);
-    const query = dialect.sqlToQuery(deleteWhereMock.mock.calls[0][0]);
-    expect(query.sql).toContain('"story_mutes"."user_id" = $1');
-    expect(query.sql).toContain('"story_mutes"."author_id" = $2');
-    expect(query.params).toEqual(["u1", "author-1"]);
-  });
-
-  it("unmuteAuthor returns false when nothing was muted", async () => {
-    const { db, returningMock } = makeDb();
-    returningMock.mockResolvedValue([]);
-    const repo = new StoryPgRepository(db);
-
-    await expect(repo.unmuteAuthor("u1", "author-1")).resolves.toBe(false);
-  });
-
-  it("getMutedAuthorIds lists the muted authors for the user", async () => {
-    const { db, whereMock } = makeDb([{ authorId: "a1" }, { authorId: "a2" }]);
-    const repo = new StoryPgRepository(db);
-
-    const result = await repo.getMutedAuthorIds("u1");
-
-    expect(result).toEqual(["a1", "a2"]);
-    const query = dialect.sqlToQuery(whereMock.mock.calls[0][0]);
-    expect(query.sql).toContain('"story_mutes"."user_id" = $1');
-    expect(query.params).toEqual(["u1"]);
-  });
-
-  it("getMutedAuthorIds returns an empty list when nothing is muted", async () => {
-    const { db } = makeDb([]);
-    const repo = new StoryPgRepository(db);
-
-    await expect(repo.getMutedAuthorIds("u1")).resolves.toEqual([]);
-  });
-
-  it("isAuthorMuted returns true for a muted author", async () => {
-    const { db, selectMock, whereMock, limitMock } = makeDb();
-    limitMock.mockResolvedValue([{ authorId: "a1" }]);
-    const repo = new StoryPgRepository(db);
-
-    await expect(repo.isAuthorMuted("u1", "a1")).resolves.toBe(true);
-    expect(selectMock).toHaveBeenCalledWith({ authorId: storyMutes.authorId });
-    expect(limitMock).toHaveBeenCalledWith(1);
-    const query = dialect.sqlToQuery(whereMock.mock.calls[0][0]);
-    expect(query.sql).toContain('"story_mutes"."user_id" = $1');
-    expect(query.sql).toContain('"story_mutes"."author_id" = $2');
-    expect(query.params).toEqual(["u1", "a1"]);
-  });
-
-  it("isAuthorMuted returns false for an unmuted author", async () => {
-    const { db, limitMock } = makeDb();
-    limitMock.mockResolvedValue([]);
-    const repo = new StoryPgRepository(db);
-
-    await expect(repo.isAuthorMuted("u1", "a2")).resolves.toBe(false);
   });
 });
 

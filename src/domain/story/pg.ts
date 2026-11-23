@@ -12,7 +12,6 @@ import {
   isNotNull,
   isNull,
   lt,
-  notExists,
   notInArray,
   or,
   sql,
@@ -45,7 +44,6 @@ import {
   type Story,
   stories,
   storyAudiences,
-  storyMutes,
   storyReactions,
   storyViews,
   userStorySettings,
@@ -198,14 +196,6 @@ export class StoryPgRepository implements StoryRepository {
     ];
 
     if (viewerId) {
-      // Exclude muted authors — a correlated NOT EXISTS keeps the whole feed
-      // lookup to a single round trip.
-      conditions.push(
-        notExists(
-          sql`(select 1 from ${storyMutes} where ${storyMutes.userId} = ${viewerId} and ${storyMutes.authorId} = ${stories.userId})`,
-        ),
-      );
-
       // Filter audience: author always sees their own; for others, check audienceMode
       conditions.push(
         or(
@@ -236,7 +226,7 @@ export class StoryPgRepository implements StoryRepository {
     }
 
     // Cap every author to their most recent stories so the feed (and its
-    // cached payload) stays bounded; the audience/mute predicates above still
+    // cached payload) stays bounded; the audience predicates above still
     // decide which rows are eligible before the cap is applied.
     const rankedStories = this.db
       .select({
@@ -731,36 +721,6 @@ export class StoryPgRepository implements StoryRepository {
       .select({ userId: storyAudiences.userId })
       .from(storyAudiences)
       .where(and(eq(storyAudiences.storyId, storyId), eq(storyAudiences.userId, userId)))
-      .limit(1);
-    return Boolean(row);
-  }
-
-  // Mutes
-  async muteAuthor(userId: string, authorId: string): Promise<void> {
-    await this.db.insert(storyMutes).values({ userId, authorId }).onConflictDoNothing();
-  }
-
-  async unmuteAuthor(userId: string, authorId: string): Promise<boolean> {
-    const rows = await this.db
-      .delete(storyMutes)
-      .where(and(eq(storyMutes.userId, userId), eq(storyMutes.authorId, authorId)))
-      .returning({ userId: storyMutes.userId });
-    return rows.length > 0;
-  }
-
-  async getMutedAuthorIds(userId: string): Promise<string[]> {
-    const rows = await this.db
-      .select({ authorId: storyMutes.authorId })
-      .from(storyMutes)
-      .where(eq(storyMutes.userId, userId));
-    return rows.map((r) => r.authorId);
-  }
-
-  async isAuthorMuted(userId: string, authorId: string): Promise<boolean> {
-    const [row] = await this.db
-      .select({ authorId: storyMutes.authorId })
-      .from(storyMutes)
-      .where(and(eq(storyMutes.userId, userId), eq(storyMutes.authorId, authorId)))
       .limit(1);
     return Boolean(row);
   }

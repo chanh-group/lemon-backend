@@ -154,6 +154,10 @@ export const storyAudiences = pgTable(
   ],
 );
 
+/**
+ * Legacy table: story muting was removed from the API and feed, but rows are
+ * kept so existing user data is not destroyed. Do not add new readers/writers.
+ */
 export const storyMutes = pgTable(
   "story_mutes",
   {
