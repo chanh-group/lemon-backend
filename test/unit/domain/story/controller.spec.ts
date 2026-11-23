@@ -63,9 +63,6 @@ describe("StoryController", () => {
   let updateStorySettingsMock: Mock<
     (userId: string, dto: UpdateStorySettingsDto) => Promise<UserStorySettingsResponse>
   >;
-  let muteAuthorMock: Mock<(userId: string, authorId: string) => Promise<void>>;
-  let unmuteAuthorMock: Mock<(userId: string, authorId: string) => Promise<void>>;
-  let getMutedAuthorIdsMock: Mock<(userId: string) => Promise<string[]>>;
   let getArchivedStoriesMock: Mock<
     (
       userId: string,
@@ -223,9 +220,6 @@ describe("StoryController", () => {
       archiveEnabled: true,
       archiveDurationSecs: null,
     });
-    muteAuthorMock = vi.fn().mockResolvedValue(undefined);
-    unmuteAuthorMock = vi.fn().mockResolvedValue(undefined);
-    getMutedAuthorIdsMock = vi.fn().mockResolvedValue([]);
     getArchivedStoriesMock = vi.fn().mockResolvedValue({ items: [], hasMore: false });
 
     const mockService = {
@@ -243,9 +237,6 @@ describe("StoryController", () => {
       replyStory: replyStoryMock,
       getStorySettings: getStorySettingsMock,
       updateStorySettings: updateStorySettingsMock,
-      muteAuthor: muteAuthorMock,
-      unmuteAuthor: unmuteAuthorMock,
-      getMutedAuthorIds: getMutedAuthorIdsMock,
       getArchivedStories: getArchivedStoriesMock,
     } as unknown as StoryService;
 
@@ -590,9 +581,6 @@ describe("StoryController", () => {
         replyStory: vi.fn(),
         getStorySettings: vi.fn(),
         updateStorySettings: vi.fn(),
-        muteAuthor: vi.fn(),
-        unmuteAuthor: vi.fn(),
-        getMutedAuthorIds: vi.fn(),
         getArchivedStories: vi.fn(),
       } as unknown as StoryService;
 

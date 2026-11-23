@@ -226,7 +226,7 @@ export class StoryPgRepository implements StoryRepository {
     }
 
     // Cap every author to their most recent stories so the feed (and its
-    // cached payload) stays bounded; the audience/mute predicates above still
+    // cached payload) stays bounded; the audience predicates above still
     // decide which rows are eligible before the cap is applied.
     const rankedStories = this.db
       .select({
