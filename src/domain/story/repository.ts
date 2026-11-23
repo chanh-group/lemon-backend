@@ -102,10 +102,6 @@ export interface StoryRepository {
   isStoryAudience(storyId: string, userId: string): Promise<boolean>;
 
   // Mutes
-  muteAuthor(userId: string, authorId: string): Promise<void>;
-  unmuteAuthor(userId: string, authorId: string): Promise<boolean>;
-  getMutedAuthorIds(userId: string): Promise<string[]>;
-  isAuthorMuted(userId: string, authorId: string): Promise<boolean>;
 
   // Archives
   findArchivedStoriesByUserId(

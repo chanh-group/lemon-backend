@@ -37,10 +37,6 @@ describe("StoryService", () => {
   let upsertUserStorySettingsMock: Mock;
   let findStoryAudienceUserIdsMock: Mock;
   let isStoryAudienceMock: Mock;
-  let muteAuthorMock: Mock;
-  let unmuteAuthorMock: Mock;
-  let getMutedAuthorIdsMock: Mock;
-  let isAuthorMutedMock: Mock;
   let findArchivedStoriesByUserIdMock: Mock;
 
   let getBestEffortMock: Mock;
@@ -193,10 +189,6 @@ describe("StoryService", () => {
     );
     findStoryAudienceUserIdsMock = vi.fn().mockResolvedValue([]);
     isStoryAudienceMock = vi.fn().mockResolvedValue(true);
-    muteAuthorMock = vi.fn().mockResolvedValue(undefined);
-    unmuteAuthorMock = vi.fn().mockResolvedValue(true);
-    getMutedAuthorIdsMock = vi.fn().mockResolvedValue([]);
-    isAuthorMutedMock = vi.fn().mockResolvedValue(false);
     findArchivedStoriesByUserIdMock = vi.fn().mockResolvedValue({ items: [], hasMore: false });
 
     getBestEffortMock = vi.fn().mockResolvedValue(null);
@@ -250,10 +242,6 @@ describe("StoryService", () => {
       upsertUserStorySettings: upsertUserStorySettingsMock,
       findStoryAudienceUserIds: findStoryAudienceUserIdsMock,
       isStoryAudience: isStoryAudienceMock,
-      muteAuthor: muteAuthorMock,
-      unmuteAuthor: unmuteAuthorMock,
-      getMutedAuthorIds: getMutedAuthorIdsMock,
-      isAuthorMuted: isAuthorMutedMock,
       findArchivedStoriesByUserId: findArchivedStoriesByUserIdMock,
     };
 
@@ -650,20 +638,6 @@ describe("StoryService", () => {
       expect(markAsViewedMock).toHaveBeenCalledWith(mockStory.id, "friend-1", false);
       expect(sendMessageMock).toHaveBeenCalled();
       expect(result.id).toBe("msg-1");
-    });
-  });
-
-  describe("mutes", () => {
-    it("mutes an author and invalidates viewer feed cache", async () => {
-      await service.muteAuthor("user-1", "user-2");
-      expect(muteAuthorMock).toHaveBeenCalledWith("user-1", "user-2");
-      expect(deleteManyBestEffortMock).toHaveBeenCalledWith(["stories:feed:user-1"]);
-    });
-
-    it("throws CANNOT_MUTE_SELF when trying to mute self", async () => {
-      await expect(service.muteAuthor("user-1", "user-1")).rejects.toMatchObject({
-        code: "CANNOT_MUTE_SELF",
-      });
     });
   });
 

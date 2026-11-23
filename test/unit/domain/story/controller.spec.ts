@@ -477,31 +477,6 @@ describe("StoryController", () => {
     });
   });
 
-  describe("mutes endpoints", () => {
-    it("mutes an author", async () => {
-      const result = await controller.muteAuthor(
-        { user: { id: "user-1" } },
-        "0193a2b1-0000-7000-8000-000000000002",
-        "en",
-      );
-      expect(muteAuthorMock).toHaveBeenCalledWith("user-1", "0193a2b1-0000-7000-8000-000000000002");
-      expect(result.message).toBe("Story muted");
-    });
-
-    it("unmutes an author", async () => {
-      const result = await controller.unmuteAuthor(
-        { user: { id: "user-1" } },
-        "0193a2b1-0000-7000-8000-000000000002",
-        "en",
-      );
-      expect(unmuteAuthorMock).toHaveBeenCalledWith(
-        "user-1",
-        "0193a2b1-0000-7000-8000-000000000002",
-      );
-      expect(result.message).toBe("Story unmuted");
-    });
-  });
-
   describe("getReactions", () => {
     it("delegates to storyService.getReactions and wraps in response envelope", async () => {
       const result = await controller.getReactions(
