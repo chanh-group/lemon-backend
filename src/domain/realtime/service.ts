@@ -427,9 +427,12 @@ export class RealtimeService {
   ): void {
     if (!this.gateway?.server) return;
     try {
-      this.gateway.server.to(callRoom(callId)).emit("call:ended", payload);
-      this.gateway.server.to(userRoom(callerId)).emit("call:ended", payload);
-      this.gateway.server.to(userRoom(calleeId)).emit("call:ended", payload);
+      // Single emit: Socket.IO de-duplicates sockets that belong to several of the rooms.
+      this.gateway.server
+        .to(callRoom(callId))
+        .to(userRoom(callerId))
+        .to(userRoom(calleeId))
+        .emit("call:ended", payload);
     } catch (err) {
       logger.warn(`Failed to emit call:ended for call ${callId}: ${String(err)}`);
     }
