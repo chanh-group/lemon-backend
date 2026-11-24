@@ -510,11 +510,12 @@ export class CallService implements OnApplicationShutdown, OnApplicationBootstra
     const activeCall = await this.callRepo.findActiveCallForUser(userId);
     if (!activeCall) return;
 
-    // Callee closed the tab / reloaded / shut the window while still ringing:
-    // keep the call ringing for a short grace period in case they come back.
+    // Keep ringing calls alive briefly on disconnect so users can recover from reloads.
     if (activeCall.status === "RINGING") {
       if (activeCall.calleeId === userId) {
         this.scheduleCalleeRingDisconnect(activeCall.id, userId);
+      } else if (activeCall.callerId === userId) {
+        this.scheduleCallerRingDisconnect(activeCall.id, userId);
       }
       return;
     }
@@ -558,6 +559,56 @@ export class CallService implements OnApplicationShutdown, OnApplicationBootstra
     timer.unref();
 
     this.disconnectTimers.set(timerKey, timer);
+  }
+
+  private scheduleCallerRingDisconnect(callId: string, callerId: string): void {
+    const timerKey = `${callId}:${callerId}`;
+    const existing = this.disconnectTimers.get(timerKey);
+    if (existing) clearTimeout(existing);
+
+    const timer = setTimeout(() => {
+      this.disconnectTimers.delete(timerKey);
+      this.handleCallerOfflineDuringRing(callId, callerId).catch((err: unknown) => {
+        this.logger.error(`Failed to cancel ringing call ${callId} for offline caller`, { err });
+      });
+    }, CALL_RING_DISCONNECT_GRACE_MS);
+    timer.unref();
+
+    this.disconnectTimers.set(timerKey, timer);
+  }
+
+  private async handleCallerOfflineDuringRing(callId: string, callerId: string): Promise<void> {
+    const updated = await this.callRepo.updateStatus(callId, ["INITIATED", "RINGING"], {
+      status: "CANCELLED",
+      endedAt: new Date(),
+      endReason: "CANCELLED",
+    });
+
+    if (!updated) {
+      const call = await this.callRepo.findById(callId);
+      if (call?.status === "ACCEPTED") {
+        await this.endCall(callerId, callId, "DISCONNECTED_TIMEOUT");
+      }
+      return;
+    }
+
+    const ringTimer = this.ringingTimers.get(callId);
+    if (ringTimer) {
+      clearTimeout(ringTimer);
+      this.ringingTimers.delete(callId);
+    }
+
+    await Promise.allSettled([
+      this.cache.releaseLock(activeCallUserKey(updated.callerId), callId),
+      this.cache.releaseLock(activeCallUserKey(updated.calleeId), callId),
+    ]);
+
+    this.realtimeService.emitCallCancelled(updated.calleeId, {
+      callId,
+      cancelledBy: callerId,
+    });
+    this.realtimeService.leaveCall([updated.callerId, updated.calleeId], callId);
+    await this.deleteLiveKitRoom(callId);
   }
 
   /**

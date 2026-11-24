@@ -186,6 +186,7 @@ describe("CallService", () => {
 
   afterEach(() => {
     service.onApplicationShutdown();
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
@@ -643,15 +644,91 @@ describe("CallService", () => {
       expect(joinOrder).toBeLessThan(reconnectedOrder);
     });
 
-    it("ignores the caller disconnecting while the call is ringing", async () => {
+    it("cancels the ringing call when the caller does not reconnect during the grace period", async () => {
       findActiveCallForUserMock.mockResolvedValueOnce({ ...mockCall, status: "RINGING" });
+      const cancelledCall = {
+        ...mockCall,
+        status: "CANCELLED" as const,
+        endedAt: new Date(),
+        endReason: "CANCELLED",
+      };
+      updateStatusMock.mockResolvedValueOnce(cancelledCall);
+      const deleteLiveKitRoomMock = vi
+        .spyOn(service, "deleteLiveKitRoom")
+        .mockResolvedValue(undefined);
 
       await service.handleUserDisconnect(callerId);
       await vi.advanceTimersByTimeAsync(CALL_RING_DISCONNECT_GRACE_MS);
 
       expect(emitCallUserDisconnectedMock).not.toHaveBeenCalled();
+      expect(updateStatusMock).toHaveBeenCalledWith(
+        callId,
+        ["INITIATED", "RINGING"],
+        expect.objectContaining({ status: "CANCELLED", endReason: "CANCELLED" }),
+      );
+      expect(cacheReleaseLockMock).toHaveBeenCalledWith(activeCallUserKey(callerId), callId);
+      expect(cacheReleaseLockMock).toHaveBeenCalledWith(activeCallUserKey(calleeId), callId);
+      expect(emitCallCancelledMock).toHaveBeenCalledWith(calleeId, {
+        callId,
+        cancelledBy: callerId,
+      });
+      expect(leaveCallMock).toHaveBeenCalledWith([callerId, calleeId], callId);
+      expect(deleteLiveKitRoomMock).toHaveBeenCalledWith(callId);
+    });
+
+    it("keeps the call ringing when the caller reconnects within the grace period", async () => {
+      findActiveCallForUserMock.mockResolvedValue({ ...mockCall, status: "RINGING" });
+
+      await service.handleUserDisconnect(callerId);
+      await service.handleUserReconnect(callerId);
+      await vi.advanceTimersByTimeAsync(CALL_RING_DISCONNECT_GRACE_MS);
+
       expect(updateStatusMock).not.toHaveBeenCalled();
-      expect(cacheReleaseLockMock).not.toHaveBeenCalled();
+      expect(emitCallCancelledMock).not.toHaveBeenCalled();
+      expect(leaveCallMock).not.toHaveBeenCalled();
+      expect(joinCallMock).toHaveBeenCalledWith([callerId], callId);
+    });
+
+    it("ends the accepted call if the caller remains offline through the grace period", async () => {
+      findActiveCallForUserMock.mockResolvedValueOnce({ ...mockCall, status: "RINGING" });
+      findByIdMock
+        .mockResolvedValueOnce({ ...mockCall, status: "ACCEPTED" })
+        .mockResolvedValueOnce({ ...mockCall, status: "ACCEPTED" });
+      const completedCall = {
+        ...mockCall,
+        status: "COMPLETED" as const,
+        endedAt: new Date(),
+        endReason: "DISCONNECTED_TIMEOUT",
+      };
+      updateStatusMock.mockResolvedValueOnce(null).mockResolvedValueOnce(completedCall);
+      const deleteLiveKitRoomMock = vi
+        .spyOn(service, "deleteLiveKitRoom")
+        .mockResolvedValue(undefined);
+
+      await service.handleUserDisconnect(callerId);
+      await vi.advanceTimersByTimeAsync(CALL_RING_DISCONNECT_GRACE_MS);
+
+      expect(updateStatusMock).toHaveBeenCalledWith(
+        callId,
+        ["INITIATED", "RINGING"],
+        expect.objectContaining({ status: "CANCELLED", endReason: "CANCELLED" }),
+      );
+      expect(updateStatusMock).toHaveBeenCalledWith(
+        callId,
+        ["INITIATED", "RINGING", "ACCEPTED"],
+        expect.objectContaining({ status: "COMPLETED", endReason: "DISCONNECTED_TIMEOUT" }),
+      );
+      expect(emitCallCancelledMock).not.toHaveBeenCalled();
+      expect(emitCallEndedMock).toHaveBeenCalledWith(
+        callId,
+        callerId,
+        calleeId,
+        expect.objectContaining({ reason: "DISCONNECTED_TIMEOUT" }),
+      );
+      expect(cacheReleaseLockMock).toHaveBeenCalledWith(activeCallUserKey(callerId), callId);
+      expect(cacheReleaseLockMock).toHaveBeenCalledWith(activeCallUserKey(calleeId), callId);
+      expect(leaveCallMock).toHaveBeenCalledWith([callerId, calleeId], callId);
+      expect(deleteLiveKitRoomMock).toHaveBeenCalledWith(callId);
     });
 
     it("misses the call with DISCONNECTED_TIMEOUT when the callee never reconnects during ringing", async () => {
