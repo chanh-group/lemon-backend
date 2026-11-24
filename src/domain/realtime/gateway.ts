@@ -20,6 +20,8 @@ import { ConversationPgRepository } from "../conversation/pg.js";
 import { UserService } from "../user/service.js";
 import { convRoom, userRoom } from "./rooms.js";
 import {
+  CALL_DISCONNECT_HANDLER,
+  type CallDisconnectHandler,
   REALTIME_EVENTS,
   REDIS_DISCONNECT_GRACE_MS,
   REDIS_LIFECYCLE_EVENTS,
@@ -67,6 +69,9 @@ export class ChatGateway
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
     @Inject(AUTH_SESSION_REPOSITORY) private readonly sessions: AuthSessionRepository,
     private readonly revocations: AuthRevocationListener,
+    @Optional()
+    @Inject(CALL_DISCONNECT_HANDLER)
+    private readonly callService?: CallDisconnectHandler,
   ) {
     this.auth = new SocketAuthenticator(this.jwt, this.revocations);
     this.presence = new PresenceTracker(this.userService, this.redis);
@@ -170,6 +175,7 @@ export class ChatGateway
     client.data = { userId };
 
     const currentConns = await this.presence.registerConnection(userId);
+    this.callService?.handleUserReconnect(userId).catch(() => {});
 
     if (!client.disconnected) {
       client.emit(REALTIME_EVENTS.READY, { userId } satisfies SocketReadyEvent);
@@ -186,6 +192,9 @@ export class ChatGateway
     if (!userId) return;
 
     const currentConns = this.presence.registerDisconnection(userId);
+    if (currentConns <= 0) {
+      this.callService?.handleUserDisconnect(userId).catch(() => {});
+    }
 
     logger.log(
       `User disconnected: ${userId} (socket ${client.id}, remaining: ${Math.max(0, currentConns)})`,

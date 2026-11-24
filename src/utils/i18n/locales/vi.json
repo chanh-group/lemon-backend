@@ -122,5 +122,10 @@
   "EMAIL_OTP_IGNORE_TEXT": "Nếu bạn không yêu cầu hành động này, vui lòng bỏ qua email này.",
   "EMAIL_OTP_SIGN_OFF": "Trân trọng,\nĐội ngũ LemonChat",
   "EMAIL_OTP_EXPIRY_HTML": "⏳ Mã này sẽ hết hạn sau <strong>{minutes} phút</strong>",
-  "EMAIL_OTP_WARNING_HTML": "<strong>Bảo mật:</strong> Tuyệt đối không chia sẻ mã này cho bất kỳ ai, kể cả nhân viên LemonChat. Nếu bạn không thực hiện yêu cầu này, vui lòng bỏ qua email."
+  "EMAIL_OTP_WARNING_HTML": "<strong>Bảo mật:</strong> Tuyệt đối không chia sẻ mã này cho bất kỳ ai, kể cả nhân viên LemonChat. Nếu bạn không thực hiện yêu cầu này, vui lòng bỏ qua email.",
+  "CALL_NOT_FOUND": "Không tìm thấy cuộc gọi",
+  "CALL_USER_BUSY": "Người dùng đang bận trong cuộc gọi khác",
+  "CALL_CANNOT_CALL_SELF": "Không thể tự gọi cho chính mình",
+  "CALL_INVALID_STATE": "Trạng thái cuộc gọi không hợp lệ cho hành động này",
+  "CALL_UNAUTHORIZED_PARTICIPANT": "Bạn không phải người tham gia cuộc gọi này"
 }
