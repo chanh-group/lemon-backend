@@ -39,11 +39,16 @@ describe("Call DTOs", () => {
   });
 
   describe("rejectCallSchema and endCallSchema", () => {
-    it("accepts optional reason", () => {
+    it("accepts an optional valid reason", () => {
       expect(rejectCallSchema.safeParse({}).success).toBe(true);
-      expect(rejectCallSchema.safeParse({ reason: "Busy right now" }).success).toBe(true);
+      expect(rejectCallSchema.safeParse({ reason: "BUSY" }).success).toBe(true);
       expect(endCallSchema.safeParse({}).success).toBe(true);
-      expect(endCallSchema.safeParse({ reason: "Call finished" }).success).toBe(true);
+      expect(endCallSchema.safeParse({ reason: "USER_HANGUP" }).success).toBe(true);
+    });
+
+    it("rejects unsupported reasons", () => {
+      expect(rejectCallSchema.safeParse({ reason: "Busy right now" }).success).toBe(false);
+      expect(endCallSchema.safeParse({ reason: "Call finished" }).success).toBe(false);
     });
   });
 });
