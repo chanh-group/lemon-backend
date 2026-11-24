@@ -3,6 +3,7 @@
 // bookkeeping) and typing.ts (typing events); this is the only file that
 // imports socket.io decorators.
 import { Inject, Logger, Optional, type OnApplicationShutdown } from "@nestjs/common";
+import { ModuleRef } from "@nestjs/core";
 import {
   ConnectedSocket,
   MessageBody,
@@ -69,9 +70,7 @@ export class ChatGateway
     @Optional() @Inject(REDIS_CLIENT) private readonly redis: Redis | null,
     @Inject(AUTH_SESSION_REPOSITORY) private readonly sessions: AuthSessionRepository,
     private readonly revocations: AuthRevocationListener,
-    @Optional()
-    @Inject(CALL_DISCONNECT_HANDLER)
-    private readonly callService?: CallDisconnectHandler,
+    private readonly moduleRef: ModuleRef,
   ) {
     this.auth = new SocketAuthenticator(this.jwt, this.revocations);
     this.presence = new PresenceTracker(this.userService, this.redis);
@@ -175,7 +174,9 @@ export class ChatGateway
     client.data = { userId };
 
     const currentConns = await this.presence.registerConnection(userId);
-    this.callService?.handleUserReconnect(userId).catch(() => {});
+    this.resolveCallHandler()
+      ?.handleUserReconnect(userId)
+      .catch(() => {});
 
     if (!client.disconnected) {
       client.emit(REALTIME_EVENTS.READY, { userId } satisfies SocketReadyEvent);
@@ -193,12 +194,29 @@ export class ChatGateway
 
     const currentConns = this.presence.registerDisconnection(userId);
     if (currentConns <= 0) {
-      this.callService?.handleUserDisconnect(userId).catch(() => {});
+      this.resolveCallHandler()
+        ?.handleUserDisconnect(userId)
+        .catch(() => {});
     }
 
     logger.log(
       `User disconnected: ${userId} (socket ${client.id}, remaining: ${Math.max(0, currentConns)})`,
     );
+  }
+
+  /**
+   * Resolve the call session handler lazily instead of through constructor
+   * injection: CallModule is a @Global module that imports RealtimeModule, so
+   * the gateway is instantiated before CallModule's exports are resolvable and
+   * an `@Optional()` constructor token silently stays undefined. `{ strict:
+   * false }` searches the whole container, where the global provider lives.
+   */
+  private resolveCallHandler(): CallDisconnectHandler | undefined {
+    try {
+      return this.moduleRef.get<CallDisconnectHandler>(CALL_DISCONNECT_HANDLER, { strict: false });
+    } catch {
+      return undefined;
+    }
   }
 
   onApplicationShutdown(): void {

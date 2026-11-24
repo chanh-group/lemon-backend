@@ -8,8 +8,9 @@ import { CallPgRepository } from "./pg.js";
 import { CALL_REPOSITORY } from "./repository.js";
 import { CallService } from "./service.js";
 
-// Global so ChatGateway (in RealtimeModule, which this module imports) can inject
-// CALL_DISCONNECT_HANDLER without a circular module import.
+// Global: call state is app-wide. The realtime gateway resolves
+// CALL_DISCONNECT_HANDLER lazily (ModuleRef, strict: false) rather than by
+// constructor injection, which cannot see another module's exports at boot.
 @Global()
 @Module({
   imports: [RealtimeModule, ConversationModule, UserModule],
