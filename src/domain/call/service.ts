@@ -6,6 +6,7 @@ import {
   type OnApplicationBootstrap,
   type OnApplicationShutdown,
 } from "@nestjs/common";
+import { Cron } from "@nestjs/schedule";
 import { AccessToken, RoomServiceClient } from "livekit-server-sdk";
 import { v7 as uuidv7 } from "uuid";
 import { get_env } from "../../helpers/index.js";
@@ -23,8 +24,9 @@ import {
   CALL_ACTIVE_LOCK_TTL_SECONDS,
   CALL_DISCONNECT_GRACE_MS,
   CALL_RING_DISCONNECT_GRACE_MS,
-  CALL_RING_LOCK_TTL_SECONDS,
   CALL_RING_TIMEOUT_MS,
+  CALL_RING_LOCK_TTL_SECONDS,
+  CALL_STALE_CLEANUP_CRON_EXPRESSION,
   DEFAULT_CALL_PAGE_SIZE,
   LIVEKIT_TOKEN_TTL_SECONDS,
 } from "./constants.js";
@@ -53,19 +55,35 @@ export class CallService implements OnApplicationShutdown, OnApplicationBootstra
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
+    await this.reconcileStaleCalls();
+  }
+
+  @Cron(CALL_STALE_CLEANUP_CRON_EXPRESSION)
+  async reconcileStaleCalls(): Promise<void> {
     try {
       const staleCalls = await this.callRepo.cleanupStaleCalls();
       if (staleCalls.length > 0) {
-        this.logger.log(`Cleaned up ${staleCalls.length} stale ringing call(s) on bootstrap`);
+        this.logger.log(`Cleaned up ${staleCalls.length} stale call(s)`);
+        for (const call of staleCalls) {
+          if (call.status === "COMPLETED" && call.endReason === "MAX_DURATION") {
+            this.realtimeService.emitCallEnded(call.id, call.callerId, call.calleeId, {
+              callId: call.id,
+              reason: "MAX_DURATION",
+              durationSecs: call.durationSecs ?? 0,
+            });
+            this.realtimeService.leaveCall([call.callerId, call.calleeId], call.id);
+          }
+        }
         await Promise.allSettled(
           staleCalls.flatMap((call) => [
             this.cache.releaseLock(activeCallUserKey(call.callerId), call.id),
             this.cache.releaseLock(activeCallUserKey(call.calleeId), call.id),
+            this.deleteLiveKitRoom(call.id),
           ]),
         );
       }
     } catch (err) {
-      this.logger.warn(`Failed to cleanup stale ringing calls on bootstrap: ${String(err)}`);
+      this.logger.warn(`Failed to reconcile stale calls: ${String(err)}`);
     }
   }
 

@@ -1,11 +1,12 @@
 import { Injectable } from "@nestjs/common";
 import { InjectDrizzle } from "@nestjs/drizzle";
-import { and, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, gt, inArray, lte, lt, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { DrizzleDb } from "../../configs/database.js";
 import { users } from "../user/schema.js";
 import { toCursorPage, type CursorPage } from "../shared.js";
 import {
+  CALL_ACTIVE_LOCK_TTL_SECONDS,
   CALL_RING_LOCK_TTL_SECONDS,
   DEFAULT_CALL_PAGE_SIZE,
   MAX_CALL_PAGE_SIZE,
@@ -86,6 +87,8 @@ export class CallPgRepository implements CallRepository {
 
   async findActiveCallForUser(userId: string): Promise<CallWithUsers | null> {
     const ringThreshold = new Date(Date.now() - CALL_RING_LOCK_TTL_SECONDS * 1000);
+    const activeThreshold = new Date(Date.now() - CALL_ACTIVE_LOCK_TTL_SECONDS * 1000);
+    const acceptedAt = sql`coalesce(${calls.answeredAt}, ${calls.startedAt})`;
     const [row] = await this.db
       .select({
         call: calls,
@@ -109,7 +112,7 @@ export class CallPgRepository implements CallRepository {
         and(
           or(eq(calls.callerId, userId), eq(calls.calleeId, userId)),
           or(
-            eq(calls.status, "ACCEPTED"),
+            and(eq(calls.status, "ACCEPTED"), gt(acceptedAt, activeThreshold)),
             and(
               inArray(calls.status, ["INITIATED", "RINGING"]),
               gte(calls.startedAt, ringThreshold),
@@ -239,7 +242,10 @@ export class CallPgRepository implements CallRepository {
   async cleanupStaleCalls(
     thresholdDate = new Date(Date.now() - CALL_RING_LOCK_TTL_SECONDS * 1000),
   ): Promise<Array<CallWithUsers>> {
-    const staleRows = await this.db
+    const activeThreshold = new Date(Date.now() - CALL_ACTIVE_LOCK_TTL_SECONDS * 1000);
+    const acceptedAt = sql`coalesce(${calls.answeredAt}, ${calls.startedAt})`;
+
+    const staleRingingRows = await this.db
       .update(calls)
       .set({
         status: "MISSED",
@@ -251,8 +257,16 @@ export class CallPgRepository implements CallRepository {
       )
       .returning();
 
-    return staleRows.map((c) => ({
-      ...c,
-    }));
+    const staleAcceptedRows = await this.db
+      .update(calls)
+      .set({
+        status: "COMPLETED",
+        endedAt: sql`${acceptedAt} + (${CALL_ACTIVE_LOCK_TTL_SECONDS} * interval '1 second')`,
+        endReason: "MAX_DURATION",
+      })
+      .where(and(eq(calls.status, "ACCEPTED"), lte(acceptedAt, activeThreshold)))
+      .returning();
+
+    return [...staleRingingRows, ...staleAcceptedRows].map((c) => ({ ...c }));
   }
 }

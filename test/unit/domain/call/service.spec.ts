@@ -763,14 +763,29 @@ describe("CallService", () => {
   });
 
   describe("onApplicationBootstrap", () => {
-    it("cleans up stale ringing calls and releases their locks", async () => {
-      cleanupStaleCallsMock.mockResolvedValueOnce([mockCall]);
+    it("cleans up stale calls, releases their locks, and deletes their LiveKit room", async () => {
+      const deleteLiveKitRoomMock = vi
+        .spyOn(service, "deleteLiveKitRoom")
+        .mockResolvedValue(undefined);
+      const expiredCall: CallWithUsers = {
+        ...mockCall,
+        status: "COMPLETED",
+        endReason: "MAX_DURATION",
+      };
+      cleanupStaleCallsMock.mockResolvedValueOnce([expiredCall]);
 
       await service.onApplicationBootstrap();
 
       expect(cleanupStaleCallsMock).toHaveBeenCalled();
       expect(cacheReleaseLockMock).toHaveBeenCalledWith(activeCallUserKey(callerId), callId);
       expect(cacheReleaseLockMock).toHaveBeenCalledWith(activeCallUserKey(calleeId), callId);
+      expect(deleteLiveKitRoomMock).toHaveBeenCalledWith(callId);
+      expect(emitCallEndedMock).toHaveBeenCalledWith(callId, callerId, calleeId, {
+        callId,
+        reason: "MAX_DURATION",
+        durationSecs: expiredCall.durationSecs,
+      });
+      expect(leaveCallMock).toHaveBeenCalledWith([callerId, calleeId], callId);
     });
 
     it("handles bootstrap cleanup failure gracefully without throwing", async () => {

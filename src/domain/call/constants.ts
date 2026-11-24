@@ -9,3 +9,4 @@ export const CALL_RING_DISCONNECT_GRACE_MS = 5_500; // 5.5 seconds (long enough 
 export const CALL_RING_LOCK_TTL_SECONDS = 60; // 60 seconds Redis lock TTL for ringing phase (45s timeout + 15s buffer)
 export const CALL_ACTIVE_LOCK_TTL_SECONDS = 18_000; // 5 hours Redis lock TTL for in-progress call
 export const LIVEKIT_TOKEN_TTL_SECONDS = 18_000; // 5 hours LiveKit JWT token TTL
+export const CALL_STALE_CLEANUP_CRON_EXPRESSION = "*/5 * * * *"; // Every 5 minutes

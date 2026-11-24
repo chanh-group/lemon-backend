@@ -22,6 +22,7 @@ export type CallEndReason =
   | "MISSED_TIMEOUT"
   | "CANCELLED"
   | "DISCONNECTED_TIMEOUT"
+  | "MAX_DURATION"
   | "BUSY"
   | "FAILED";
 
