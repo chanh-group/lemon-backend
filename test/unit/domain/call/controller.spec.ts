@@ -5,6 +5,13 @@ import request from "supertest";
 import type { App } from "supertest/types.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { CallController } from "../../../../src/domain/call/controller.js";
+import {
+  RATE_LIMITER,
+  RATE_LIMIT_CALL_INITIATE_IP_MAX,
+  RATE_LIMIT_CALL_INITIATE_USER_MAX,
+  RATE_LIMIT_WINDOW_SECS,
+} from "../../../../src/middleware/ratelimit.js";
+import { ErrorFilter } from "../../../../src/middleware/error-filter.js";
 import { CallService } from "../../../../src/domain/call/service.js";
 import type {
   AcceptCallResponse,
@@ -12,6 +19,7 @@ import type {
   InitiateCallResponse,
 } from "../../../../src/domain/call/dto/response.js";
 import type { CursorPage } from "../../../../src/domain/shared.js";
+import type { Logger } from "../../../../src/utils/logger.js";
 import { standardSchemaPipe } from "../../../../src/utils/validation.js";
 
 describe("CallController", () => {
@@ -27,6 +35,7 @@ describe("CallController", () => {
   let cancelCallMock: Mock;
   let endCallMock: Mock;
   let listCallsMock: Mock;
+  let checkMixedLimitMock: Mock;
 
   const mockUserId = "0193a2b1-0000-7000-8000-000000000001";
   const mockPartnerId = "0193a2b1-0000-7000-8000-000000000002";
@@ -89,10 +98,15 @@ describe("CallController", () => {
       items: [mockCallResponse],
       hasMore: false,
     });
+    checkMixedLimitMock = vi.fn().mockResolvedValue(true);
 
     const moduleRef = await Test.createTestingModule({
       controllers: [CallController],
       providers: [
+        {
+          provide: RATE_LIMITER,
+          useValue: { checkMixedLimit: checkMixedLimitMock },
+        },
         {
           provide: CallService,
           useValue: {
@@ -112,6 +126,9 @@ describe("CallController", () => {
 
     app = moduleRef.createNestApplication();
     app.useGlobalPipes(standardSchemaPipe());
+    app.useGlobalFilters(
+      new ErrorFilter({ log: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as Logger),
+    );
     app.use((req: Request, _res: Response, next: () => void) => {
       (req as unknown as { user: { id: string } }).user = { id: mockUserId };
       next();
@@ -140,6 +157,25 @@ describe("CallController", () => {
       conversationId: mockConvId,
       media: "VIDEO",
     });
+    expect(checkMixedLimitMock).toHaveBeenCalledWith(
+      "initiate-call",
+      mockUserId,
+      expect.any(String),
+      RATE_LIMIT_CALL_INITIATE_USER_MAX,
+      RATE_LIMIT_CALL_INITIATE_IP_MAX,
+      RATE_LIMIT_WINDOW_SECS,
+    );
+  });
+
+  it("POST /calls rejects requests over the rate limit", async () => {
+    checkMixedLimitMock.mockResolvedValueOnce(false);
+
+    await request(server)
+      .post("/calls")
+      .send({ conversationId: mockConvId, media: "VIDEO" })
+      .expect(429);
+
+    expect(initiateCallMock).not.toHaveBeenCalled();
   });
 
   it("GET /calls/:id/token returns LiveKit access token", async () => {
@@ -176,12 +212,21 @@ describe("CallController", () => {
   it("POST /calls/:id/reject rejects a call", async () => {
     const res = await request(server)
       .post(`/calls/${mockCallId}/reject`)
-      .send({ reason: "Busy" })
+      .send({ reason: "BUSY" })
       .expect(200);
 
     expect(res.body.success).toBe(true);
     expect(res.body.data.status).toBe("REJECTED");
-    expect(rejectCallMock).toHaveBeenCalledWith(mockUserId, mockCallId, "Busy");
+    expect(rejectCallMock).toHaveBeenCalledWith(mockUserId, mockCallId, "BUSY");
+  });
+
+  it("POST /calls/:id/reject rejects unknown reasons", async () => {
+    await request(server)
+      .post(`/calls/${mockCallId}/reject`)
+      .send({ reason: "not-an-enum-value" })
+      .expect(422);
+
+    expect(rejectCallMock).not.toHaveBeenCalled();
   });
 
   it("POST /calls/:id/cancel cancels a call", async () => {
@@ -195,12 +240,21 @@ describe("CallController", () => {
   it("POST /calls/:id/end ends an ongoing call", async () => {
     const res = await request(server)
       .post(`/calls/${mockCallId}/end`)
-      .send({ reason: "Finished" })
+      .send({ reason: "NORMAL" })
       .expect(200);
 
     expect(res.body.success).toBe(true);
     expect(res.body.data.status).toBe("COMPLETED");
-    expect(endCallMock).toHaveBeenCalledWith(mockUserId, mockCallId, "Finished");
+    expect(endCallMock).toHaveBeenCalledWith(mockUserId, mockCallId, "NORMAL");
+  });
+
+  it("POST /calls/:id/end rejects unknown reasons", async () => {
+    await request(server)
+      .post(`/calls/${mockCallId}/end`)
+      .send({ reason: "not-an-enum-value" })
+      .expect(422);
+
+    expect(endCallMock).not.toHaveBeenCalled();
   });
 
   it("GET /calls lists calls with pagination", async () => {

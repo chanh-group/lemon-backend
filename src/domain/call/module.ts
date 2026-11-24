@@ -1,4 +1,5 @@
 import { Global, Module } from "@nestjs/common";
+import { RateLimitModule } from "../../middleware/ratelimit.module.js";
 import { ConversationModule } from "../conversation/module.js";
 import { CALL_DISCONNECT_HANDLER } from "../realtime/constants.js";
 import { RealtimeModule } from "../realtime/module.js";
@@ -13,7 +14,7 @@ import { CallService } from "./service.js";
 // constructor injection, which cannot see another module's exports at boot.
 @Global()
 @Module({
-  imports: [RealtimeModule, ConversationModule, UserModule],
+  imports: [RealtimeModule, ConversationModule, UserModule, RateLimitModule],
   controllers: [CallController],
   providers: [
     {

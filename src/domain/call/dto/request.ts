@@ -8,11 +8,11 @@ export const initiateCallSchema = z.object({
 export type InitiateCallDto = z.infer<typeof initiateCallSchema>;
 
 export const rejectCallSchema = z.object({
-  reason: z.string().trim().max(100).optional(),
+  reason: z.enum(["USER_DECLINED", "CALLEE_OFFLINE", "BUSY"]).optional(),
 });
 export type RejectCallDto = z.infer<typeof rejectCallSchema>;
 
 export const endCallSchema = z.object({
-  reason: z.string().trim().max(100).optional(),
+  reason: z.enum(["NORMAL", "WINDOW_CLOSED", "USER_HANGUP"]).optional(),
 });
 export type EndCallDto = z.infer<typeof endCallSchema>;

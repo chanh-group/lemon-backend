@@ -34,7 +34,7 @@ import type { InitiateCallDto } from "./dto/request.js";
 import type { AcceptCallResponse, CallResponse, InitiateCallResponse } from "./dto/response.js";
 import { toCallResponse } from "./dto/mapper.js";
 import { CALL_REPOSITORY, type CallRepository } from "./repository.js";
-import type { LiveKitConnectionDetails } from "./types.js";
+import type { CallEndReason, CallRejectReason, LiveKitConnectionDetails } from "./types.js";
 
 @Injectable()
 export class CallService implements OnApplicationShutdown, OnApplicationBootstrap {
@@ -357,7 +357,11 @@ export class CallService implements OnApplicationShutdown, OnApplicationBootstra
     };
   }
 
-  async rejectCall(calleeId: string, callId: string, reason?: string): Promise<CallResponse> {
+  async rejectCall(
+    calleeId: string,
+    callId: string,
+    reason?: CallRejectReason,
+  ): Promise<CallResponse> {
     const call = await this.callRepo.findById(callId);
     if (!call) {
       throw new BusinessError("CALL_NOT_FOUND");
@@ -430,7 +434,7 @@ export class CallService implements OnApplicationShutdown, OnApplicationBootstra
     return toCallResponse(updated);
   }
 
-  async endCall(userId: string, callId: string, reason?: string): Promise<CallResponse> {
+  async endCall(userId: string, callId: string, reason?: CallEndReason): Promise<CallResponse> {
     const call = await this.callRepo.findById(callId);
     if (!call) {
       throw new BusinessError("CALL_NOT_FOUND");

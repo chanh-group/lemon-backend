@@ -23,8 +23,14 @@ export type CallEndReason =
   | "CANCELLED"
   | "DISCONNECTED_TIMEOUT"
   | "MAX_DURATION"
+  | "WINDOW_CLOSED"
+  | "USER_HANGUP"
+  | "USER_DECLINED"
+  | "CALLEE_OFFLINE"
   | "BUSY"
   | "FAILED";
+
+export type CallRejectReason = "USER_DECLINED" | "CALLEE_OFFLINE" | "BUSY";
 
 export interface CallParticipant {
   id: string;
@@ -66,7 +72,7 @@ export interface CallAcceptedPayload {
 export interface CallRejectedPayload {
   callId: string;
   rejectedBy: string;
-  reason?: string;
+  reason?: CallRejectReason;
 }
 
 export interface CallCancelledPayload {
@@ -78,12 +84,12 @@ export interface CallMissedPayload {
   callId: string;
   callerId: string;
   media: CallMedia;
-  reason: string;
+  reason: CallEndReason;
 }
 
 export interface CallEndedPayload {
   callId: string;
   endedBy?: string;
-  reason: string;
+  reason: CallEndReason;
   durationSecs: number;
 }

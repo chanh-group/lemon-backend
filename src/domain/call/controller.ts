@@ -4,12 +4,22 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Inject,
   Param,
   ParseUUIDPipe,
   Post,
   Query,
   Req,
 } from "@nestjs/common";
+import {
+  RATE_LIMITER,
+  RATE_LIMIT_CALL_INITIATE_IP_MAX,
+  RATE_LIMIT_CALL_INITIATE_USER_MAX,
+  RATE_LIMIT_WINDOW_SECS,
+  assertMixedRateLimit,
+  extractClientIp,
+  type RateLimiter,
+} from "../../middleware/ratelimit.js";
 import { created, ok } from "../../utils/response.js";
 import { getAuthUser, parseCursorPage, type AuthUser } from "../shared.js";
 import { DEFAULT_CALL_PAGE_SIZE, MAX_CALL_PAGE_SIZE } from "./constants.js";
@@ -25,15 +35,27 @@ import { CallService } from "./service.js";
 
 @Controller("calls")
 export class CallController {
-  constructor(private readonly service: CallService) {}
+  constructor(
+    private readonly service: CallService,
+    @Inject(RATE_LIMITER) private readonly rateLimiter: RateLimiter,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
   async initiateCall(
-    @Req() req: { user?: unknown },
+    @Req() req: { user?: unknown; ip?: string; socket?: { remoteAddress?: string | null } },
     @Body({ schema: initiateCallSchema }) dto: InitiateCallDto,
   ) {
     const { id: userId }: AuthUser = getAuthUser(req);
+    await assertMixedRateLimit(
+      this.rateLimiter,
+      "initiate-call",
+      userId,
+      extractClientIp(req),
+      RATE_LIMIT_CALL_INITIATE_USER_MAX,
+      RATE_LIMIT_CALL_INITIATE_IP_MAX,
+      RATE_LIMIT_WINDOW_SECS,
+    );
     const data = await this.service.initiateCall(userId, dto);
     return created(data, "Call initiated");
   }
