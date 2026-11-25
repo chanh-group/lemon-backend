@@ -478,7 +478,15 @@ export class StoryPgRepository implements StoryRepository {
     anonymous: boolean = false,
   ): Promise<StoryReactionResult> {
     return this.db.transaction(async (tx) => {
-      await tx.insert(storyViews).values({ storyId, userId, anonymous }).onConflictDoNothing();
+      // Keep anonymous/viewedAt in sync with markAsViewed: a user who disables
+      // viewed receipts after an earlier view must not stay exposed as named.
+      await tx
+        .insert(storyViews)
+        .values({ storyId, userId, anonymous })
+        .onConflictDoUpdate({
+          target: [storyViews.storyId, storyViews.userId],
+          set: { anonymous, viewedAt: sql`now()` },
+        });
 
       const [row] = await tx
         .insert(storyReactions)

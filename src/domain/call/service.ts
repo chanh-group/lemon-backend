@@ -473,6 +473,21 @@ export class CallService implements OnApplicationShutdown, OnApplicationBootstra
     return toCallResponse(updated);
   }
 
+  /** Shared teardown after a terminal call status is written. */
+  private async finalizeCall(callId: string, callerId: string, calleeId: string): Promise<void> {
+    const ringTimer = this.ringingTimers.get(callId);
+    if (ringTimer) {
+      clearTimeout(ringTimer);
+      this.ringingTimers.delete(callId);
+    }
+    await Promise.allSettled([
+      this.cache.releaseLock(activeCallUserKey(callerId), callId),
+      this.cache.releaseLock(activeCallUserKey(calleeId), callId),
+    ]);
+    this.realtimeService.leaveCall([callerId, calleeId], callId);
+    await this.deleteLiveKitRoom(callId);
+  }
+
   async handleRingingTimeout(callId: string): Promise<void> {
     this.ringingTimers.delete(callId);
 
@@ -483,11 +498,6 @@ export class CallService implements OnApplicationShutdown, OnApplicationBootstra
     });
 
     if (!updated) return;
-
-    await Promise.allSettled([
-      this.cache.releaseLock(activeCallUserKey(updated.callerId), callId),
-      this.cache.releaseLock(activeCallUserKey(updated.calleeId), callId),
-    ]);
 
     this.realtimeService.emitCallEnded(callId, updated.callerId, updated.calleeId, {
       callId,
@@ -502,8 +512,7 @@ export class CallService implements OnApplicationShutdown, OnApplicationBootstra
       reason: "MISSED_TIMEOUT",
     });
 
-    this.realtimeService.leaveCall([updated.callerId, updated.calleeId], callId);
-    await this.deleteLiveKitRoom(callId);
+    await this.finalizeCall(callId, updated.callerId, updated.calleeId);
   }
 
   async handleUserDisconnect(userId: string): Promise<void> {
@@ -592,23 +601,11 @@ export class CallService implements OnApplicationShutdown, OnApplicationBootstra
       return;
     }
 
-    const ringTimer = this.ringingTimers.get(callId);
-    if (ringTimer) {
-      clearTimeout(ringTimer);
-      this.ringingTimers.delete(callId);
-    }
-
-    await Promise.allSettled([
-      this.cache.releaseLock(activeCallUserKey(updated.callerId), callId),
-      this.cache.releaseLock(activeCallUserKey(updated.calleeId), callId),
-    ]);
-
     this.realtimeService.emitCallCancelled(updated.calleeId, {
       callId,
       cancelledBy: callerId,
     });
-    this.realtimeService.leaveCall([updated.callerId, updated.calleeId], callId);
-    await this.deleteLiveKitRoom(callId);
+    await this.finalizeCall(callId, updated.callerId, updated.calleeId);
   }
 
   /**
@@ -625,17 +622,6 @@ export class CallService implements OnApplicationShutdown, OnApplicationBootstra
     // Call was answered / rejected / cancelled during the grace period.
     if (!updated) return;
 
-    const ringTimer = this.ringingTimers.get(callId);
-    if (ringTimer) {
-      clearTimeout(ringTimer);
-      this.ringingTimers.delete(callId);
-    }
-
-    await Promise.allSettled([
-      this.cache.releaseLock(activeCallUserKey(updated.callerId), callId),
-      this.cache.releaseLock(activeCallUserKey(updated.calleeId), callId),
-    ]);
-
     this.realtimeService.emitCallMissed(updated.callerId, {
       callId,
       callerId: updated.callerId,
@@ -649,8 +635,7 @@ export class CallService implements OnApplicationShutdown, OnApplicationBootstra
       durationSecs: 0,
     });
 
-    this.realtimeService.leaveCall([updated.callerId, updated.calleeId], callId);
-    await this.deleteLiveKitRoom(callId);
+    await this.finalizeCall(callId, updated.callerId, updated.calleeId);
   }
 
   async handleUserReconnect(userId: string): Promise<void> {

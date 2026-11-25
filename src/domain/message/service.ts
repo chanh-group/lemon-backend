@@ -26,7 +26,11 @@ import { ATTACHMENT_URL_TTL_SECS } from "./constants.js";
 import { isMessageBodyWithinLimit } from "./body-length.js";
 import { DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE } from "../pagination.constants.js";
 import { STORAGE_SERVICE, type StorageService } from "../../utils/storage/store.js";
-import { BYTES_PER_MB, CHAT_MAX_FILE_BYTES } from "../../utils/cache/constants.js";
+import {
+  BYTES_PER_MB,
+  CHAT_DEFAULT_BUCKET,
+  CHAT_MAX_FILE_BYTES,
+} from "../../utils/cache/constants.js";
 import type { StoryPreview } from "../story/types.js";
 import type { Story } from "../story/schema.js";
 import { toStoryPreview } from "../story/dto/mapper.js";
@@ -254,12 +258,12 @@ export class MessageService {
       if (reply.deletedAt) throw new BusinessError("MESSAGE_REVOKED");
     }
 
-    let bucket = "lemon-chat-storage";
+    let bucket = CHAT_DEFAULT_BUCKET;
     if (this.storage) {
       try {
         bucket = this.storage.getBucket();
       } catch {
-        bucket = "lemon-chat-storage";
+        bucket = CHAT_DEFAULT_BUCKET;
       }
     }
 

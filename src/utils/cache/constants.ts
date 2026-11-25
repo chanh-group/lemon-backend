@@ -19,6 +19,8 @@ export const STORY_FEED_KEY_PREFIX = "stories:feed:";
 export const STORY_FEED_TTL_SECS = 60; // 1 minute — per-viewer feed tray cache
 export const STORY_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours — story lifetime
 export const STORY_DEFAULT_BUCKET = "lemon-stories";
+// Chat attachment fallback when no storage service is configured (dev/test).
+export const CHAT_DEFAULT_BUCKET = "lemon-chat-storage";
 
 // Story media upload limits (single source used by presign AND verify).
 export const STORY_MAX_IMAGE_BYTES = 25 * 1024 * 1024; // 25MB
@@ -151,4 +153,3 @@ export const OFFLINE_PRESENCE_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 // Call session
 export const ACTIVE_CALL_KEY_PREFIX = "call:active:user:";
-export const ACTIVE_CALL_LOCK_TTL_SECONDS = 60; // Auto-evicts orphaned locks if process crashes

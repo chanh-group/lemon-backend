@@ -5,6 +5,11 @@ import type { DrizzleDb } from "../../../../src/configs/database.js";
 import { GROUP_MAX_MEMBERS } from "../../../../src/domain/conversation/constants.js";
 import { ConversationPgRepository } from "../../../../src/domain/conversation/pg.js";
 import {
+  ATTACHMENT_PREVIEW_TOKEN,
+  MESSAGE_REVOKED_PREVIEW_TOKEN,
+  STORY_REACTION_PREVIEW_TOKEN,
+} from "../../../../src/domain/message/constants.js";
+import {
   avatarCleanupJobs,
   conversationParticipants,
   conversations,
@@ -871,6 +876,29 @@ describe("ConversationPgRepository.findById", () => {
     const repo = new ConversationPgRepository(db);
 
     await expect(repo.findById(convRow.id, userAId)).resolves.toBeNull();
+  });
+
+  it("uses the shared preview tokens in the inbox projection", async () => {
+    const { db, dbSelect } = makeDb();
+    dbSelect.limitMock.mockResolvedValueOnce([]);
+    const repo = new ConversationPgRepository(db);
+
+    await repo.findById(convRow.id, userAId);
+
+    const projection = (dbSelect.selectMock.mock.calls as unknown as [Record<string, SQL>][])[0][0];
+    const preview = render(projection.lastMessagePreview);
+    expect(preview.params).toEqual(
+      expect.arrayContaining([
+        MESSAGE_REVOKED_PREVIEW_TOKEN,
+        STORY_REACTION_PREVIEW_TOKEN,
+        ATTACHMENT_PREVIEW_TOKEN,
+        userAId,
+        userAId,
+      ]),
+    );
+    expect(preview.sql).not.toContain("'[message-revoked]'");
+    expect(preview.sql).not.toContain("'[story-reaction]'");
+    expect(preview.sql).not.toContain("'[attachment]'");
   });
 });
 

@@ -234,6 +234,38 @@ describe("StoryPgRepository purge queries", () => {
       });
     });
 
+    it("addReactionWithView updates anonymous on an existing view", async () => {
+      const { db, insertMock, valuesMock, onConflictMock, returningMock } = makeDb();
+      returningMock.mockResolvedValue([
+        {
+          storyId: "s1",
+          userId: "u1",
+          emoji: "🔥",
+          kind: "REACTION",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          isNew: true,
+        },
+      ]);
+      const repo = new StoryPgRepository(db);
+
+      await repo.addReactionWithView("s1", "u1", "🔥", "REACTION", true);
+
+      expect(insertMock).toHaveBeenCalledWith(storyViews);
+      expect(valuesMock).toHaveBeenCalledWith({
+        storyId: "s1",
+        userId: "u1",
+        anonymous: true,
+      });
+      const viewConflict = onConflictMock.mock.calls[0][0] as {
+        target: unknown[];
+        set: Record<string, unknown>;
+      };
+      expect(viewConflict.target).toEqual([storyViews.storyId, storyViews.userId]);
+      expect(viewConflict.set.anonymous).toBe(true);
+      expect(render(viewConflict.set.viewedAt as SQL)).toBe("now()");
+    });
+
     it("addReactionWithView keeps the original created_at when the emoji changes", async () => {
       const { db, onConflictMock, returningMock } = makeDb();
       returningMock.mockResolvedValue([
@@ -251,7 +283,7 @@ describe("StoryPgRepository purge queries", () => {
 
       await repo.addReactionWithView("s1", "u1", "😂");
 
-      const conflict = onConflictMock.mock.calls[0][0] as {
+      const conflict = onConflictMock.mock.calls[1][0] as {
         set: Record<string, unknown>;
       };
       expect(conflict.set).not.toHaveProperty("createdAt");

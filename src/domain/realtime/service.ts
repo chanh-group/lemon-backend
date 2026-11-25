@@ -37,6 +37,26 @@ export class RealtimeService {
   constructor(private readonly gateway: ChatGateway) {}
 
   /**
+   * Emit to each user room when recipients are given (viewer-dependent events),
+   * otherwise to the conversation room. One routing decision for all callers.
+   */
+  private emitToUsersOrRoom(
+    userIds: string[] | undefined,
+    room: string,
+    event: string,
+    payload: unknown,
+  ): void {
+    if (!this.gateway?.server) return;
+    if (userIds) {
+      for (const userId of userIds) {
+        this.gateway.server.to(userRoom(userId)).emit(event, payload);
+      }
+      return;
+    }
+    this.gateway.server.to(room).emit(event, payload);
+  }
+
+  /**
    * Broadcast a newly created message to the conversation room
    */
   emitNewMessage(
@@ -93,13 +113,12 @@ export class RealtimeService {
   ): void {
     if (!this.gateway?.server) return;
     try {
-      if (recipientUserIds) {
-        for (const userId of recipientUserIds)
-          this.gateway.server.to(userRoom(userId)).emit(REALTIME_EVENTS.MESSAGE_UPDATED, updated);
-      } else
-        this.gateway.server
-          .to(convRoom(conversationId))
-          .emit(REALTIME_EVENTS.MESSAGE_UPDATED, updated);
+      this.emitToUsersOrRoom(
+        recipientUserIds,
+        convRoom(conversationId),
+        REALTIME_EVENTS.MESSAGE_UPDATED,
+        updated,
+      );
     } catch (err) {
       logger.warn(`Failed to emit message:updated: ${String(err)}`);
     }
@@ -119,13 +138,12 @@ export class RealtimeService {
         ...payload,
         conversationId,
       };
-      if (recipientUserIds) {
-        for (const userId of recipientUserIds)
-          this.gateway.server.to(userRoom(userId)).emit(REALTIME_EVENTS.MESSAGE_REVOKED, event);
-      } else
-        this.gateway.server
-          .to(convRoom(conversationId))
-          .emit(REALTIME_EVENTS.MESSAGE_REVOKED, event);
+      this.emitToUsersOrRoom(
+        recipientUserIds,
+        convRoom(conversationId),
+        REALTIME_EVENTS.MESSAGE_REVOKED,
+        event,
+      );
     } catch (err) {
       logger.warn(`Failed to emit message:revoked: ${String(err)}`);
     }
@@ -175,11 +193,12 @@ export class RealtimeService {
         ...payload,
         conversationId,
       };
-      if (recipientUserIds) {
-        for (const userId of recipientUserIds)
-          this.gateway.server.to(userRoom(userId)).emit(REALTIME_EVENTS.READ_UPDATED, event);
-      } else
-        this.gateway.server.to(convRoom(conversationId)).emit(REALTIME_EVENTS.READ_UPDATED, event);
+      this.emitToUsersOrRoom(
+        recipientUserIds,
+        convRoom(conversationId),
+        REALTIME_EVENTS.READ_UPDATED,
+        event,
+      );
     } catch (err) {
       logger.warn(`Failed to emit read:updated: ${String(err)}`);
     }
@@ -204,13 +223,12 @@ export class RealtimeService {
         ...payload,
         conversationId,
       };
-      if (recipientUserIds) {
-        for (const userId of recipientUserIds)
-          this.gateway.server.to(userRoom(userId)).emit(REALTIME_EVENTS.MESSAGE_REACTION, event);
-      } else
-        this.gateway.server
-          .to(convRoom(conversationId))
-          .emit(REALTIME_EVENTS.MESSAGE_REACTION, event);
+      this.emitToUsersOrRoom(
+        recipientUserIds,
+        convRoom(conversationId),
+        REALTIME_EVENTS.MESSAGE_REACTION,
+        event,
+      );
     } catch (err) {
       logger.warn(`Failed to emit message:reaction for conv ${conversationId}: ${String(err)}`);
     }

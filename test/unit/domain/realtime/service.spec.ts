@@ -87,6 +87,20 @@ describe("RealtimeService", () => {
     });
   });
 
+  describe("viewer-dependent event routing", () => {
+    it("emits message:revoked to individual user rooms, not the conversation room", () => {
+      const emit = vi.fn();
+      const to = vi.fn().mockReturnValue({ emit });
+      const service = createService(to);
+
+      service.emitMessageRevoked("c1", { id: "m1", deletedAt: new Date() }, ["u2", "u3"]);
+
+      expect(to.mock.calls.map(([room]) => room)).toEqual([userRoom("u2"), userRoom("u3")]);
+      expect(to).not.toHaveBeenCalledWith("conv:c1");
+      expect(emit).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe("emitReadUpdated", () => {
     it("includes the conversation id in the event payload", () => {
       const emit = vi.fn();
