@@ -20,7 +20,6 @@ describe("ConversationService", () => {
   let findUserConversationsMock: Mock;
   let existsByIdMock: Mock;
   let findByIdMock: Mock;
-  let isMessageInConversationMock: Mock;
   let canAccessMessageMock: Mock;
   let updateLastReadMock: Mock;
   let countUnreadMock: Mock;
@@ -81,7 +80,6 @@ describe("ConversationService", () => {
     findUserConversationsMock = vi.fn();
     existsByIdMock = vi.fn();
     findByIdMock = vi.fn();
-    isMessageInConversationMock = vi.fn().mockResolvedValue(true);
     canAccessMessageMock = vi.fn().mockResolvedValue(true);
     updateLastReadMock = vi.fn();
     countUnreadMock = vi.fn();
@@ -116,7 +114,6 @@ describe("ConversationService", () => {
       findUserConversations: findUserConversationsMock,
       existsById: existsByIdMock,
       findById: findByIdMock,
-      isMessageInConversation: isMessageInConversationMock,
       canAccessMessage: canAccessMessageMock,
       updateLastRead: updateLastReadMock,
       countUnread: countUnreadMock,
@@ -745,7 +742,7 @@ describe("ConversationService", () => {
 
       await service.markAsRead(convId, userA, "msg-123");
 
-      expect(isMessageInConversationMock).toHaveBeenCalledWith(convId, "msg-123");
+      expect(canAccessMessageMock).toHaveBeenCalledWith(convId, userA, "msg-123");
       expect(updateLastReadMock).toHaveBeenCalledWith(convId, userA, "msg-123");
       expect(redisDelMock).not.toHaveBeenCalled();
       expect(redisPipelineMock).not.toHaveBeenCalled();
@@ -757,15 +754,15 @@ describe("ConversationService", () => {
       );
     });
 
-    it("rejects a lastReadMessageId that does not belong to the conversation", async () => {
+    it("rejects a lastReadMessageId the viewer cannot access", async () => {
       existsByIdMock.mockResolvedValue(true);
       findByIdMock.mockResolvedValue({ ...mockConvWithPartner });
-      isMessageInConversationMock.mockResolvedValue(false);
+      canAccessMessageMock.mockResolvedValue(false);
 
       await expect(service.markAsRead(convId, userA, "msg-other")).rejects.toThrow(
         expect.objectContaining({ code: "BAD_REQUEST" }),
       );
-      expect(isMessageInConversationMock).toHaveBeenCalledWith(convId, "msg-other");
+      expect(canAccessMessageMock).toHaveBeenCalledWith(convId, userA, "msg-other");
       expect(updateLastReadMock).not.toHaveBeenCalled();
       expect(redisDelMock).not.toHaveBeenCalled();
       expect(emitReadUpdatedMock).not.toHaveBeenCalled();
@@ -778,7 +775,7 @@ describe("ConversationService", () => {
       await expect(service.markAsRead(convId, userA, "msg-123")).rejects.toThrow(
         expect.objectContaining({ code: "NOT_PARTICIPANT" }),
       );
-      expect(isMessageInConversationMock).not.toHaveBeenCalled();
+      expect(canAccessMessageMock).not.toHaveBeenCalled();
       expect(updateLastReadMock).not.toHaveBeenCalled();
     });
 
@@ -788,7 +785,7 @@ describe("ConversationService", () => {
       await expect(service.markAsRead(convId, userA, "msg-123")).rejects.toThrow(
         expect.objectContaining({ code: "CONVERSATION_NOT_FOUND" }),
       );
-      expect(isMessageInConversationMock).not.toHaveBeenCalled();
+      expect(canAccessMessageMock).not.toHaveBeenCalled();
       expect(updateLastReadMock).not.toHaveBeenCalled();
     });
 
@@ -797,7 +794,7 @@ describe("ConversationService", () => {
         expect.objectContaining({ code: "BAD_REQUEST" }),
       );
       expect(existsByIdMock).not.toHaveBeenCalled();
-      expect(isMessageInConversationMock).not.toHaveBeenCalled();
+      expect(canAccessMessageMock).not.toHaveBeenCalled();
     });
   });
 });

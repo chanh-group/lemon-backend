@@ -215,7 +215,7 @@ describe("StoryService", () => {
     const mockRepo: StoryRepository = {
       create: createStoryMock,
       findUnmeasuredMedia: vi.fn().mockResolvedValue([]),
-      setMediaSize: vi.fn().mockResolvedValue(undefined),
+      setMediaSizes: vi.fn().mockResolvedValue(undefined),
       getStorageUsage: vi.fn().mockResolvedValue(0),
       updateActive: updateActiveMock,
       findById: findByIdMock,
@@ -485,14 +485,14 @@ describe("StoryService", () => {
         { id: "s1", objectKey: "stories/u/gone.jpg" },
         { id: "s2", objectKey: "stories/u/exists.jpg" },
       ]);
-      const setMediaSizeMock = vi.fn().mockResolvedValue(undefined);
+      const setMediaSizesMock = vi.fn().mockResolvedValue(undefined);
       headObjectMock
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce({ contentLength: 500, contentType: "image/jpeg" });
 
       const repo = {
         findUnmeasuredMedia: findUnmeasuredMock,
-        setMediaSize: setMediaSizeMock,
+        setMediaSizes: setMediaSizesMock,
       };
       const svc = new StoryService(
         repo as never,
@@ -507,8 +507,49 @@ describe("StoryService", () => {
         svc as unknown as { measureLegacyMedia(id: string): Promise<void> }
       ).measureLegacyMedia("user-1");
 
-      expect(setMediaSizeMock).toHaveBeenCalledWith("s1", 0);
-      expect(setMediaSizeMock).toHaveBeenCalledWith("s2", 500);
+      expect(setMediaSizesMock).toHaveBeenCalledTimes(1);
+      expect(setMediaSizesMock).toHaveBeenCalledWith([
+        { id: "s1", sizeBytes: 0 },
+        { id: "s2", sizeBytes: 500 },
+      ]);
+    });
+
+    it("batches head requests instead of awaiting them one by one", async () => {
+      const findUnmeasuredMock = vi
+        .fn()
+        .mockResolvedValue(
+          Array.from({ length: 5 }, (_, i) => ({ id: `s${i}`, objectKey: `stories/u/${i}.jpg` })),
+        );
+      let resolveAll: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        resolveAll = resolve;
+      });
+      headObjectMock.mockImplementation(() => gate.then(() => ({ contentLength: 10 })));
+      const setMediaSizesMock = vi.fn().mockResolvedValue(undefined);
+      const repo = {
+        findUnmeasuredMedia: findUnmeasuredMock,
+        setMediaSizes: setMediaSizesMock,
+      };
+      const svc = new StoryService(
+        repo as never,
+        {} as never,
+        storageMock,
+        conversationServiceMock,
+        messageServiceMock,
+        realtimeServiceMock,
+      );
+
+      const measuring = (
+        svc as unknown as { measureLegacyMedia(id: string): Promise<void> }
+      ).measureLegacyMedia("user-1");
+
+      await Promise.resolve();
+      expect(headObjectMock).toHaveBeenCalledTimes(5);
+      expect(setMediaSizesMock).not.toHaveBeenCalled();
+
+      resolveAll?.();
+      await measuring;
+      expect(setMediaSizesMock).toHaveBeenCalledTimes(1);
     });
   });
 

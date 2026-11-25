@@ -72,6 +72,7 @@ function makeDb(rows: unknown[] = []) {
     delete: deleteMock,
     insert: insertMock,
     update: updateMock,
+    execute: executeMock,
     transaction: transactionMock,
   } as unknown as DrizzleDb;
   return {
@@ -883,19 +884,31 @@ describe("StoryPgRepository.findActiveById", () => {
   });
 });
 
-describe("StoryPgRepository.setMediaSize", () => {
-  it("backfills media_size_bytes only while it is still unknown", async () => {
-    const { db, updateMock, updateSetMock, updateWhereMock } = makeDb();
+describe("StoryPgRepository.setMediaSizes", () => {
+  it("backfills all measured rows in one update while sizes are still unknown", async () => {
+    const { db, executeMock } = makeDb();
     const repo = new StoryPgRepository(db);
 
-    await repo.setMediaSize("s1", 2048);
+    await repo.setMediaSizes([
+      { id: "s1", sizeBytes: 2048 },
+      { id: "s2", sizeBytes: 500 },
+    ]);
 
-    expect(updateMock).toHaveBeenCalledWith(stories);
-    expect(updateSetMock).toHaveBeenCalledWith({ mediaSizeBytes: 2048 });
-    const whereSql = render(updateWhereMock.mock.calls[0][0]);
-    expect(whereSql).toContain('"stories"."id" = $1');
-    expect(whereSql).toContain('"stories"."media_size_bytes" is null');
-    expect(dialect.sqlToQuery(updateWhereMock.mock.calls[0][0]).params).toEqual(["s1"]);
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    const query = dialect.sqlToQuery((executeMock.mock.calls as unknown as Array<[SQL]>)[0][0]);
+    expect(query.sql).toContain("UPDATE stories");
+    expect(query.sql).toContain("media_size_bytes = measured.size_bytes");
+    expect(query.sql).toContain("stories.media_size_bytes IS NULL");
+    expect(query.params).toEqual(["s1", 2048, "s2", 500]);
+  });
+
+  it("does not touch the database for an empty batch", async () => {
+    const { db, executeMock } = makeDb();
+    const repo = new StoryPgRepository(db);
+
+    await repo.setMediaSizes([]);
+
+    expect(executeMock).not.toHaveBeenCalled();
   });
 });
 

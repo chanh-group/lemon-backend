@@ -1166,15 +1166,6 @@ export class ConversationPgRepository implements ConversationRepository {
     return Boolean(row);
   }
 
-  async isMessageInConversation(conversationId: string, messageId: string): Promise<boolean> {
-    const [row] = await this.db
-      .select({ id: messages.id })
-      .from(messages)
-      .where(and(eq(messages.id, messageId), eq(messages.conversationId, conversationId)))
-      .limit(1);
-    return Boolean(row);
-  }
-
   async isParticipant(conversationId: string, userId: string): Promise<boolean> {
     const [row] = await this.db
       .select({ conversationId: conversationParticipants.conversationId })
@@ -1428,22 +1419,47 @@ export class ConversationPgRepository implements ConversationRepository {
       .limit(limit);
   }
 
+  async getGroupAvatarUrls(conversationIds: string[]): Promise<Map<string, string | null>> {
+    if (conversationIds.length === 0) return new Map();
+    const rows = await this.db
+      .select({ id: conversations.id, avatarUrl: conversations.avatarUrl })
+      .from(conversations)
+      .where(
+        and(
+          inArray(conversations.id, conversationIds),
+          eq(conversations.kind, "GROUP"),
+          isNull(conversations.deletedAt),
+        ),
+      );
+    return new Map(rows.map((row) => [row.id, row.avatarUrl]));
+  }
+
   async completeAvatarCleanupJobs(ids: string[]): Promise<number> {
     if (ids.length === 0) return 0;
     const res = await this.db.delete(avatarCleanupJobs).where(inArray(avatarCleanupJobs.id, ids));
     return (res as unknown as { rowCount?: number }).rowCount ?? ids.length;
   }
 
-  async failAvatarCleanupJob(id: string, attempts: number, error: string): Promise<void> {
-    const nextAttempts = attempts + 1;
-    await this.db
-      .update(avatarCleanupJobs)
-      .set({
-        attempts: nextAttempts,
-        status: nextAttempts >= AVATAR_CLEANUP_MAX_ATTEMPTS ? "FAILED" : "PENDING",
-        lastError: error.slice(0, AVATAR_CLEANUP_ERROR_MAX_LENGTH),
-        updatedAt: sql`now()`,
-      })
-      .where(eq(avatarCleanupJobs.id, id));
+  async failAvatarCleanupJobs(
+    entries: Array<{ id: string; attempts: number; error: string }>,
+  ): Promise<void> {
+    if (entries.length === 0) return;
+    const values = sql.join(
+      entries.map((entry) => {
+        const nextAttempts = entry.attempts + 1;
+        const status = nextAttempts >= AVATAR_CLEANUP_MAX_ATTEMPTS ? "FAILED" : "PENDING";
+        return sql`(${entry.id}, ${nextAttempts}, ${entry.error.slice(0, AVATAR_CLEANUP_ERROR_MAX_LENGTH)}, ${status}::avatar_cleanup_status)`;
+      }),
+      sql`, `,
+    );
+    await this.db.execute(sql`
+      UPDATE avatar_cleanup_jobs AS job
+      SET attempts = measured.attempts,
+          status = measured.status,
+          last_error = measured.error,
+          updated_at = now()
+      FROM (VALUES ${values}) AS measured(id, attempts, error, status)
+      WHERE job.id = measured.id::uuid
+    `);
   }
 }

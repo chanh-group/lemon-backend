@@ -71,10 +71,13 @@ export class StoryService {
 
   private async measureLegacyMedia(userId: string): Promise<void> {
     const rows = await this.storyRepo.findUnmeasuredMedia(userId);
-    for (const row of rows) {
-      const head = await this.storage.headObject(row.objectKey);
-      await this.storyRepo.setMediaSize(row.id, head?.contentLength ?? 0);
-    }
+    if (rows.length === 0) return;
+    // One S3 batch and one DB batch: legacy rows are unbounded, so doing this
+    // per row blocked story creation for minutes on old accounts.
+    const heads = await Promise.all(rows.map((row) => this.storage.headObject(row.objectKey)));
+    await this.storyRepo.setMediaSizes(
+      rows.map((row, index) => ({ id: row.id, sizeBytes: heads[index]?.contentLength ?? 0 })),
+    );
   }
 
   async getStorageUsage(userId: string): Promise<{ usedBytes: number; limitBytes: number }> {

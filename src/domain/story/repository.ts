@@ -41,7 +41,7 @@ export interface StoryRepository {
   /** Active only (feed/chat semantics): unexpired, undeleted, unarchived — mirror of findActiveById. */
   findViewableByIds(ids: string[], viewerId: string): Promise<Story[]>;
   findUnmeasuredMedia(userId: string): Promise<Array<{ id: string; objectKey: string }>>;
-  setMediaSize(id: string, size: number): Promise<void>;
+  setMediaSizes(entries: Array<{ id: string; sizeBytes: number }>): Promise<void>;
   getStorageUsage(userId: string): Promise<number>;
   updateActive(
     id: string,

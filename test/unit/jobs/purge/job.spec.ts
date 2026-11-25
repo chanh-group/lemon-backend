@@ -44,9 +44,9 @@ function setup(opts?: {
   storage: StorageStub;
   conversationRepo: {
     findPendingAvatarCleanupJobs: ReturnType<typeof vi.fn>;
-    getGroupAvatarUrl: ReturnType<typeof vi.fn>;
+    getGroupAvatarUrls: ReturnType<typeof vi.fn>;
     completeAvatarCleanupJobs: ReturnType<typeof vi.fn>;
-    failAvatarCleanupJob: ReturnType<typeof vi.fn>;
+    failAvatarCleanupJobs: ReturnType<typeof vi.fn>;
   };
 } {
   const cache = new MemoryCacheService();
@@ -67,9 +67,9 @@ function setup(opts?: {
   };
   const conversationRepo = {
     findPendingAvatarCleanupJobs: vi.fn().mockResolvedValue(opts?.avatarJobs ?? []),
-    getGroupAvatarUrl: vi.fn().mockResolvedValue(null),
+    getGroupAvatarUrls: vi.fn().mockResolvedValue(new Map()),
     completeAvatarCleanupJobs: vi.fn().mockResolvedValue(0),
-    failAvatarCleanupJob: vi.fn().mockResolvedValue(undefined),
+    failAvatarCleanupJobs: vi.fn().mockResolvedValue(undefined),
   };
   const job = new PurgeJob(
     storyRepo as unknown as StoryRepository,
@@ -269,7 +269,7 @@ describe("PurgeJob", () => {
     expect(noteRepo.deleteByIds).toHaveBeenCalledWith(["n1"]);
   });
 
-  it("keeps an avatar cleanup job when the current reference cannot be checked", async () => {
+  it("keeps all avatar cleanup jobs when the batch reference lookup fails", async () => {
     const { job, storage, conversationRepo } = setup({
       avatarJobs: [
         {
@@ -280,12 +280,91 @@ describe("PurgeJob", () => {
         },
       ],
     });
-    conversationRepo.getGroupAvatarUrl.mockRejectedValue(new Error("database unavailable"));
+    conversationRepo.getGroupAvatarUrls.mockRejectedValue(new Error("database unavailable"));
 
     await job.run();
 
     expect(storage.deleteObjects).not.toHaveBeenCalled();
     expect(conversationRepo.completeAvatarCleanupJobs).not.toHaveBeenCalled();
-    expect(conversationRepo.failAvatarCleanupJob).not.toHaveBeenCalled();
+    expect(conversationRepo.failAvatarCleanupJobs).not.toHaveBeenCalled();
+  });
+
+  it("looks up every avatar reference once and cancels jobs still in use", async () => {
+    const { job, storage, conversationRepo } = setup({
+      avatarJobs: [
+        {
+          id: "job-1",
+          conversationId: "group-1",
+          objectKey: "group-avatars/group-1/0193a2b1-0000-7000-8000-0000000000a1.png",
+          attempts: 0,
+        },
+        {
+          id: "job-2",
+          conversationId: "group-2",
+          objectKey: "group-avatars/group-2/0193a2b1-0000-7000-8000-0000000000b1.png",
+          attempts: 1,
+        },
+      ],
+      deleted: ["group-avatars/group-2/0193a2b1-0000-7000-8000-0000000000b1.png"],
+    });
+    conversationRepo.getGroupAvatarUrls.mockResolvedValue(
+      new Map([
+        [
+          "group-1",
+          "http://localhost:3000/api/files/group-avatars/group-1/0193a2b1-0000-7000-8000-0000000000a1.png",
+        ],
+        [
+          "group-2",
+          "http://localhost:3000/api/files/group-avatars/group-2/0193a2b1-0000-7000-8000-0000000000c1.png",
+        ],
+      ]),
+    );
+
+    await job.run();
+
+    expect(conversationRepo.getGroupAvatarUrls).toHaveBeenCalledTimes(1);
+    expect(conversationRepo.getGroupAvatarUrls).toHaveBeenCalledWith(["group-1", "group-2"]);
+    expect(storage.deleteObjects).toHaveBeenCalledWith([
+      "group-avatars/group-2/0193a2b1-0000-7000-8000-0000000000b1.png",
+    ]);
+    expect(conversationRepo.completeAvatarCleanupJobs).toHaveBeenNthCalledWith(1, ["job-1"]);
+    expect(conversationRepo.completeAvatarCleanupJobs).toHaveBeenNthCalledWith(2, ["job-2"]);
+    expect(conversationRepo.failAvatarCleanupJobs).not.toHaveBeenCalled();
+  });
+
+  it("records S3 deletion failures for all jobs in one batch", async () => {
+    const { job, conversationRepo } = setup({
+      avatarJobs: [
+        {
+          id: "job-1",
+          conversationId: "group-1",
+          objectKey: "group-avatars/group-1/a.png",
+          attempts: 0,
+        },
+        {
+          id: "job-2",
+          conversationId: "group-2",
+          objectKey: "group-avatars/group-2/b.png",
+          attempts: 2,
+        },
+      ],
+      failed: ["group-avatars/group-1/a.png", "group-avatars/group-2/b.png"],
+    });
+
+    await job.run();
+
+    expect(conversationRepo.failAvatarCleanupJobs).toHaveBeenCalledTimes(1);
+    expect(conversationRepo.failAvatarCleanupJobs).toHaveBeenCalledWith([
+      {
+        id: "job-1",
+        attempts: 0,
+        error: "Storage deleteObjects reported failed",
+      },
+      {
+        id: "job-2",
+        attempts: 2,
+        error: "Storage deleteObjects reported failed",
+      },
+    ]);
   });
 });

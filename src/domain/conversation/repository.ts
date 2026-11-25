@@ -99,7 +99,6 @@ export interface ConversationRepository {
   findById(conversationId: string, userId: string): Promise<ConversationWithPartner | null>;
   existsById(conversationId: string): Promise<boolean>;
   isParticipant(conversationId: string, userId: string): Promise<boolean>;
-  isMessageInConversation(conversationId: string, messageId: string): Promise<boolean>;
   canAccessMessage(conversationId: string, userId: string, messageId: string): Promise<boolean>;
   getMessageRecipientUserIds(conversationId: string, messageId: string): Promise<string[]>;
   getParticipantUserIds(conversationId: string): Promise<string[]>;
@@ -114,8 +113,11 @@ export interface ConversationRepository {
   ): Promise<
     Array<{ id: string; conversationId: string | null; objectKey: string; attempts: number }>
   >;
+  getGroupAvatarUrls(conversationIds: string[]): Promise<Map<string, string | null>>;
   completeAvatarCleanupJobs(ids: string[]): Promise<number>;
-  failAvatarCleanupJob(id: string, attempts: number, error: string): Promise<void>;
+  failAvatarCleanupJobs(
+    entries: Array<{ id: string; attempts: number; error: string }>,
+  ): Promise<void>;
 }
 
 export const CONVERSATION_REPOSITORY = Symbol("CONVERSATION_REPOSITORY");

@@ -111,11 +111,19 @@ export class StoryPgRepository implements StoryRepository {
     return rows.filter((row): row is { id: string; objectKey: string } => row.objectKey !== null);
   }
 
-  async setMediaSize(id: string, size: number): Promise<void> {
-    await this.db
-      .update(stories)
-      .set({ mediaSizeBytes: size })
-      .where(and(eq(stories.id, id), isNull(stories.mediaSizeBytes)));
+  async setMediaSizes(entries: Array<{ id: string; sizeBytes: number }>): Promise<void> {
+    if (entries.length === 0) return;
+    const values = sql.join(
+      entries.map((entry) => sql`(${entry.id}, ${entry.sizeBytes})`),
+      sql`, `,
+    );
+    await this.db.execute(sql`
+      UPDATE stories
+      SET media_size_bytes = measured.size_bytes
+      FROM (VALUES ${values}) AS measured(story_id, size_bytes)
+      WHERE stories.id = measured.story_id::uuid
+        AND stories.media_size_bytes IS NULL
+    `);
   }
 
   async getStorageUsage(userId: string): Promise<number> {

@@ -858,27 +858,22 @@ export class MessagePgRepository implements MessageRepository {
     conversationId: string,
     userId: string,
   ): Promise<void> {
-    const [conversation] = await tx
-      .select({ kind: conversations.kind })
+    const [direct] = await tx
+      .select({ kind: conversations.kind, partnerId: conversationParticipants.userId })
       .from(conversations)
-      .where(eq(conversations.id, conversationId))
-      .limit(1);
-    if (conversation?.kind !== "DIRECT") return;
-
-    const [partner] = await tx
-      .select({ userId: conversationParticipants.userId })
-      .from(conversationParticipants)
-      .where(
+      .leftJoin(
+        conversationParticipants,
         and(
-          eq(conversationParticipants.conversationId, conversationId),
+          eq(conversationParticipants.conversationId, conversations.id),
           ne(conversationParticipants.userId, userId),
           isNull(conversationParticipants.leftAt),
         ),
       )
+      .where(eq(conversations.id, conversationId))
       .limit(1);
-    if (!partner) return;
+    if (!direct || direct.kind !== "DIRECT" || !direct.partnerId) return;
 
-    const [userLow, userHigh] = [userId, partner.userId].sort();
+    const [userLow, userHigh] = [userId, direct.partnerId].sort();
     const [relation] = await tx
       .select({ status: friendships.status })
       .from(friendships)
