@@ -92,21 +92,28 @@ describe("FriendService", () => {
   });
 
   it("rejects requests to blocked users", async () => {
-    friendRepo.findByPair.mockResolvedValue({ status: "BLOCKED" });
+    friendRepo.createRequest.mockResolvedValue({
+      friendship: { id: "request-id", requesterId: userId, status: "BLOCKED" },
+      created: false,
+    });
 
     await expect(service.sendRequest(userId, otherId)).rejects.toMatchObject({
       code: "USER_BLOCKED",
     });
-    expect(friendRepo.createRequest).not.toHaveBeenCalled();
+    expect(friendRepo.createRequest).toHaveBeenCalledWith(userId, otherId);
+    expect(friendRepo.findByPair).not.toHaveBeenCalled();
   });
 
   it("rejects requests when a request is already pending", async () => {
-    friendRepo.findByPair.mockResolvedValue({ status: "PENDING" });
+    friendRepo.createRequest.mockResolvedValue({
+      friendship: { id: "request-id", requesterId: userId, status: "PENDING" },
+      created: false,
+    });
 
     await expect(service.sendRequest(userId, otherId)).rejects.toMatchObject({
       code: "FRIEND_REQUEST_EXISTS",
     });
-    expect(friendRepo.createRequest).not.toHaveBeenCalled();
+    expect(friendRepo.findByPair).not.toHaveBeenCalled();
   });
 
   it("does not allow chat until friendship is accepted", async () => {

@@ -5,6 +5,11 @@ import type { DrizzleDb } from "../../../../src/configs/database.js";
 import { GROUP_MAX_MEMBERS } from "../../../../src/domain/conversation/constants.js";
 import { ConversationPgRepository } from "../../../../src/domain/conversation/pg.js";
 import {
+  ATTACHMENT_PREVIEW_TOKEN,
+  MESSAGE_REVOKED_PREVIEW_TOKEN,
+  STORY_REACTION_PREVIEW_TOKEN,
+} from "../../../../src/domain/message/constants.js";
+import {
   avatarCleanupJobs,
   conversationParticipants,
   conversations,
@@ -271,6 +276,31 @@ const groupFindCursorRow = {
 };
 
 describe("ConversationPgRepository group avatar", () => {
+  it("loads every active group avatar in one query", async () => {
+    const whereMock = vi.fn<(condition: SQL) => Promise<unknown[]>>().mockResolvedValue([
+      { id: "g1", avatarUrl: "https://api.example.com/g1.png" },
+      { id: "g2", avatarUrl: null },
+    ]);
+    const fromMock = vi.fn(() => ({ where: whereMock }));
+    const selectMock = vi.fn(() => ({ from: fromMock }));
+    const db = { select: selectMock } as unknown as DrizzleDb;
+    const repo = new ConversationPgRepository(db);
+
+    const result = await repo.getGroupAvatarUrls(["g1", "g2", "g3"]);
+
+    expect(result).toEqual(
+      new Map([
+        ["g1", "https://api.example.com/g1.png"],
+        ["g2", null],
+      ]),
+    );
+    const lookup = render(whereMock.mock.calls[0][0]);
+    expect(lookup.sql).toContain('"conversations"."kind" =');
+    expect(lookup.sql).toContain('"conversations"."deleted_at" is null');
+    expect(lookup.sql).toContain(" in ");
+    expect(lookup.params).toEqual(["g1", "g2", "g3", "GROUP"]);
+  });
+
   it("returns the avatar only for an active group", async () => {
     const { db, dbSelect } = makeDb();
     const groupId = "0193a2b1-0000-7000-8000-000000000010";
@@ -803,36 +833,6 @@ describe("ConversationPgRepository.updateLastRead", () => {
   });
 });
 
-describe("ConversationPgRepository.isMessageInConversation", () => {
-  it("looks up the message by id and conversation without filtering deleted messages", async () => {
-    const chain = makeSelectChain();
-    chain.limitMock.mockResolvedValueOnce([{ id: "msg-1" }]);
-    const db = { select: chain.selectMock } as unknown as DrizzleDb;
-    const repo = new ConversationPgRepository(db);
-
-    const result = await repo.isMessageInConversation(convRow.id, "msg-1");
-
-    expect(result).toBe(true);
-    expect(chain.fromMock).toHaveBeenCalledWith(messages);
-    expect(chain.limitMock).toHaveBeenCalledWith(1);
-
-    const where = render(chain.whereMock.mock.calls[0][0]);
-    expect(where.sql).toContain('"messages"."id" =');
-    expect(where.sql).toContain('"messages"."conversation_id" =');
-    expect(where.sql).not.toContain("deleted_at");
-    expect(where.params).toEqual(["msg-1", convRow.id]);
-  });
-
-  it("returns false when the message does not belong to the conversation", async () => {
-    const chain = makeSelectChain();
-    chain.limitMock.mockResolvedValueOnce([]);
-    const db = { select: chain.selectMock } as unknown as DrizzleDb;
-    const repo = new ConversationPgRepository(db);
-
-    await expect(repo.isMessageInConversation(convRow.id, "missing")).resolves.toBe(false);
-  });
-});
-
 describe("ConversationPgRepository.findById", () => {
   it("loads the conversation, active membership, and active partner in one query", async () => {
     const { db, dbSelect } = makeDb();
@@ -871,6 +871,29 @@ describe("ConversationPgRepository.findById", () => {
     const repo = new ConversationPgRepository(db);
 
     await expect(repo.findById(convRow.id, userAId)).resolves.toBeNull();
+  });
+
+  it("uses the shared preview tokens in the inbox projection", async () => {
+    const { db, dbSelect } = makeDb();
+    dbSelect.limitMock.mockResolvedValueOnce([]);
+    const repo = new ConversationPgRepository(db);
+
+    await repo.findById(convRow.id, userAId);
+
+    const projection = (dbSelect.selectMock.mock.calls as unknown as [Record<string, SQL>][])[0][0];
+    const preview = render(projection.lastMessagePreview);
+    expect(preview.params).toEqual(
+      expect.arrayContaining([
+        MESSAGE_REVOKED_PREVIEW_TOKEN,
+        STORY_REACTION_PREVIEW_TOKEN,
+        ATTACHMENT_PREVIEW_TOKEN,
+        userAId,
+        userAId,
+      ]),
+    );
+    expect(preview.sql).not.toContain("'[message-revoked]'");
+    expect(preview.sql).not.toContain("'[story-reaction]'");
+    expect(preview.sql).not.toContain("'[attachment]'");
   });
 });
 
@@ -1987,8 +2010,11 @@ describe("ConversationPgRepository.findUserConversations", () => {
     expect(where.params).toEqual([userAId]);
     expect(chain.orderByMock).toHaveBeenCalledTimes(1);
     const order = chain.orderByMock.mock.calls[0].map((arg) => render(arg as SQL).sql);
-    expect(order[0]).toContain("COALESCE(");
-    expect(order[0]).toContain('"conversations"."created_at"');
+    // Must match conversations_inbox_order_idx exactly, without the per-viewer
+    // visibility CASE (that forced a full sort of every conversation).
+    expect(order[0]).toBe(
+      'COALESCE("conversations"."last_message_at", "conversations"."created_at") desc',
+    );
     expect(order[1]).toContain('"conversations"."id"');
     const partnerWhere = render(chain.whereMock.mock.calls[1][0]);
     expect(partnerWhere.sql).toContain('"conversation_participants"."conversation_id" in');
@@ -2041,7 +2067,7 @@ describe("ConversationPgRepository.findUserConversations", () => {
     const { db, chain } = makeInboxDb();
     const cursorAt = new Date("2026-10-19T07:00:00Z");
     chain.limitMock
-      .mockResolvedValueOnce([{ ...groupFindCursorRow, lastMessageAt: cursorAt }])
+      .mockResolvedValueOnce([{ activity: cursorAt }])
       .mockResolvedValueOnce([inboxDirectRow])
       .mockResolvedValueOnce([{ conversationId: inboxDirectRow.id, user: partnerRow }]);
     const repo = new ConversationPgRepository(db);
@@ -2448,44 +2474,43 @@ describe("ConversationPgRepository.completeAvatarCleanupJobs", () => {
   });
 });
 
-describe("ConversationPgRepository.failAvatarCleanupJob", () => {
+describe("ConversationPgRepository.failAvatarCleanupJobs", () => {
   const jobId = "0193a2b1-0000-7000-8000-0000000000j1";
 
-  it("keeps the job pending with the error recorded before the retry budget runs out", async () => {
-    const { db, updateMock, setMock, updateWhereMock } = makeTxDb();
+  function makeExecuteDb() {
+    const executeMock = vi.fn().mockResolvedValue(undefined);
+    return { db: { execute: executeMock } as unknown as DrizzleDb, executeMock };
+  }
+
+  it("records errors for all jobs in one statement and keeps them pending before the retry budget", async () => {
+    const { db, executeMock } = makeExecuteDb();
     const repo = new ConversationPgRepository(db);
 
-    await repo.failAvatarCleanupJob(jobId, 1, "storage down");
+    await repo.failAvatarCleanupJobs([{ id: jobId, attempts: 1, error: "storage down" }]);
 
-    expect(updateMock).toHaveBeenCalledWith(avatarCleanupJobs);
-    const values = setMock.mock.calls[0][0] as {
-      attempts: number;
-      status: string;
-      lastError: string;
-      updatedAt: SQL;
-    };
-    expect(values.attempts).toBe(2);
-    expect(values.status).toBe("PENDING");
-    expect(values.lastError).toBe("storage down");
-    expect(render(values.updatedAt).sql).toBe("now()");
-    const where = render(updateWhereMock.mock.calls[0][0]);
-    expect(where.sql).toContain('"avatar_cleanup_jobs"."id" =');
-    expect(where.params).toEqual([jobId]);
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    const query = dialect.sqlToQuery((executeMock.mock.calls as unknown as Array<[SQL]>)[0][0]);
+    expect(query.sql).toContain("UPDATE avatar_cleanup_jobs");
+    expect(query.sql).toContain("avatar_cleanup_status");
+    expect(query.params).toEqual([jobId, 2, "storage down", "PENDING"]);
   });
 
   it("marks the job failed on the final attempt and truncates the error", async () => {
-    const { db, setMock } = makeTxDb();
+    const { db, executeMock } = makeExecuteDb();
     const repo = new ConversationPgRepository(db);
 
-    await repo.failAvatarCleanupJob(jobId, 4, "x".repeat(520));
+    await repo.failAvatarCleanupJobs([{ id: jobId, attempts: 4, error: "x".repeat(520) }]);
 
-    const values = setMock.mock.calls[0][0] as {
-      attempts: number;
-      status: string;
-      lastError: string;
-    };
-    expect(values.attempts).toBe(5);
-    expect(values.status).toBe("FAILED");
-    expect(values.lastError).toHaveLength(500);
+    const query = dialect.sqlToQuery((executeMock.mock.calls as unknown as Array<[SQL]>)[0][0]);
+    expect(query.params).toEqual([jobId, 5, "x".repeat(500), "FAILED"]);
+  });
+
+  it("does not execute anything for an empty batch", async () => {
+    const { db, executeMock } = makeExecuteDb();
+    const repo = new ConversationPgRepository(db);
+
+    await repo.failAvatarCleanupJobs([]);
+
+    expect(executeMock).not.toHaveBeenCalled();
   });
 });

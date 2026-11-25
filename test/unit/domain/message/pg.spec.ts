@@ -49,10 +49,24 @@ function makeSelectChain() {
   });
   const whereMock = vi.fn(makeWhereResult);
   const innerJoinMock = vi.fn(() => ({ where: whereMock }));
-  const fromMock = vi.fn(() => ({ where: whereMock, innerJoin: innerJoinMock }));
+  const leftJoinMock = vi.fn(() => ({ where: whereMock }));
+  const fromMock = vi.fn(() => ({
+    where: whereMock,
+    innerJoin: innerJoinMock,
+    leftJoin: leftJoinMock,
+  }));
   const selectMock = vi.fn(() => ({ from: fromMock }));
 
-  return { selectMock, fromMock, whereMock, innerJoinMock, forMock, orderByMock, limitMock };
+  return {
+    selectMock,
+    fromMock,
+    whereMock,
+    innerJoinMock,
+    leftJoinMock,
+    forMock,
+    orderByMock,
+    limitMock,
+  };
 }
 
 function makeDb() {
@@ -902,8 +916,7 @@ describe("MessagePgRepository.reactMessage", () => {
     const { db, txSelect, transactionMock } = makeDb();
     txSelect.limitMock.mockResolvedValueOnce([{ conversationId, deletedAt: null }]); // msg exists
     txSelect.limitMock.mockResolvedValueOnce([{ userId: senderId }]); // participant exists
-    txSelect.limitMock.mockResolvedValueOnce([{ kind: "DIRECT" }]); // conversation kind
-    txSelect.limitMock.mockResolvedValueOnce([{ userId: partnerId }]); // direct partner
+    txSelect.limitMock.mockResolvedValueOnce([{ kind: "DIRECT", partnerId }]); // conversation + partner in one query
     txSelect.limitMock.mockResolvedValueOnce([{ status: "BLOCKED" }]); // friendship under share lock
     const repo = new MessagePgRepository(db);
 
@@ -918,8 +931,7 @@ describe("MessagePgRepository.reactMessage", () => {
     const { db, txSelect, insertMock } = makeDb();
     txSelect.limitMock.mockResolvedValueOnce([{ conversationId, deletedAt: null }]); // msg exists
     txSelect.limitMock.mockResolvedValueOnce([{ userId: senderId }]); // participant exists
-    txSelect.limitMock.mockResolvedValueOnce([{ kind: "DIRECT" }]); // conversation kind
-    txSelect.limitMock.mockResolvedValueOnce([{ userId: partnerId }]); // direct partner
+    txSelect.limitMock.mockResolvedValueOnce([{ kind: "DIRECT", partnerId }]); // conversation + partner in one query
     txSelect.limitMock.mockResolvedValueOnce([{ status: "ACCEPTED" }]); // friendship under share lock
     txSelect.limitMock.mockResolvedValueOnce([]); // no existing reaction
     txSelect.limitMock.mockResolvedValueOnce([{ emoji: "❤️", userId: senderId }]); // allReactions
@@ -938,8 +950,7 @@ describe("MessagePgRepository.reactMessage", () => {
     const { db, txSelect, insertMock } = makeDb();
     txSelect.limitMock.mockResolvedValueOnce([{ conversationId, deletedAt: null }]); // msg exists
     txSelect.limitMock.mockResolvedValueOnce([{ userId: senderId }]); // participant exists
-    txSelect.limitMock.mockResolvedValueOnce([{ kind: "DIRECT" }]); // conversation kind
-    txSelect.limitMock.mockResolvedValueOnce([]); // no active partner
+    txSelect.limitMock.mockResolvedValueOnce([{ kind: "DIRECT", partnerId: null }]); // no active partner
     txSelect.limitMock.mockResolvedValueOnce([]); // no existing reaction
     txSelect.limitMock.mockResolvedValueOnce([]); // allReactions
     const repo = new MessagePgRepository(db);

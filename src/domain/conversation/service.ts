@@ -647,18 +647,17 @@ export class ConversationService {
     ]);
     if (!exists) throw new BusinessError("CONVERSATION_NOT_FOUND");
     if (!conversation) throw new BusinessError("NOT_PARTICIPANT");
-    const [messageBelongsToConversation] = await Promise.all([
-      this.convRepo.isMessageInConversation(conversationId, lastReadMessageId),
+    // canAccessMessage already pins the message to this conversation; the
+    // friendship gate can run in the same round trip. updateLastRead rechecks
+    // the boundary under its transaction lock before writing.
+    await Promise.all([
+      this.convRepo.canAccessMessage(conversationId, userId, lastReadMessageId).then((allowed) => {
+        if (!allowed) throw new BusinessError("BAD_REQUEST");
+      }),
       conversation.kind === "DIRECT" && conversation.partner
         ? this.friendService.assertCanChat(userId, conversation.partner.id)
         : Promise.resolve(),
     ]);
-    if (!messageBelongsToConversation) {
-      throw new BusinessError("BAD_REQUEST");
-    }
-    if (!(await this.convRepo.canAccessMessage(conversationId, userId, lastReadMessageId))) {
-      throw new BusinessError("BAD_REQUEST");
-    }
 
     await this.convRepo.updateLastRead(conversationId, userId, lastReadMessageId);
 

@@ -24,6 +24,7 @@ import {
   toStoryPreview,
 } from "./dto/mapper.js";
 import {
+  STORY_LEGACY_MEDIA_HEAD_CONCURRENCY,
   STORY_SILENT_LIKE_EMOJI,
   STORY_STORAGE_LIMIT_BYTES,
   type StoryEmoji,
@@ -71,10 +72,30 @@ export class StoryService {
 
   private async measureLegacyMedia(userId: string): Promise<void> {
     const rows = await this.storyRepo.findUnmeasuredMedia(userId);
-    for (const row of rows) {
-      const head = await this.storage.headObject(row.objectKey);
-      await this.storyRepo.setMediaSize(row.id, head?.contentLength ?? 0);
+    if (rows.length === 0) return;
+    // Legacy rows are unbounded, so measure in bounded chunks. Each object is
+    // measured independently: a fulfilled HEAD is recorded (a null HEAD means
+    // the object is gone, so size 0), while a rejected one is logged and left
+    // NULL so the next sweep retries it instead of persisting a bogus 0.
+    const measured: Array<{ id: string; sizeBytes: number }> = [];
+    for (let i = 0; i < rows.length; i += STORY_LEGACY_MEDIA_HEAD_CONCURRENCY) {
+      const chunk = rows.slice(i, i + STORY_LEGACY_MEDIA_HEAD_CONCURRENCY);
+      const settled = await Promise.allSettled(
+        chunk.map((row) => this.storage.headObject(row.objectKey)),
+      );
+      settled.forEach((result, index) => {
+        const row = chunk[index]!;
+        if (result.status === "rejected") {
+          this.logger.warn("Legacy media HEAD failed, leaving unmeasured for retry", {
+            storyId: row.id,
+            err: result.reason,
+          });
+          return;
+        }
+        measured.push({ id: row.id, sizeBytes: result.value?.contentLength ?? 0 });
+      });
     }
+    await this.storyRepo.setMediaSizes(measured);
   }
 
   async getStorageUsage(userId: string): Promise<{ usedBytes: number; limitBytes: number }> {

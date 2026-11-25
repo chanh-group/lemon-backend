@@ -831,7 +831,8 @@ describe("ChatGateway", () => {
 
       const res = await gateway.handleJoinConversation(client, { conversationId: mockConvId });
 
-      expect(joinMock).not.toHaveBeenCalledWith(`conv:${mockConvId}`);
+      // The pre-join membership check rejects an outsider before it ever joins.
+      expect(joinMock).not.toHaveBeenCalled();
       expect(emitMock).toHaveBeenCalledWith(
         "error",
         expect.objectContaining({ code: "NOT_PARTICIPANT" }),
@@ -847,6 +848,8 @@ describe("ChatGateway", () => {
       const { client, joinMock, leaveMock, emitMock } = createMockSocket({});
       client.data = { userId: mockUserId };
       joinMock.mockImplementationOnce(() => joinPending);
+      // Pre-join check passes, then the caller is revoked before the post-join
+      // re-check runs — the post-check must evict them from the room.
       isParticipantMock.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
 
       const result = gateway.handleJoinConversation(client, { conversationId: mockConvId });
@@ -857,13 +860,26 @@ describe("ChatGateway", () => {
       expect(leaveMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
       expect(emitMock).toHaveBeenCalledWith("error", { code: "NOT_PARTICIPANT" });
     });
+
+    it("does not join the room when the pre-join membership check fails", async () => {
+      isParticipantMock.mockResolvedValueOnce(false);
+
+      const { client, joinMock, leaveMock, emitMock } = createMockSocket({});
+      client.data = { userId: "outsider-id" };
+
+      const res = await gateway.handleJoinConversation(client, { conversationId: mockConvId });
+
+      expect(joinMock).not.toHaveBeenCalled();
+      expect(leaveMock).not.toHaveBeenCalled();
+      expect(emitMock).toHaveBeenCalledWith("error", { code: "NOT_PARTICIPANT" });
+      expect(res).toEqual({ success: false, conversationId: mockConvId });
+    });
   });
 
   describe("typing:start and typing:stop", () => {
     it.each(["start", "stop"] as const)(
-      "broadcasts %s once to active recipients only",
+      "broadcasts %s once to the conversation room without any DB lookup",
       async (event) => {
-        getParticipantUserIdsMock.mockResolvedValue([mockUserId, "other-user", "third-user"]);
         const { client, toMock, roomEmitMock } = createMockSocket({});
         client.data = { userId: mockUserId };
 
@@ -871,49 +887,37 @@ describe("ChatGateway", () => {
           ? gateway.handleTypingStart(client, { conversationId: mockConvId })
           : gateway.handleTypingStop(client, { conversationId: mockConvId }));
 
-        expect(toMock).toHaveBeenCalledExactlyOnceWith(["user:other-user", "user:third-user"]);
+        expect(toMock).toHaveBeenCalledExactlyOnceWith(`conv:${mockConvId}`);
         expect(roomEmitMock).toHaveBeenCalledOnce();
-        expect(isParticipantMock).not.toHaveBeenCalled();
+        expect(getParticipantUserIdsMock).not.toHaveBeenCalled();
       },
     );
 
-    it.each(["start", "stop"] as const)("rejects removed senders for %s", async (event) => {
-      getParticipantUserIdsMock.mockResolvedValue(["other-user"]);
-      const { client, toMock, leaveMock } = createMockSocket({});
-      client.data = { userId: mockUserId };
-      client.rooms.add(`conv:${mockConvId}`);
-
-      await (event === "start"
-        ? gateway.handleTypingStart(client, { conversationId: mockConvId })
-        : gateway.handleTypingStop(client, { conversationId: mockConvId }));
-
-      expect(leaveMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
-      expect(toMock).not.toHaveBeenCalled();
-      expect(redisSetMock).not.toHaveBeenCalled();
-      expect(redisDelMock).not.toHaveBeenCalled();
-    });
-
     it.each(["start", "stop"] as const)(
-      "does not broadcast %s to an empty recipient set",
+      "does nothing for %s when the socket is not in the conversation room",
       async (event) => {
-        getParticipantUserIdsMock.mockResolvedValue([mockUserId]);
         const { client, toMock } = createMockSocket({});
         client.data = { userId: mockUserId };
+        client.rooms.delete(`conv:${mockConvId}`);
 
         await (event === "start"
           ? gateway.handleTypingStart(client, { conversationId: mockConvId })
           : gateway.handleTypingStop(client, { conversationId: mockConvId }));
 
         expect(toMock).not.toHaveBeenCalled();
+        expect(redisSetMock).not.toHaveBeenCalled();
+        expect(redisDelMock).not.toHaveBeenCalled();
+        expect(getParticipantUserIdsMock).not.toHaveBeenCalled();
       },
     );
-    it("broadcasts typing:start to room excluding sender", async () => {
+
+    it("broadcasts typing:start to the room excluding sender", async () => {
       const { client, toMock, roomEmitMock } = createMockSocket({});
       client.data = { userId: mockUserId };
 
       await gateway.handleTypingStart(client, { conversationId: mockConvId });
 
-      expect(toMock).toHaveBeenCalledWith(["user:other-user"]);
+      expect(toMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
       expect(redisSetMock).toHaveBeenCalledWith(
         `typing:${mockConvId}:${mockUserId}`,
         "1",
@@ -927,13 +931,13 @@ describe("ChatGateway", () => {
       });
     });
 
-    it("broadcasts typing:stop to room excluding sender", async () => {
+    it("broadcasts typing:stop to the room excluding sender", async () => {
       const { client, toMock, roomEmitMock } = createMockSocket({});
       client.data = { userId: mockUserId };
 
       await gateway.handleTypingStop(client, { conversationId: mockConvId });
 
-      expect(toMock).toHaveBeenCalledWith(["user:other-user"]);
+      expect(toMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
       expect(redisDelMock).toHaveBeenCalledWith(`typing:${mockConvId}:${mockUserId}`);
       expect(roomEmitMock).toHaveBeenCalledWith("typing", {
         conversationId: mockConvId,
@@ -942,45 +946,30 @@ describe("ChatGateway", () => {
       });
     });
 
-    it("emits typing:start without waiting for the redis write", async () => {
-      let releaseWrite!: () => void;
-      redisSetMock.mockReturnValue(
-        new Promise<void>((resolve) => {
+    it.each(["start", "stop"] as const)(
+      "emits typing:%s without waiting for the redis write",
+      async (event) => {
+        let releaseWrite!: () => void;
+        const pending = new Promise<void>((resolve) => {
           releaseWrite = resolve;
-        }),
-      );
-      const { client, toMock } = createMockSocket({});
-      client.data = { userId: mockUserId };
+        });
+        redisSetMock.mockReturnValue(pending);
+        redisDelMock.mockReturnValue(pending);
+        const { client, toMock, roomEmitMock } = createMockSocket({});
+        client.data = { userId: mockUserId };
 
-      // Resolves while the Redis write is still pending — the handler must not await it
-      await gateway.handleTypingStart(client, { conversationId: mockConvId });
+        await (event === "start"
+          ? gateway.handleTypingStart(client, { conversationId: mockConvId })
+          : gateway.handleTypingStop(client, { conversationId: mockConvId }));
 
-      expect(toMock).toHaveBeenCalledWith(["user:other-user"]);
-      expect(redisSetMock).toHaveBeenCalledWith(
-        `typing:${mockConvId}:${mockUserId}`,
-        "1",
-        "EX",
-        TYPING_TTL_SECS,
-      );
-      releaseWrite();
-    });
-
-    it("emits typing:stop without waiting for the redis delete", async () => {
-      let releaseDelete!: () => void;
-      redisDelMock.mockReturnValue(
-        new Promise<void>((resolve) => {
-          releaseDelete = resolve;
-        }),
-      );
-      const { client, toMock } = createMockSocket({});
-      client.data = { userId: mockUserId };
-
-      await gateway.handleTypingStop(client, { conversationId: mockConvId });
-
-      expect(toMock).toHaveBeenCalledWith(["user:other-user"]);
-      expect(redisDelMock).toHaveBeenCalledWith(`typing:${mockConvId}:${mockUserId}`);
-      releaseDelete();
-    });
+        expect(toMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
+        expect(roomEmitMock).toHaveBeenCalledWith(
+          "typing",
+          expect.objectContaining({ conversationId: mockConvId, userId: mockUserId }),
+        );
+        releaseWrite();
+      },
+    );
 
     it("still broadcasts typing when the redis writes fail", async () => {
       redisSetMock.mockRejectedValue(new Error("redis down"));
@@ -993,8 +982,8 @@ describe("ChatGateway", () => {
       await gateway.handleTypingStart(startClient, { conversationId: mockConvId });
       await gateway.handleTypingStop(stopClient, { conversationId: mockConvId });
 
-      expect(startTo).toHaveBeenCalledWith(["user:other-user"]);
-      expect(stopTo).toHaveBeenCalledWith(["user:other-user"]);
+      expect(startTo).toHaveBeenCalledWith(`conv:${mockConvId}`);
+      expect(stopTo).toHaveBeenCalledWith(`conv:${mockConvId}`);
     });
   });
 

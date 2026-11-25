@@ -6,6 +6,7 @@ import { BusinessError } from "../../../../src/utils/errors/business.js";
 import { StoryPgRepository } from "../../../../src/domain/story/pg.js";
 import {
   STORY_FEED_MAX_PER_AUTHOR,
+  STORY_MEDIA_SIZE_UPDATE_BATCH,
   STORY_VIEWER_WINDOW_HOURS,
 } from "../../../../src/domain/story/constants.js";
 import { STORY_TTL_MS } from "../../../../src/utils/cache/constants.js";
@@ -72,6 +73,7 @@ function makeDb(rows: unknown[] = []) {
     delete: deleteMock,
     insert: insertMock,
     update: updateMock,
+    execute: executeMock,
     transaction: transactionMock,
   } as unknown as DrizzleDb;
   return {
@@ -128,38 +130,51 @@ describe("StoryPgRepository purge queries", () => {
   });
 
   describe("findPurgeable", () => {
-    it("findPurgeable selects id and object_key with the batch limit", async () => {
+    it("queries expired, deleted and archived stories separately with the batch limit", async () => {
       const { db, selectMock, whereMock, orderByMock, limitMock } = makeDb();
-      const rows = [
-        {
-          id: "s1",
-          objectKey: "k1",
-          userId: "u1",
-          archivedAt: null,
-          deletedAt: null,
-          archiveEnabled: true,
-        },
-      ];
-      limitMock.mockResolvedValue(rows);
+      const expired = {
+        id: "s1",
+        objectKey: "k1",
+        userId: "u1",
+        archivedAt: null,
+        deletedAt: null,
+        expiresAt: new Date("2026-01-01T00:00:00Z"),
+        archiveEnabled: true,
+      };
+      const deleted = {
+        ...expired,
+        id: "s2",
+        deletedAt: new Date("2025-12-31T00:00:00Z"),
+        expiresAt: new Date("2026-02-01T00:00:00Z"),
+      };
+      limitMock
+        .mockResolvedValueOnce([expired])
+        .mockResolvedValueOnce([deleted])
+        .mockResolvedValueOnce([]);
       const repo = new StoryPgRepository(db);
 
       const result = await repo.findPurgeable(500);
 
+      expect(selectMock).toHaveBeenCalledTimes(3);
       expect(selectMock).toHaveBeenCalledWith({
         id: stories.id,
         objectKey: stories.objectKey,
         userId: stories.userId,
         archivedAt: stories.archivedAt,
         deletedAt: stories.deletedAt,
+        expiresAt: stories.expiresAt,
         archiveEnabled: userStorySettings.archiveEnabled,
       });
+      expect(limitMock).toHaveBeenCalledTimes(3);
       expect(limitMock).toHaveBeenCalledWith(500);
-      expect(result).toEqual(rows);
+      expect(result.map((row) => row.id)).toEqual(["s1", "s2"]);
 
-      const whereSql = render(whereMock.mock.calls[0][0]);
-      expect(whereSql).toContain('"stories"."expires_at" < now()');
-      expect(whereSql).toContain('"stories"."deleted_at" is not null or');
-      expect(whereSql).toContain('"stories"."archived_at" is null');
+      const expiredSql = render(whereMock.mock.calls[0][0]);
+      expect(expiredSql).toContain('"stories"."expires_at" < now()');
+      expect(expiredSql).toContain('"stories"."deleted_at" is null');
+      expect(expiredSql).toContain('"stories"."archived_at" is null');
+      expect(render(whereMock.mock.calls[1][0])).toContain('"stories"."deleted_at" is not null');
+      expect(render(whereMock.mock.calls[2][0])).toContain('"stories"."archived_at" is not null');
 
       const orderBySql = render(orderByMock.mock.calls[0][0]);
       expect(orderBySql).toContain('"stories"."expires_at" asc');
@@ -234,6 +249,38 @@ describe("StoryPgRepository purge queries", () => {
       });
     });
 
+    it("addReactionWithView updates anonymous on an existing view", async () => {
+      const { db, insertMock, valuesMock, onConflictMock, returningMock } = makeDb();
+      returningMock.mockResolvedValue([
+        {
+          storyId: "s1",
+          userId: "u1",
+          emoji: "🔥",
+          kind: "REACTION",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          isNew: true,
+        },
+      ]);
+      const repo = new StoryPgRepository(db);
+
+      await repo.addReactionWithView("s1", "u1", "🔥", "REACTION", true);
+
+      expect(insertMock).toHaveBeenCalledWith(storyViews);
+      expect(valuesMock).toHaveBeenCalledWith({
+        storyId: "s1",
+        userId: "u1",
+        anonymous: true,
+      });
+      const viewConflict = onConflictMock.mock.calls[0][0] as {
+        target: unknown[];
+        set: Record<string, unknown>;
+      };
+      expect(viewConflict.target).toEqual([storyViews.storyId, storyViews.userId]);
+      expect(viewConflict.set.anonymous).toBe(true);
+      expect(render(viewConflict.set.viewedAt as SQL)).toBe("now()");
+    });
+
     it("addReactionWithView keeps the original created_at when the emoji changes", async () => {
       const { db, onConflictMock, returningMock } = makeDb();
       returningMock.mockResolvedValue([
@@ -251,7 +298,7 @@ describe("StoryPgRepository purge queries", () => {
 
       await repo.addReactionWithView("s1", "u1", "😂");
 
-      const conflict = onConflictMock.mock.calls[0][0] as {
+      const conflict = onConflictMock.mock.calls[1][0] as {
         set: Record<string, unknown>;
       };
       expect(conflict.set).not.toHaveProperty("createdAt");
@@ -851,19 +898,53 @@ describe("StoryPgRepository.findActiveById", () => {
   });
 });
 
-describe("StoryPgRepository.setMediaSize", () => {
-  it("backfills media_size_bytes only while it is still unknown", async () => {
-    const { db, updateMock, updateSetMock, updateWhereMock } = makeDb();
+describe("StoryPgRepository.setMediaSizes", () => {
+  it("backfills all measured rows in one update while sizes are still unknown", async () => {
+    const { db, executeMock } = makeDb();
     const repo = new StoryPgRepository(db);
 
-    await repo.setMediaSize("s1", 2048);
+    await repo.setMediaSizes([
+      { id: "s1", sizeBytes: 2048 },
+      { id: "s2", sizeBytes: 500 },
+    ]);
 
-    expect(updateMock).toHaveBeenCalledWith(stories);
-    expect(updateSetMock).toHaveBeenCalledWith({ mediaSizeBytes: 2048 });
-    const whereSql = render(updateWhereMock.mock.calls[0][0]);
-    expect(whereSql).toContain('"stories"."id" = $1');
-    expect(whereSql).toContain('"stories"."media_size_bytes" is null');
-    expect(dialect.sqlToQuery(updateWhereMock.mock.calls[0][0]).params).toEqual(["s1"]);
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    const query = dialect.sqlToQuery((executeMock.mock.calls as unknown as Array<[SQL]>)[0][0]);
+    expect(query.sql).toContain("UPDATE stories");
+    expect(query.sql).toContain("media_size_bytes = measured.size_bytes");
+    expect(query.sql).toContain("stories.media_size_bytes IS NULL");
+    expect(query.params).toEqual(["s1", 2048, "s2", 500]);
+  });
+
+  it("does not touch the database for an empty batch", async () => {
+    const { db, executeMock } = makeDb();
+    const repo = new StoryPgRepository(db);
+
+    await repo.setMediaSizes([]);
+
+    expect(executeMock).not.toHaveBeenCalled();
+  });
+
+  it("chunks the backfill into multiple updates when the batch exceeds the cap", async () => {
+    const { db, executeMock } = makeDb();
+    const repo = new StoryPgRepository(db);
+
+    const entries = Array.from({ length: STORY_MEDIA_SIZE_UPDATE_BATCH + 1 }, (_, i) => ({
+      id: `s${i}`,
+      sizeBytes: i,
+    }));
+    await repo.setMediaSizes(entries);
+
+    // One full chunk plus a trailing chunk of one row — not one giant statement.
+    expect(executeMock).toHaveBeenCalledTimes(2);
+    const calls = executeMock.mock.calls as unknown as Array<[SQL]>;
+    const first = dialect.sqlToQuery(calls[0][0]);
+    const second = dialect.sqlToQuery(calls[1][0]);
+    expect(first.params).toHaveLength(STORY_MEDIA_SIZE_UPDATE_BATCH * 2);
+    expect(second.params).toEqual([
+      `s${STORY_MEDIA_SIZE_UPDATE_BATCH}`,
+      STORY_MEDIA_SIZE_UPDATE_BATCH,
+    ]);
   });
 });
 

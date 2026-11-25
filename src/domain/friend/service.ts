@@ -31,13 +31,6 @@ export class FriendService {
     }
     if (!requester) throw new BusinessError("USER_NOT_FOUND");
 
-    const existing = await this.friendRepo.findByPair(requesterId, addresseeId);
-    if (existing) {
-      if (existing.status === "BLOCKED") throw new BusinessError("USER_BLOCKED");
-      if (existing.status === "ACCEPTED") throw new BusinessError("ALREADY_FRIENDS");
-      throw new BusinessError("FRIEND_REQUEST_EXISTS");
-    }
-
     const result = await this.friendRepo.createRequest(requesterId, addresseeId);
     const request = result.friendship;
     if (request.status === "BLOCKED") throw new BusinessError("USER_BLOCKED");

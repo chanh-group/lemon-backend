@@ -95,7 +95,8 @@ export class PurgeJob {
       const archiveRows = rows.filter(
         (row) => !row.archivedAt && !row.deletedAt && row.archiveEnabled,
       );
-      const deleteRows = rows.filter((row) => !archiveRows.includes(row));
+      const archiveIds = new Set(archiveRows.map((row) => row.id));
+      const deleteRows = rows.filter((row) => !archiveIds.has(row.id));
       const archived = archiveRows.length
         ? await this.storyRepo.archiveStories(archiveRows.map((row) => row.id))
         : 0;
@@ -158,25 +159,30 @@ export class PurgeJob {
       const toDeleteJobs: typeof jobs = [];
       const cancelJobIds: string[] = [];
 
+      // One lookup for all referenced groups instead of a query per job.
+      const conversationIds = [
+        ...new Set(jobs.flatMap((job) => (job.conversationId ? [job.conversationId] : []))),
+      ];
+      let currentUrls: Map<string, string | null>;
+      try {
+        currentUrls = await this.conversationRepo.getGroupAvatarUrls(conversationIds);
+      } catch (err) {
+        this.logger.warn("Purge: could not verify group avatar references, keeping cleanup jobs", {
+          err,
+        });
+        return 0;
+      }
+
       for (const job of jobs) {
-        try {
-          const currentUrl = job.conversationId
-            ? await this.conversationRepo.getGroupAvatarUrl(job.conversationId)
-            : null;
-          if (
-            currentUrl &&
-            job.conversationId &&
-            groupAvatarObjectKeyFromUrl(currentUrl, job.conversationId) === job.objectKey
-          ) {
-            cancelJobIds.push(job.id);
-          } else {
-            toDeleteJobs.push(job);
-          }
-        } catch (err) {
-          this.logger.warn("Purge: could not verify group avatar reference, keeping cleanup job", {
-            err,
-            jobId: job.id,
-          });
+        const currentUrl = job.conversationId ? currentUrls.get(job.conversationId) : undefined;
+        if (
+          currentUrl &&
+          job.conversationId &&
+          groupAvatarObjectKeyFromUrl(currentUrl, job.conversationId) === job.objectKey
+        ) {
+          cancelJobIds.push(job.id);
+        } else {
+          toDeleteJobs.push(job);
         }
       }
 
@@ -199,27 +205,28 @@ export class PurgeJob {
         }
       } catch (err) {
         this.logger.warn("Purge: group avatar deletion failed, jobs kept for retry", { err });
-        for (const job of toDeleteJobs) {
-          await this.conversationRepo.failAvatarCleanupJob(
-            job.id,
-            job.attempts,
-            err instanceof Error ? err.message : String(err),
-          );
-        }
+        const error = err instanceof Error ? err.message : String(err);
+        await this.conversationRepo.failAvatarCleanupJobs(
+          toDeleteJobs.map((job) => ({ id: job.id, attempts: job.attempts, error })),
+        );
         return cancelJobIds.length;
       }
 
       const completedIds: string[] = [];
+      const failedJobs: Array<{ id: string; attempts: number; error: string }> = [];
       for (const job of toDeleteJobs) {
         if (deletedKeys.has(job.objectKey)) {
           completedIds.push(job.id);
         } else if (failedKeys.has(job.objectKey)) {
-          await this.conversationRepo.failAvatarCleanupJob(
-            job.id,
-            job.attempts,
-            "Storage deleteObjects reported failed",
-          );
+          failedJobs.push({
+            id: job.id,
+            attempts: job.attempts,
+            error: "Storage deleteObjects reported failed",
+          });
         }
+      }
+      if (failedJobs.length > 0) {
+        await this.conversationRepo.failAvatarCleanupJobs(failedJobs);
       }
 
       if (completedIds.length > 0) {

@@ -15,6 +15,7 @@ import {
   notInArray,
   or,
   sql,
+  type SQL,
 } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { friendships } from "../friend/schema.js";
@@ -22,6 +23,7 @@ import { messages } from "../message/schema.js";
 import { users } from "../user/schema.js";
 import {
   STORY_FEED_MAX_PER_AUTHOR,
+  STORY_MEDIA_SIZE_UPDATE_BATCH,
   STORY_STORAGE_LIMIT_BYTES,
   STORY_VIEWER_WINDOW_HOURS,
   type StoryReactionKind,
@@ -111,11 +113,25 @@ export class StoryPgRepository implements StoryRepository {
     return rows.filter((row): row is { id: string; objectKey: string } => row.objectKey !== null);
   }
 
-  async setMediaSize(id: string, size: number): Promise<void> {
-    await this.db
-      .update(stories)
-      .set({ mediaSizeBytes: size })
-      .where(and(eq(stories.id, id), isNull(stories.mediaSizeBytes)));
+  async setMediaSizes(entries: Array<{ id: string; sizeBytes: number }>): Promise<void> {
+    if (entries.length === 0) return;
+    // Chunked so a very large backfill cannot build a single UPDATE ... VALUES
+    // statement that blows past PostgreSQL's bind-parameter cap. Each row still
+    // only fills a row whose media_size_bytes is still NULL.
+    for (let i = 0; i < entries.length; i += STORY_MEDIA_SIZE_UPDATE_BATCH) {
+      const chunk = entries.slice(i, i + STORY_MEDIA_SIZE_UPDATE_BATCH);
+      const values = sql.join(
+        chunk.map((entry) => sql`(${entry.id}, ${entry.sizeBytes})`),
+        sql`, `,
+      );
+      await this.db.execute(sql`
+        UPDATE stories
+        SET media_size_bytes = measured.size_bytes
+        FROM (VALUES ${values}) AS measured(story_id, size_bytes)
+        WHERE stories.id = measured.story_id::uuid
+          AND stories.media_size_bytes IS NULL
+      `);
+    }
   }
 
   async getStorageUsage(userId: string): Promise<number> {
@@ -411,36 +427,58 @@ export class StoryPgRepository implements StoryRepository {
   }
 
   async findPurgeable(limit: number): Promise<PurgeableStory[]> {
-    const rows = await this.db
-      .select({
-        id: stories.id,
-        objectKey: stories.objectKey,
-        userId: stories.userId,
-        archivedAt: stories.archivedAt,
-        deletedAt: stories.deletedAt,
-        archiveEnabled: userStorySettings.archiveEnabled,
-      })
-      .from(stories)
-      .leftJoin(userStorySettings, eq(userStorySettings.userId, stories.userId))
-      .where(
-        or(
-          isNotNull(stories.deletedAt),
-          and(isNull(stories.archivedAt), lt(stories.expiresAt, sql`now()`)),
-          and(
-            isNotNull(stories.archivedAt),
-            or(
-              eq(userStorySettings.archiveEnabled, false),
-              and(
-                isNotNull(userStorySettings.archiveDurationSecs),
-                sql`${stories.archivedAt} + ${userStorySettings.archiveDurationSecs} * interval '1 second' <= now()`,
-              ),
+    const selection = {
+      id: stories.id,
+      objectKey: stories.objectKey,
+      userId: stories.userId,
+      archivedAt: stories.archivedAt,
+      deletedAt: stories.deletedAt,
+      expiresAt: stories.expiresAt,
+      archiveEnabled: userStorySettings.archiveEnabled,
+    };
+    const find = (condition: SQL | undefined) =>
+      this.db
+        .select(selection)
+        .from(stories)
+        .leftJoin(userStorySettings, eq(userStorySettings.userId, stories.userId))
+        .where(condition)
+        .orderBy(asc(stories.expiresAt))
+        .limit(limit);
+
+    // Three separate branches instead of one OR that forced a full-table scan.
+    // The expired branch uses stories_expiry_idx and the archived branch can
+    // use stories_archived_idx; only the (small) deleted branch stays a scan.
+    const [expired, deleted, archived] = await Promise.all([
+      find(
+        and(
+          isNull(stories.deletedAt),
+          isNull(stories.archivedAt),
+          lt(stories.expiresAt, sql`now()`),
+        ),
+      ),
+      find(isNotNull(stories.deletedAt)),
+      find(
+        and(
+          // Exclude soft-deleted stories so the deleted branch stays mutually
+          // exclusive with this one: a story both archived and deleted must not
+          // appear twice and waste purge limit slots.
+          isNull(stories.deletedAt),
+          isNotNull(stories.archivedAt),
+          or(
+            eq(userStorySettings.archiveEnabled, false),
+            and(
+              isNotNull(userStorySettings.archiveDurationSecs),
+              sql`${stories.archivedAt} + ${userStorySettings.archiveDurationSecs} * interval '1 second' <= now()`,
             ),
           ),
         ),
-      )
-      .orderBy(asc(stories.expiresAt))
-      .limit(limit);
-    return rows.map((row) => ({ ...row, archiveEnabled: row.archiveEnabled ?? true }));
+      ),
+    ]);
+
+    return [...expired, ...deleted, ...archived]
+      .map((row) => ({ ...row, archiveEnabled: row.archiveEnabled ?? true }))
+      .sort((a, b) => a.expiresAt.getTime() - b.expiresAt.getTime())
+      .slice(0, limit);
   }
 
   async deleteByIds(ids: string[]): Promise<number> {
@@ -478,7 +516,15 @@ export class StoryPgRepository implements StoryRepository {
     anonymous: boolean = false,
   ): Promise<StoryReactionResult> {
     return this.db.transaction(async (tx) => {
-      await tx.insert(storyViews).values({ storyId, userId, anonymous }).onConflictDoNothing();
+      // Keep anonymous/viewedAt in sync with markAsViewed: a user who disables
+      // viewed receipts after an earlier view must not stay exposed as named.
+      await tx
+        .insert(storyViews)
+        .values({ storyId, userId, anonymous })
+        .onConflictDoUpdate({
+          target: [storyViews.storyId, storyViews.userId],
+          set: { anonymous, viewedAt: sql`now()` },
+        });
 
       const [row] = await tx
         .insert(storyReactions)

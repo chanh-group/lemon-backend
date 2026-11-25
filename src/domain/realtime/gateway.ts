@@ -260,11 +260,11 @@ export class ChatGateway
     const userId = client.data?.userId as string;
     if (!userId) return;
 
-    // Verify user is an active participant in this conversation
+    // Pre-join check keeps an unverified socket out of the room so it cannot
+    // receive broadcasts (or drive typing, which trusts room membership) during
+    // the membership lookup. The post-join re-check is kept as defense-in-depth
+    // against revocation between the two steps.
     if (!(await this.conversationRepo.isParticipant(data.conversationId, userId))) {
-      logger.warn(
-        `Unauthorized conv:join attempt by user ${userId} for conversation ${data.conversationId}`,
-      );
       client.emit(REALTIME_EVENTS.ERROR, { code: SOCKET_ERROR_CODES.NOT_PARTICIPANT });
       return { success: false, conversationId: data.conversationId };
     }
@@ -302,7 +302,6 @@ export class ChatGateway
       client,
       data,
       {
-        conversationRepo: this.conversationRepo,
         redis: this.redis,
         pending: this.pendingConnections.get(client),
       },
@@ -319,7 +318,6 @@ export class ChatGateway
       client,
       data,
       {
-        conversationRepo: this.conversationRepo,
         redis: this.redis,
         pending: this.pendingConnections.get(client),
       },
