@@ -23,6 +23,7 @@ import { messages } from "../message/schema.js";
 import { users } from "../user/schema.js";
 import {
   STORY_FEED_MAX_PER_AUTHOR,
+  STORY_MEDIA_SIZE_UPDATE_BATCH,
   STORY_STORAGE_LIMIT_BYTES,
   STORY_VIEWER_WINDOW_HOURS,
   type StoryReactionKind,
@@ -114,17 +115,23 @@ export class StoryPgRepository implements StoryRepository {
 
   async setMediaSizes(entries: Array<{ id: string; sizeBytes: number }>): Promise<void> {
     if (entries.length === 0) return;
-    const values = sql.join(
-      entries.map((entry) => sql`(${entry.id}, ${entry.sizeBytes})`),
-      sql`, `,
-    );
-    await this.db.execute(sql`
-      UPDATE stories
-      SET media_size_bytes = measured.size_bytes
-      FROM (VALUES ${values}) AS measured(story_id, size_bytes)
-      WHERE stories.id = measured.story_id::uuid
-        AND stories.media_size_bytes IS NULL
-    `);
+    // Chunked so a very large backfill cannot build a single UPDATE ... VALUES
+    // statement that blows past PostgreSQL's bind-parameter cap. Each row still
+    // only fills a row whose media_size_bytes is still NULL.
+    for (let i = 0; i < entries.length; i += STORY_MEDIA_SIZE_UPDATE_BATCH) {
+      const chunk = entries.slice(i, i + STORY_MEDIA_SIZE_UPDATE_BATCH);
+      const values = sql.join(
+        chunk.map((entry) => sql`(${entry.id}, ${entry.sizeBytes})`),
+        sql`, `,
+      );
+      await this.db.execute(sql`
+        UPDATE stories
+        SET media_size_bytes = measured.size_bytes
+        FROM (VALUES ${values}) AS measured(story_id, size_bytes)
+        WHERE stories.id = measured.story_id::uuid
+          AND stories.media_size_bytes IS NULL
+      `);
+    }
   }
 
   async getStorageUsage(userId: string): Promise<number> {

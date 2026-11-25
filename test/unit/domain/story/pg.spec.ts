@@ -6,6 +6,7 @@ import { BusinessError } from "../../../../src/utils/errors/business.js";
 import { StoryPgRepository } from "../../../../src/domain/story/pg.js";
 import {
   STORY_FEED_MAX_PER_AUTHOR,
+  STORY_MEDIA_SIZE_UPDATE_BATCH,
   STORY_VIEWER_WINDOW_HOURS,
 } from "../../../../src/domain/story/constants.js";
 import { STORY_TTL_MS } from "../../../../src/utils/cache/constants.js";
@@ -922,6 +923,28 @@ describe("StoryPgRepository.setMediaSizes", () => {
     await repo.setMediaSizes([]);
 
     expect(executeMock).not.toHaveBeenCalled();
+  });
+
+  it("chunks the backfill into multiple updates when the batch exceeds the cap", async () => {
+    const { db, executeMock } = makeDb();
+    const repo = new StoryPgRepository(db);
+
+    const entries = Array.from({ length: STORY_MEDIA_SIZE_UPDATE_BATCH + 1 }, (_, i) => ({
+      id: `s${i}`,
+      sizeBytes: i,
+    }));
+    await repo.setMediaSizes(entries);
+
+    // One full chunk plus a trailing chunk of one row — not one giant statement.
+    expect(executeMock).toHaveBeenCalledTimes(2);
+    const calls = executeMock.mock.calls as unknown as Array<[SQL]>;
+    const first = dialect.sqlToQuery(calls[0][0]);
+    const second = dialect.sqlToQuery(calls[1][0]);
+    expect(first.params).toHaveLength(STORY_MEDIA_SIZE_UPDATE_BATCH * 2);
+    expect(second.params).toEqual([
+      `s${STORY_MEDIA_SIZE_UPDATE_BATCH}`,
+      STORY_MEDIA_SIZE_UPDATE_BATCH,
+    ]);
   });
 });
 

@@ -551,6 +551,39 @@ describe("StoryService", () => {
       await measuring;
       expect(setMediaSizesMock).toHaveBeenCalledTimes(1);
     });
+
+    it("leaves a story unmeasured for retry when its HEAD request rejects", async () => {
+      const findUnmeasuredMock = vi.fn().mockResolvedValue([
+        { id: "s-ok", objectKey: "stories/u/ok.jpg" },
+        { id: "s-fail", objectKey: "stories/u/fail.jpg" },
+      ]);
+      const setMediaSizesMock = vi.fn().mockResolvedValue(undefined);
+      headObjectMock
+        .mockResolvedValueOnce({ contentLength: 750, contentType: "image/jpeg" })
+        .mockRejectedValueOnce(new Error("s3 down"));
+
+      const repo = {
+        findUnmeasuredMedia: findUnmeasuredMock,
+        setMediaSizes: setMediaSizesMock,
+      };
+      const svc = new StoryService(
+        repo as never,
+        {} as never,
+        storageMock,
+        conversationServiceMock,
+        messageServiceMock,
+        realtimeServiceMock,
+      );
+
+      await (
+        svc as unknown as { measureLegacyMedia(id: string): Promise<void> }
+      ).measureLegacyMedia("user-1");
+
+      // Only the successful HEAD is persisted; the rejected one stays NULL so
+      // the next sweep retries it instead of recording a bogus zero.
+      expect(setMediaSizesMock).toHaveBeenCalledTimes(1);
+      expect(setMediaSizesMock).toHaveBeenCalledWith([{ id: "s-ok", sizeBytes: 750 }]);
+    });
   });
 
   describe("getStorageUsage", () => {

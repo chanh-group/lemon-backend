@@ -73,27 +73,29 @@ export class StoryService {
   private async measureLegacyMedia(userId: string): Promise<void> {
     const rows = await this.storyRepo.findUnmeasuredMedia(userId);
     if (rows.length === 0) return;
-    // Legacy rows are unbounded, so measure in bounded chunks and isolate each
-    // HEAD: an unbounded Promise.all would flood S3, and a single HEAD failure
-    // would discard every measurement in the batch (the old loop kept prior rows).
-    const sizes: number[] = [];
+    // Legacy rows are unbounded, so measure in bounded chunks. Each object is
+    // measured independently: a fulfilled HEAD is recorded (a null HEAD means
+    // the object is gone, so size 0), while a rejected one is logged and left
+    // NULL so the next sweep retries it instead of persisting a bogus 0.
+    const measured: Array<{ id: string; sizeBytes: number }> = [];
     for (let i = 0; i < rows.length; i += STORY_LEGACY_MEDIA_HEAD_CONCURRENCY) {
       const chunk = rows.slice(i, i + STORY_LEGACY_MEDIA_HEAD_CONCURRENCY);
       const settled = await Promise.allSettled(
         chunk.map((row) => this.storage.headObject(row.objectKey)),
       );
       settled.forEach((result, index) => {
+        const row = chunk[index]!;
         if (result.status === "rejected") {
-          this.logger.warn("Legacy media HEAD failed, sizing as 0", {
-            storyId: chunk[index]!.id,
+          this.logger.warn("Legacy media HEAD failed, leaving unmeasured for retry", {
+            storyId: row.id,
+            err: result.reason,
           });
+          return;
         }
-        sizes.push(result.status === "fulfilled" ? (result.value?.contentLength ?? 0) : 0);
+        measured.push({ id: row.id, sizeBytes: result.value?.contentLength ?? 0 });
       });
     }
-    await this.storyRepo.setMediaSizes(
-      rows.map((row, index) => ({ id: row.id, sizeBytes: sizes[index]! })),
-    );
+    await this.storyRepo.setMediaSizes(measured);
   }
 
   async getStorageUsage(userId: string): Promise<{ usedBytes: number; limitBytes: number }> {
