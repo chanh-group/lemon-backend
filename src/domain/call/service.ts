@@ -287,15 +287,7 @@ export class CallService implements OnApplicationShutdown, OnApplicationBootstra
       media: dto.media,
     });
 
-    const livekit = await this.createLiveKitToken(
-      callerId,
-      callId,
-      callerSummary?.fullName ?? callerSummary?.username,
-    );
-    return {
-      ...toCallResponse(call),
-      livekit,
-    };
+    return toCallResponse(call);
   }
 
   async acceptCall(calleeId: string, callId: string): Promise<AcceptCallResponse> {
