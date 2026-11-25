@@ -24,6 +24,7 @@ import {
   toStoryPreview,
 } from "./dto/mapper.js";
 import {
+  STORY_LEGACY_MEDIA_HEAD_CONCURRENCY,
   STORY_SILENT_LIKE_EMOJI,
   STORY_STORAGE_LIMIT_BYTES,
   type StoryEmoji,
@@ -72,11 +73,26 @@ export class StoryService {
   private async measureLegacyMedia(userId: string): Promise<void> {
     const rows = await this.storyRepo.findUnmeasuredMedia(userId);
     if (rows.length === 0) return;
-    // One S3 batch and one DB batch: legacy rows are unbounded, so doing this
-    // per row blocked story creation for minutes on old accounts.
-    const heads = await Promise.all(rows.map((row) => this.storage.headObject(row.objectKey)));
+    // Legacy rows are unbounded, so measure in bounded chunks and isolate each
+    // HEAD: an unbounded Promise.all would flood S3, and a single HEAD failure
+    // would discard every measurement in the batch (the old loop kept prior rows).
+    const sizes: number[] = [];
+    for (let i = 0; i < rows.length; i += STORY_LEGACY_MEDIA_HEAD_CONCURRENCY) {
+      const chunk = rows.slice(i, i + STORY_LEGACY_MEDIA_HEAD_CONCURRENCY);
+      const settled = await Promise.allSettled(
+        chunk.map((row) => this.storage.headObject(row.objectKey)),
+      );
+      settled.forEach((result, index) => {
+        if (result.status === "rejected") {
+          this.logger.warn("Legacy media HEAD failed, sizing as 0", {
+            storyId: chunk[index]!.id,
+          });
+        }
+        sizes.push(result.status === "fulfilled" ? (result.value?.contentLength ?? 0) : 0);
+      });
+    }
     await this.storyRepo.setMediaSizes(
-      rows.map((row, index) => ({ id: row.id, sizeBytes: heads[index]?.contentLength ?? 0 })),
+      rows.map((row, index) => ({ id: row.id, sizeBytes: sizes[index]! })),
     );
   }
 

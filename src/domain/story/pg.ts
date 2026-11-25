@@ -452,6 +452,10 @@ export class StoryPgRepository implements StoryRepository {
       find(isNotNull(stories.deletedAt)),
       find(
         and(
+          // Exclude soft-deleted stories so the deleted branch stays mutually
+          // exclusive with this one: a story both archived and deleted must not
+          // appear twice and waste purge limit slots.
+          isNull(stories.deletedAt),
           isNotNull(stories.archivedAt),
           or(
             eq(userStorySettings.archiveEnabled, false),

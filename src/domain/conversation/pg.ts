@@ -988,7 +988,20 @@ export class ConversationPgRepository implements ConversationRepository {
       const [cursorRow] = await this.db
         .select({ activity: activityOrder })
         .from(conversations)
-        .where(and(eq(conversations.id, cursor), isNull(conversations.deletedAt)))
+        .innerJoin(
+          conversationParticipants,
+          eq(conversationParticipants.conversationId, conversations.id),
+        )
+        .where(
+          and(
+            eq(conversations.id, cursor),
+            isNull(conversations.deletedAt),
+            // The cursor must belong to the caller, matching the inbox membership
+            // rule, or a foreign conversation id could shift the page boundary.
+            eq(conversationParticipants.userId, userId),
+            isNull(conversationParticipants.leftAt),
+          ),
+        )
         .limit(1);
       if (!cursorRow) return { items: [], hasMore: false };
       const cursorActivity = cursorRow.activity;

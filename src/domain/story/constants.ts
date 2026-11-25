@@ -46,4 +46,8 @@ export const STORY_EXPIRY_CHECK_HOURS = STORY_VIEWER_WINDOW_HOURS + 1;
  */
 export const STORY_FEED_MAX_PER_AUTHOR = 30;
 
+/** Bounded S3 HEAD concurrency for measuring legacy media so an old account
+ * cannot flood S3 with an unbounded Promise.all (throttle / connection spike). */
+export const STORY_LEGACY_MEDIA_HEAD_CONCURRENCY = 32;
+
 export const STORY_STORAGE_LIMIT_BYTES = 512 * 1024 * 1024;

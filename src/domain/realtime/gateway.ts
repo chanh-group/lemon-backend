@@ -260,10 +260,17 @@ export class ChatGateway
     const userId = client.data?.userId as string;
     if (!userId) return;
 
+    // Pre-join check keeps an unverified socket out of the room so it cannot
+    // receive broadcasts (or drive typing, which trusts room membership) during
+    // the membership lookup. The post-join re-check is kept as defense-in-depth
+    // against revocation between the two steps.
+    if (!(await this.conversationRepo.isParticipant(data.conversationId, userId))) {
+      client.emit(REALTIME_EVENTS.ERROR, { code: SOCKET_ERROR_CODES.NOT_PARTICIPANT });
+      return { success: false, conversationId: data.conversationId };
+    }
+
     const room = convRoom(data.conversationId);
     await client.join(room);
-    // One membership check, after the join, is enough: a revoked member cannot
-    // pass it, and leaveConversation also removes their socket from the room.
     if (!(await this.conversationRepo.isParticipant(data.conversationId, userId))) {
       await client.leave(room);
       client.emit(REALTIME_EVENTS.ERROR, { code: SOCKET_ERROR_CODES.NOT_PARTICIPANT });

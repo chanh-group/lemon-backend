@@ -831,7 +831,8 @@ describe("ChatGateway", () => {
 
       const res = await gateway.handleJoinConversation(client, { conversationId: mockConvId });
 
-      expect(joinMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
+      // The pre-join membership check rejects an outsider before it ever joins.
+      expect(joinMock).not.toHaveBeenCalled();
       expect(emitMock).toHaveBeenCalledWith(
         "error",
         expect.objectContaining({ code: "NOT_PARTICIPANT" }),
@@ -847,7 +848,9 @@ describe("ChatGateway", () => {
       const { client, joinMock, leaveMock, emitMock } = createMockSocket({});
       client.data = { userId: mockUserId };
       joinMock.mockImplementationOnce(() => joinPending);
-      isParticipantMock.mockResolvedValueOnce(false);
+      // Pre-join check passes, then the caller is revoked before the post-join
+      // re-check runs — the post-check must evict them from the room.
+      isParticipantMock.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
 
       const result = gateway.handleJoinConversation(client, { conversationId: mockConvId });
       await vi.waitFor(() => expect(joinMock).toHaveBeenCalledWith(`conv:${mockConvId}`));
@@ -856,6 +859,20 @@ describe("ChatGateway", () => {
       await expect(result).resolves.toEqual({ success: false, conversationId: mockConvId });
       expect(leaveMock).toHaveBeenCalledWith(`conv:${mockConvId}`);
       expect(emitMock).toHaveBeenCalledWith("error", { code: "NOT_PARTICIPANT" });
+    });
+
+    it("does not join the room when the pre-join membership check fails", async () => {
+      isParticipantMock.mockResolvedValueOnce(false);
+
+      const { client, joinMock, leaveMock, emitMock } = createMockSocket({});
+      client.data = { userId: "outsider-id" };
+
+      const res = await gateway.handleJoinConversation(client, { conversationId: mockConvId });
+
+      expect(joinMock).not.toHaveBeenCalled();
+      expect(leaveMock).not.toHaveBeenCalled();
+      expect(emitMock).toHaveBeenCalledWith("error", { code: "NOT_PARTICIPANT" });
+      expect(res).toEqual({ success: false, conversationId: mockConvId });
     });
   });
 
