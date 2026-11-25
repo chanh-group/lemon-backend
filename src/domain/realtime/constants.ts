@@ -63,3 +63,10 @@ export const REDIS_LIFECYCLE_EVENTS = {
   FAILURE: ["close", "end", "reconnecting", "error"],
   RECOVERY: ["ready", "connect"],
 } as const;
+
+export const CALL_DISCONNECT_HANDLER = Symbol("CALL_DISCONNECT_HANDLER");
+
+export interface CallDisconnectHandler {
+  handleUserDisconnect(userId: string): Promise<void>;
+  handleUserReconnect(userId: string): Promise<void>;
+}

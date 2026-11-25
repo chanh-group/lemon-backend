@@ -122,5 +122,10 @@
   "EMAIL_OTP_IGNORE_TEXT": "If you did not request this, you can safely ignore this email.",
   "EMAIL_OTP_SIGN_OFF": "Best regards,\nThe LemonChat Team",
   "EMAIL_OTP_EXPIRY_HTML": "⏳ This code expires in <strong>{minutes} minutes</strong>",
-  "EMAIL_OTP_WARNING_HTML": "<strong>Security:</strong> Never share this code with anyone, including LemonChat staff. If you did not make this request, please ignore this email."
+  "EMAIL_OTP_WARNING_HTML": "<strong>Security:</strong> Never share this code with anyone, including LemonChat staff. If you did not make this request, please ignore this email.",
+  "CALL_NOT_FOUND": "Call not found",
+  "CALL_USER_BUSY": "User is currently busy on another call",
+  "CALL_CANNOT_CALL_SELF": "Cannot call yourself",
+  "CALL_INVALID_STATE": "Invalid call state for this action",
+  "CALL_UNAUTHORIZED_PARTICIPANT": "You are not a participant in this call"
 }

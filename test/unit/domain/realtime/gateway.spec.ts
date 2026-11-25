@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { ChatGateway } from "../../../../src/domain/realtime/gateway.js";
 import {
+  CALL_DISCONNECT_HANDLER,
   REDIS_DISCONNECT_GRACE_MS,
   TYPING_TTL_SECS,
 } from "../../../../src/domain/realtime/constants.js";
@@ -32,6 +33,7 @@ describe("ChatGateway", () => {
   let findAuthUserMock: Mock;
   let sessionActiveMock: Mock;
   let revocationTrackMock: Mock;
+  let moduleGetMock: Mock;
 
   const mockUserId = "0193a2b1-0000-7000-8000-000000000001";
   const mockConvId = "0193a2b1-0000-7000-8000-000000000010";
@@ -99,6 +101,8 @@ describe("ChatGateway", () => {
       ttl: redisTtlMock,
     } as unknown as Redis;
 
+    moduleGetMock = vi.fn().mockReturnValue(undefined);
+
     gateway = new ChatGateway(
       {
         getActiveConversationIds: activeConversationIdsMock,
@@ -113,6 +117,7 @@ describe("ChatGateway", () => {
       mockRedis,
       { isActive: sessionActiveMock } as never,
       { track: revocationTrackMock } as never,
+      { get: moduleGetMock } as never,
     );
   });
 
@@ -510,6 +515,28 @@ describe("ChatGateway", () => {
       );
     });
 
+    it("hands the last socket drop of a user to the call session handler", async () => {
+      verifyAccessTokenMock.mockImplementation(async () => ({
+        sub: mockUserId,
+        authVersion: 0,
+        exp: Math.floor(Date.now() / 1000) + 900,
+      }));
+      const handleUserDisconnect = vi.fn().mockResolvedValue(undefined);
+      moduleGetMock.mockReturnValue({
+        handleUserDisconnect,
+        handleUserReconnect: vi.fn().mockResolvedValue(undefined),
+      });
+      const { client } = createMockSocket({ auth: { token: "valid-jwt" } });
+
+      await gateway.handleConnection(client);
+      await gateway.handleDisconnect(client);
+
+      // Lazy container lookup: constructor injection cannot see CallModule's
+      // global export (the gateway boots before CallModule is initialized).
+      expect(moduleGetMock).toHaveBeenCalledWith(CALL_DISCONNECT_HANDLER, { strict: false });
+      expect(handleUserDisconnect).toHaveBeenCalledWith(mockUserId);
+    });
+
     it("presence:ping rewrites the payload when the connection count changed", async () => {
       verifyAccessTokenMock.mockImplementation(async () => ({
         sub: mockUserId,
@@ -712,6 +739,7 @@ describe("ChatGateway", () => {
         null,
         { isActive: sessionActiveMock } as never,
         { track: vi.fn().mockReturnValue(vi.fn()) } as never,
+        { get: vi.fn().mockReturnValue(undefined) } as never,
       );
       verifyAccessTokenMock.mockImplementation(async () => ({
         sub: mockUserId,

@@ -148,3 +148,7 @@ export const REDIS_RECONNECT_DELAY_BASE_MS = 100;
 export const REDIS_RECONNECT_DELAY_MAX_MS = 3000;
 export const DEFAULT_REDIS_URL = "redis://localhost:6379";
 export const OFFLINE_PRESENCE_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+// Call session
+export const ACTIVE_CALL_KEY_PREFIX = "call:active:user:";
+export const ACTIVE_CALL_LOCK_TTL_SECONDS = 60; // Auto-evicts orphaned locks if process crashes

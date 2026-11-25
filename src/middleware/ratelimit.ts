@@ -26,6 +26,8 @@ export const RATE_LIMIT_STORY_REPLY_USER_MAX = 20;
 export const RATE_LIMIT_STORY_REPLY_IP_MAX = 60;
 export const RATE_LIMIT_STORY_REACTIONS_READ_USER_MAX = 60;
 export const RATE_LIMIT_STORY_REACTIONS_READ_IP_MAX = 180;
+export const RATE_LIMIT_CALL_INITIATE_USER_MAX = 10;
+export const RATE_LIMIT_CALL_INITIATE_IP_MAX = 30;
 
 export interface RateLimiter {
   checkIpLimit(action: string, ip: string, max: number, windowSecs: number): Promise<boolean>;

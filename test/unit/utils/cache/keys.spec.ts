@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeCallUserKey,
   noteFeedKey,
   purgeLockKey,
   refreshTokenKey,
@@ -27,5 +28,9 @@ describe("cache.keys", () => {
 
   it("builds the purge lock key", () => {
     expect(purgeLockKey()).toBe("lock:purge-stories-notes");
+  });
+
+  it("builds active call user key", () => {
+    expect(activeCallUserKey("user-123")).toBe("call:active:user:user-123");
   });
 });
