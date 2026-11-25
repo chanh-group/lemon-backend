@@ -16,9 +16,7 @@ export interface CallResponse {
   callee?: CallParticipant;
 }
 
-export interface InitiateCallResponse extends CallResponse {
-  livekit: LiveKitConnectionDetails;
-}
+export type InitiateCallResponse = CallResponse;
 
 export interface AcceptCallResponse extends CallResponse {
   livekit: LiveKitConnectionDetails;

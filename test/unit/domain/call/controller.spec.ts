@@ -65,7 +65,6 @@ describe("CallController", () => {
   beforeAll(async () => {
     initiateCallMock = vi.fn<() => Promise<InitiateCallResponse>>().mockResolvedValue({
       ...mockCallResponse,
-      livekit: mockLivekit,
     });
 
     getCallTokenMock = vi.fn().mockResolvedValue(mockLivekit);
@@ -153,6 +152,7 @@ describe("CallController", () => {
 
     expect(res.body.success).toBe(true);
     expect(res.body.data.id).toBe(mockCallId);
+    expect(res.body.data).not.toHaveProperty("livekit");
     expect(initiateCallMock).toHaveBeenCalledWith(mockUserId, {
       conversationId: mockConvId,
       media: "VIDEO",

@@ -193,11 +193,18 @@ describe("CallService", () => {
   describe("LiveKit tokens & room lifecycle", () => {
     it("creates LiveKit token with serverUrl, room, and jwt token", async () => {
       const details = await service.createLiveKitToken(callerId, callId, "Caller User");
+      const payload = details.token.split(".")[1];
+      if (!payload) throw new Error("LiveKit token is missing its payload");
+      const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
+        exp: number;
+        nbf: number;
+      };
 
       expect(details.serverUrl).toBeDefined();
       expect(details.room).toBe(callId);
       expect(details.token).toBeDefined();
       expect(typeof details.token).toBe("string");
+      expect(claims.exp - claims.nbf).toBe(60);
     });
 
     it("throws CALL_NOT_FOUND when getting token for nonexistent call", async () => {
@@ -319,6 +326,7 @@ describe("CallService", () => {
     });
 
     it("successfully initiates call and emits call:incoming with late-offer flow", async () => {
+      const createTokenSpy = vi.spyOn(service, "createLiveKitToken");
       const result = await service.initiateCall(callerId, {
         conversationId: convId,
         media: "VIDEO",
@@ -344,8 +352,8 @@ describe("CallService", () => {
         }),
       );
       expect(result.id).toBeDefined();
-      expect(result.livekit).toBeDefined();
-      expect(result.livekit.room).toBe(result.id);
+      expect(result).not.toHaveProperty("livekit");
+      expect(createTokenSpy).not.toHaveBeenCalled();
     });
   });
 
