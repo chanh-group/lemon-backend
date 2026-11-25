@@ -260,17 +260,10 @@ export class ChatGateway
     const userId = client.data?.userId as string;
     if (!userId) return;
 
-    // Verify user is an active participant in this conversation
-    if (!(await this.conversationRepo.isParticipant(data.conversationId, userId))) {
-      logger.warn(
-        `Unauthorized conv:join attempt by user ${userId} for conversation ${data.conversationId}`,
-      );
-      client.emit(REALTIME_EVENTS.ERROR, { code: SOCKET_ERROR_CODES.NOT_PARTICIPANT });
-      return { success: false, conversationId: data.conversationId };
-    }
-
     const room = convRoom(data.conversationId);
     await client.join(room);
+    // One membership check, after the join, is enough: a revoked member cannot
+    // pass it, and leaveConversation also removes their socket from the room.
     if (!(await this.conversationRepo.isParticipant(data.conversationId, userId))) {
       await client.leave(room);
       client.emit(REALTIME_EVENTS.ERROR, { code: SOCKET_ERROR_CODES.NOT_PARTICIPANT });
@@ -302,7 +295,6 @@ export class ChatGateway
       client,
       data,
       {
-        conversationRepo: this.conversationRepo,
         redis: this.redis,
         pending: this.pendingConnections.get(client),
       },
@@ -319,7 +311,6 @@ export class ChatGateway
       client,
       data,
       {
-        conversationRepo: this.conversationRepo,
         redis: this.redis,
         pending: this.pendingConnections.get(client),
       },

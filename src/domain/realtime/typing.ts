@@ -6,14 +6,12 @@ import { Logger } from "@nestjs/common";
 import type { Redis } from "ioredis";
 import type { Socket } from "socket.io";
 import { typingKey } from "../../utils/cache/keys.js";
-import type { ConversationPgRepository } from "../conversation/pg.js";
 import { REALTIME_EVENTS, TYPING_KEY_VALUE, TYPING_TTL_SECS } from "./constants.js";
-import { convRoom, userRoom } from "./rooms.js";
+import { convRoom } from "./rooms.js";
 
 const logger = new Logger("ChatGateway");
 
 export interface TypingDeps {
-  conversationRepo: Pick<ConversationPgRepository, "getParticipantUserIds">;
   redis: Redis | null;
   /** Pending connection initialization — the handler must wait for it, like every other. */
   pending?: Promise<void>;
@@ -31,11 +29,10 @@ export async function handleTypingEvent(
   if (!userId || !data?.conversationId) return;
 
   const room = convRoom(data.conversationId);
-  const participantIds = await deps.conversationRepo.getParticipantUserIds(data.conversationId);
-  if (!participantIds.includes(userId)) {
-    if (client.rooms.has(room)) await client.leave(room);
-    return;
-  }
+  // Room membership is maintained by gateway connection/join and by
+  // leaveConversation on removal. Checking it locally avoids a DB round trip
+  // on every keystroke — typing events are high-frequency by nature.
+  if (!client.rooms.has(room)) return;
 
   // Cache typing indicator in Redis; fire-and-forget so keystroke events
   // never wait on Redis before the room broadcast.
@@ -52,9 +49,8 @@ export async function handleTypingEvent(
     });
   }
 
-  const recipientRooms = participantIds.filter((id) => id !== userId).map(userRoom);
-  if (recipientRooms.length === 0) return;
-  client.to(recipientRooms).emit(REALTIME_EVENTS.TYPING, {
+  // Broadcast to the conversation room; socket.io excludes this sender.
+  client.to(room).emit(REALTIME_EVENTS.TYPING, {
     conversationId: data.conversationId,
     userId,
     isTyping,

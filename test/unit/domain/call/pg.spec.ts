@@ -139,10 +139,15 @@ describe("CallPgRepository", () => {
     const result = await repo.findActiveCallForUser(callerId);
 
     expect(result?.id).toBe(callId);
-    const query = render(whereMock.mock.calls[0][0]);
-    expect(query.sql).toContain('"calls"."answered_at"');
-    expect(query.sql).toContain('"calls"."started_at"');
-    expect(query.params).toContainEqual(expect.any(Date));
+    // One query per side so each uses its caller/callee index.
+    expect(whereMock).toHaveBeenCalledTimes(2);
+    const callerQuery = render(whereMock.mock.calls[0][0]);
+    const calleeQuery = render(whereMock.mock.calls[1][0]);
+    expect(callerQuery.sql).toContain('"calls"."caller_id" =');
+    expect(calleeQuery.sql).toContain('"calls"."callee_id" =');
+    expect(callerQuery.sql).toContain('"calls"."answered_at"');
+    expect(callerQuery.sql).toContain('"calls"."started_at"');
+    expect(callerQuery.params).toContainEqual(expect.any(Date));
   });
 
   it("updateStatus updates status atomically and returns updated call", async () => {

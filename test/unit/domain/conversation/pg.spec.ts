@@ -2010,8 +2010,11 @@ describe("ConversationPgRepository.findUserConversations", () => {
     expect(where.params).toEqual([userAId]);
     expect(chain.orderByMock).toHaveBeenCalledTimes(1);
     const order = chain.orderByMock.mock.calls[0].map((arg) => render(arg as SQL).sql);
-    expect(order[0]).toContain("COALESCE(");
-    expect(order[0]).toContain('"conversations"."created_at"');
+    // Must match conversations_inbox_order_idx exactly, without the per-viewer
+    // visibility CASE (that forced a full sort of every conversation).
+    expect(order[0]).toBe(
+      'COALESCE("conversations"."last_message_at", "conversations"."created_at") desc',
+    );
     expect(order[1]).toContain('"conversations"."id"');
     const partnerWhere = render(chain.whereMock.mock.calls[1][0]);
     expect(partnerWhere.sql).toContain('"conversation_participants"."conversation_id" in');
@@ -2064,7 +2067,7 @@ describe("ConversationPgRepository.findUserConversations", () => {
     const { db, chain } = makeInboxDb();
     const cursorAt = new Date("2026-10-19T07:00:00Z");
     chain.limitMock
-      .mockResolvedValueOnce([{ ...groupFindCursorRow, lastMessageAt: cursorAt }])
+      .mockResolvedValueOnce([{ activity: cursorAt }])
       .mockResolvedValueOnce([inboxDirectRow])
       .mockResolvedValueOnce([{ conversationId: inboxDirectRow.id, user: partnerRow }]);
     const repo = new ConversationPgRepository(db);

@@ -129,38 +129,51 @@ describe("StoryPgRepository purge queries", () => {
   });
 
   describe("findPurgeable", () => {
-    it("findPurgeable selects id and object_key with the batch limit", async () => {
+    it("queries expired, deleted and archived stories separately with the batch limit", async () => {
       const { db, selectMock, whereMock, orderByMock, limitMock } = makeDb();
-      const rows = [
-        {
-          id: "s1",
-          objectKey: "k1",
-          userId: "u1",
-          archivedAt: null,
-          deletedAt: null,
-          archiveEnabled: true,
-        },
-      ];
-      limitMock.mockResolvedValue(rows);
+      const expired = {
+        id: "s1",
+        objectKey: "k1",
+        userId: "u1",
+        archivedAt: null,
+        deletedAt: null,
+        expiresAt: new Date("2026-01-01T00:00:00Z"),
+        archiveEnabled: true,
+      };
+      const deleted = {
+        ...expired,
+        id: "s2",
+        deletedAt: new Date("2025-12-31T00:00:00Z"),
+        expiresAt: new Date("2026-02-01T00:00:00Z"),
+      };
+      limitMock
+        .mockResolvedValueOnce([expired])
+        .mockResolvedValueOnce([deleted])
+        .mockResolvedValueOnce([]);
       const repo = new StoryPgRepository(db);
 
       const result = await repo.findPurgeable(500);
 
+      expect(selectMock).toHaveBeenCalledTimes(3);
       expect(selectMock).toHaveBeenCalledWith({
         id: stories.id,
         objectKey: stories.objectKey,
         userId: stories.userId,
         archivedAt: stories.archivedAt,
         deletedAt: stories.deletedAt,
+        expiresAt: stories.expiresAt,
         archiveEnabled: userStorySettings.archiveEnabled,
       });
+      expect(limitMock).toHaveBeenCalledTimes(3);
       expect(limitMock).toHaveBeenCalledWith(500);
-      expect(result).toEqual(rows);
+      expect(result.map((row) => row.id)).toEqual(["s1", "s2"]);
 
-      const whereSql = render(whereMock.mock.calls[0][0]);
-      expect(whereSql).toContain('"stories"."expires_at" < now()');
-      expect(whereSql).toContain('"stories"."deleted_at" is not null or');
-      expect(whereSql).toContain('"stories"."archived_at" is null');
+      const expiredSql = render(whereMock.mock.calls[0][0]);
+      expect(expiredSql).toContain('"stories"."expires_at" < now()');
+      expect(expiredSql).toContain('"stories"."deleted_at" is null');
+      expect(expiredSql).toContain('"stories"."archived_at" is null');
+      expect(render(whereMock.mock.calls[1][0])).toContain('"stories"."deleted_at" is not null');
+      expect(render(whereMock.mock.calls[2][0])).toContain('"stories"."archived_at" is not null');
 
       const orderBySql = render(orderByMock.mock.calls[0][0]);
       expect(orderBySql).toContain('"stories"."expires_at" asc');

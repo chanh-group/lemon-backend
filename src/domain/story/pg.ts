@@ -15,6 +15,7 @@ import {
   notInArray,
   or,
   sql,
+  type SQL,
 } from "drizzle-orm";
 import type { DrizzleDb } from "../../configs/database.js";
 import { friendships } from "../friend/schema.js";
@@ -419,36 +420,54 @@ export class StoryPgRepository implements StoryRepository {
   }
 
   async findPurgeable(limit: number): Promise<PurgeableStory[]> {
-    const rows = await this.db
-      .select({
-        id: stories.id,
-        objectKey: stories.objectKey,
-        userId: stories.userId,
-        archivedAt: stories.archivedAt,
-        deletedAt: stories.deletedAt,
-        archiveEnabled: userStorySettings.archiveEnabled,
-      })
-      .from(stories)
-      .leftJoin(userStorySettings, eq(userStorySettings.userId, stories.userId))
-      .where(
-        or(
-          isNotNull(stories.deletedAt),
-          and(isNull(stories.archivedAt), lt(stories.expiresAt, sql`now()`)),
-          and(
-            isNotNull(stories.archivedAt),
-            or(
-              eq(userStorySettings.archiveEnabled, false),
-              and(
-                isNotNull(userStorySettings.archiveDurationSecs),
-                sql`${stories.archivedAt} + ${userStorySettings.archiveDurationSecs} * interval '1 second' <= now()`,
-              ),
+    const selection = {
+      id: stories.id,
+      objectKey: stories.objectKey,
+      userId: stories.userId,
+      archivedAt: stories.archivedAt,
+      deletedAt: stories.deletedAt,
+      expiresAt: stories.expiresAt,
+      archiveEnabled: userStorySettings.archiveEnabled,
+    };
+    const find = (condition: SQL | undefined) =>
+      this.db
+        .select(selection)
+        .from(stories)
+        .leftJoin(userStorySettings, eq(userStorySettings.userId, stories.userId))
+        .where(condition)
+        .orderBy(asc(stories.expiresAt))
+        .limit(limit);
+
+    // Three separate branches instead of one OR that forced a full-table scan.
+    // The expired branch uses stories_expiry_idx and the archived branch can
+    // use stories_archived_idx; only the (small) deleted branch stays a scan.
+    const [expired, deleted, archived] = await Promise.all([
+      find(
+        and(
+          isNull(stories.deletedAt),
+          isNull(stories.archivedAt),
+          lt(stories.expiresAt, sql`now()`),
+        ),
+      ),
+      find(isNotNull(stories.deletedAt)),
+      find(
+        and(
+          isNotNull(stories.archivedAt),
+          or(
+            eq(userStorySettings.archiveEnabled, false),
+            and(
+              isNotNull(userStorySettings.archiveDurationSecs),
+              sql`${stories.archivedAt} + ${userStorySettings.archiveDurationSecs} * interval '1 second' <= now()`,
             ),
           ),
         ),
-      )
-      .orderBy(asc(stories.expiresAt))
-      .limit(limit);
-    return rows.map((row) => ({ ...row, archiveEnabled: row.archiveEnabled ?? true }));
+      ),
+    ]);
+
+    return [...expired, ...deleted, ...archived]
+      .map((row) => ({ ...row, archiveEnabled: row.archiveEnabled ?? true }))
+      .sort((a, b) => a.expiresAt.getTime() - b.expiresAt.getTime())
+      .slice(0, limit);
   }
 
   async deleteByIds(ids: string[]): Promise<number> {

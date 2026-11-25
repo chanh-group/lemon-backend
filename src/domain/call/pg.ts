@@ -89,41 +89,48 @@ export class CallPgRepository implements CallRepository {
     const ringThreshold = new Date(Date.now() - CALL_RING_LOCK_TTL_SECONDS * 1000);
     const activeThreshold = new Date(Date.now() - CALL_ACTIVE_LOCK_TTL_SECONDS * 1000);
     const acceptedAt = sql`coalesce(${calls.answeredAt}, ${calls.startedAt})`;
-    const [row] = await this.db
-      .select({
-        call: calls,
-        caller: {
-          id: callerAlias.id,
-          username: callerAlias.username,
-          fullName: callerAlias.fullName,
-          avatarUrl: callerAlias.avatarUrl,
-        },
-        callee: {
-          id: calleeAlias.id,
-          username: calleeAlias.username,
-          fullName: calleeAlias.fullName,
-          avatarUrl: calleeAlias.avatarUrl,
-        },
-      })
-      .from(calls)
-      .leftJoin(callerAlias, eq(calls.callerId, callerAlias.id))
-      .leftJoin(calleeAlias, eq(calls.calleeId, calleeAlias.id))
-      .where(
-        and(
-          or(eq(calls.callerId, userId), eq(calls.calleeId, userId)),
-          or(
-            and(eq(calls.status, "ACCEPTED"), gt(acceptedAt, activeThreshold)),
-            and(
-              inArray(calls.status, ["INITIATED", "RINGING"]),
-              gte(calls.startedAt, ringThreshold),
-            ),
-          ),
-        ),
-      )
-      .orderBy(desc(calls.startedAt), desc(calls.id))
-      .limit(1);
+    // One query per side so each uses its (caller_id|callee_id, status,
+    // started_at) index instead of a BitmapOr over both.
+    const activeCondition = or(
+      and(eq(calls.status, "ACCEPTED"), gt(acceptedAt, activeThreshold)),
+      and(inArray(calls.status, ["INITIATED", "RINGING"]), gte(calls.startedAt, ringThreshold)),
+    );
+    const selection = {
+      call: calls,
+      caller: {
+        id: callerAlias.id,
+        username: callerAlias.username,
+        fullName: callerAlias.fullName,
+        avatarUrl: callerAlias.avatarUrl,
+      },
+      callee: {
+        id: calleeAlias.id,
+        username: calleeAlias.username,
+        fullName: calleeAlias.fullName,
+        avatarUrl: calleeAlias.avatarUrl,
+      },
+    };
+    const findSide = (column: typeof calls.callerId | typeof calls.calleeId) =>
+      this.db
+        .select(selection)
+        .from(calls)
+        .leftJoin(callerAlias, eq(calls.callerId, callerAlias.id))
+        .leftJoin(calleeAlias, eq(calls.calleeId, calleeAlias.id))
+        .where(and(eq(column, userId), activeCondition))
+        .orderBy(desc(calls.startedAt), desc(calls.id))
+        .limit(1);
 
-    return row ? mapRow(row) : null;
+    const [asCaller, asCallee] = await Promise.all([
+      findSide(calls.callerId),
+      findSide(calls.calleeId),
+    ]);
+    const rows = [...asCaller, ...asCallee];
+    if (rows.length === 0) return null;
+    rows.sort(
+      (a, b) =>
+        b.call.startedAt.getTime() - a.call.startedAt.getTime() || (a.call.id < b.call.id ? 1 : -1),
+    );
+    return mapRow(rows[0]!);
   }
 
   async updateStatus(

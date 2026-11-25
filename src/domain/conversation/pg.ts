@@ -975,21 +975,27 @@ export class ConversationPgRepository implements ConversationRepository {
   async findUserConversations(userId: string, limit: number, cursor?: string) {
     // Apply pagination before loading participant details so users with many
     // conversations do not create an unbounded IN list.
-    const activityOrder = sql`COALESCE(${visibleMessageAt(userId)}, ${conversations.createdAt})`;
-    const cursorConversation = cursor ? await this.findById(cursor, userId) : null;
+    // This exact expression is backed by conversations_inbox_order_idx. The
+    // viewer-specific visibility CASE is still computed in the projection, but
+    // using it for pagination forced a full sort of every conversation.
+    const activityOrder = sql`COALESCE(${conversations.lastMessageAt}, ${conversations.createdAt})`;
     const conditions = [
       eq(conversationParticipants.userId, userId),
       isNull(conversationParticipants.leftAt),
       isNull(conversations.deletedAt),
     ];
-    if (cursor && cursorConversation) {
-      const cursorActivity = cursorConversation.lastMessageAt ?? cursorConversation.createdAt;
+    if (cursor) {
+      const [cursorRow] = await this.db
+        .select({ activity: activityOrder })
+        .from(conversations)
+        .where(and(eq(conversations.id, cursor), isNull(conversations.deletedAt)))
+        .limit(1);
+      if (!cursorRow) return { items: [], hasMore: false };
+      const cursorActivity = cursorRow.activity;
       conditions.push(
         sql`(${activityOrder} < ${cursorActivity}
           OR (${activityOrder} = ${cursorActivity} AND ${conversations.id} < ${cursor}))`,
       );
-    } else if (cursor) {
-      return { items: [], hasMore: false };
     }
     const convRows = await this.db
       .select({
