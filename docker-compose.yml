@@ -27,6 +27,19 @@ services:
       timeout: 3s
       retries: 10
 
+  # Local LiveKit media server for voice/video calls.
+  livekit:
+    image: livekit/livekit-server:v1.8.1
+    environment:
+      LIVEKIT_PORT: "7880"
+      LIVEKIT_KEYS: "devkey: dev_secret_at_least_32_bytes_long_for_local_only"
+      LIVEKIT_REDIS_ADDRESS: redis:6379
+    ports:
+      - "7880:7880"
+    depends_on:
+      redis:
+        condition: service_healthy
+
   # Runs drizzle migrations once, then exits; api waits for it.
   migrate:
     image: lemon-backend:local
@@ -54,11 +67,16 @@ services:
       REDIS_URL: redis://redis:6379
       FRONTEND_URL: http://localhost:5173
       JWT_SECRET: local_dev_jwt_secret_at_least_32_bytes_long_123
+      LIVEKIT_URL: ws://livekit:7880
+      LIVEKIT_API_KEY: devkey
+      LIVEKIT_API_SECRET: dev_secret_at_least_32_bytes_long_for_local_only
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+      livekit:
+        condition: service_started
       migrate:
         condition: service_completed_successfully
 
