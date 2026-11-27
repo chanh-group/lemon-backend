@@ -152,12 +152,14 @@ export class StoryService {
     const audienceMode = dto.audienceMode ?? "ALL_FRIENDS";
     let audienceUserIds: string[] | undefined = undefined;
 
-    if (audienceMode !== "ALL_FRIENDS" && dto.audienceUserIds) {
-      // Validate that all audience IDs are accepted friends and not self
+    if (audienceMode !== "ALL_FRIENDS") {
+      const requested = Array.from(new Set(dto.audienceUserIds ?? []));
       const friendSet = new Set(friendIds);
-      audienceUserIds = Array.from(
-        new Set(dto.audienceUserIds.filter((id) => id !== userId && friendSet.has(id))),
-      );
+      // A stale or invalid exclusion must not silently turn into a wider audience.
+      if (requested.length === 0 || requested.some((id) => id === userId || !friendSet.has(id))) {
+        throw new BusinessError("BAD_REQUEST");
+      }
+      audienceUserIds = requested;
     }
 
     const newStoryData: Omit<NewStory, "createdAt" | "expiresAt"> = {

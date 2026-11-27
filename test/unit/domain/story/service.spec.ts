@@ -442,6 +442,30 @@ describe("StoryService", () => {
       expect(result.id).toBe("story-id-new");
     });
 
+    it("rejects an invalid excluded audience instead of silently widening visibility", async () => {
+      await expect(
+        service.createStory("user-owner-1", {
+          kind: "TEXT",
+          caption: "private",
+          audienceMode: "EXCLUDE",
+          audienceUserIds: ["not-a-friend"],
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      expect(createStoryMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects a selected audience without any friends", async () => {
+      await expect(
+        service.createStory("user-owner-1", {
+          kind: "TEXT",
+          caption: "private",
+          audienceMode: "CUSTOM",
+          audienceUserIds: [],
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      expect(createStoryMock).not.toHaveBeenCalled();
+    });
+
     it("creates a custom audience story and invalidates cache only for that audience", async () => {
       const dto: CreateStoryDto = {
         kind: "TEXT",
