@@ -198,6 +198,63 @@ describe("Story flows with PostgreSQL and Redis", () => {
       .expect(201);
   });
 
+  it("enforces story audience for owners, friends, excluded users and strangers", async () => {
+    for (const scenario of [
+      { mode: "ALL_FRIENDS", ids: undefined, friendStatus: 200, secondStatus: 200 },
+      { mode: "CUSTOM", ids: [friend], friendStatus: 200, secondStatus: 403 },
+      { mode: "EXCLUDE", ids: [friend], friendStatus: 403, secondStatus: 200 },
+    ] as const) {
+      const objectKey = `stories/${owner}/${uuidv7()}.jpg`;
+      objects.set(objectKey, { body: Buffer.from("test-image"), contentType: "image/jpeg" });
+      const created = await request(app.getHttpServer())
+        .post("/api/stories")
+        .auth(ownerToken, { type: "bearer" })
+        .send({
+          kind: "IMAGE",
+          objectKey,
+          audienceMode: scenario.mode,
+          audienceUserIds: scenario.ids,
+        })
+        .expect(201);
+      const id = created.body.data.id;
+      for (const [token, status] of [
+        [ownerToken, 200],
+        [friendToken, scenario.friendStatus],
+        [secondFriendToken, scenario.secondStatus],
+        [strangerToken, 403],
+      ] as const) {
+        await request(app.getHttpServer())
+          .get(`/api/stories/${id}/media`)
+          .auth(token, { type: "bearer" })
+          .expect(status);
+      }
+      for (const [token, visible] of [
+        [friendToken, scenario.friendStatus === 200],
+        [secondFriendToken, scenario.secondStatus === 200],
+        [strangerToken, false],
+      ] as const) {
+        const feed = await request(app.getHttpServer())
+          .get("/api/stories/feed")
+          .auth(token, { type: "bearer" })
+          .expect(200);
+        const ids = feed.body.data.flatMap((group: { stories: Array<{ id: string }> }) =>
+          group.stories.map((item) => item.id),
+        );
+        expect(ids.includes(id)).toBe(visible);
+      }
+    }
+    await request(app.getHttpServer())
+      .post("/api/stories")
+      .auth(ownerToken, { type: "bearer" })
+      .send({
+        kind: "TEXT",
+        caption: "private",
+        audienceMode: "EXCLUDE",
+        audienceUserIds: [stranger],
+      })
+      .expect(400);
+  }, 30000);
+
   it("creates, views, edits, reacts, replies and deletes a text story", async () => {
     const created = await request(app.getHttpServer())
       .post("/api/stories")
