@@ -126,7 +126,7 @@ export class StoryPgRepository implements StoryRepository {
       );
       await this.db.execute(sql`
         UPDATE stories
-        SET media_size_bytes = measured.size_bytes
+        SET media_size_bytes = measured.size_bytes::integer
         FROM (VALUES ${values}) AS measured(story_id, size_bytes)
         WHERE stories.id = measured.story_id::uuid
           AND stories.media_size_bytes IS NULL
